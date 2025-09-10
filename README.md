@@ -21,17 +21,20 @@
 
 ## MVP Design overview
 
-Scope: End-to-end demo: Submit agent → Evaluate on task → Score and "reward" (just print rankings).
+Scope: End-to-end demo: Miner makes agent → Validator evals codebase vulns → Score (just print rankings).
 
 scabench do 1 vuln
 sandbox: docker
 miner submits simplified agents
 validator runs 1 vuln
+openai api
 
 no bittensor components
 no database
 no logging
 no / limited website
+no chutes
+no visibility
 
 Platform API (Central Hub): A FastAPI server acting as the "subnet platform."
 
@@ -68,6 +71,12 @@ Demo workflow:
 Validator: Run eval, show scores like "Agent1: 100 (reward: 50 'TAO')".
 
 ## In order to simplify the building of subnets, this template abstracts away the complexity of the underlying blockchain and other boilerplate code. While the default behavior of the template is sufficient for a simple subnet, you should customize the template in order to meet your specific requirements.
+
+```python
+python -m venv env; source env/bin/activate;
+pip install -U pip
+pip install -r requirements.txt
+```
 
 ## License
 
