@@ -5,3 +5,6 @@ pytest>=8
 torch>=2
 numpy>=1
 setuptools>=68
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+docker>=6.1.0 
