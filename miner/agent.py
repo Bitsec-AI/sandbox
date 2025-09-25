@@ -302,8 +302,6 @@ class BaselineRunner:
                     raise
 
                 progress.advance(task)
-
-                break
         
         # Deduplicate vulnerabilities
         unique_vulnerabilities = {
