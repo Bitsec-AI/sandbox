@@ -308,7 +308,24 @@ class SandboxManager:
                     }
                 }
                 
-                logger.info(f"Completed scoring for {current_project_id}")
+                # Concise summary for CI/logs: true positives vs expected
+                logger.info(
+                    f"Scoring Project: {current_project_id} | Found: {result.true_positives} | Expected: {result.total_expected}"
+                )
+
+                # Persist per-project scoring summary next to report.json
+                try:
+                    project_summary = {
+                        'project': current_project_id,
+                        'timestamp': result.timestamp,
+                        'expected': result.total_expected,
+                        'found': result.true_positives
+                    }
+                    summary_path = report_file.parent / "scoring_summary.json"
+                    with open(summary_path, 'w') as sf:
+                        json.dump(project_summary, sf, indent=2)
+                except Exception as e:
+                    logger.error(f"Failed to write scoring summary for {current_project_id}: {str(e)}")
                 
             except Exception as e:
                 logger.error(f"Error evaluating {current_project_id}: {str(e)}")
@@ -324,6 +341,23 @@ class SandboxManager:
         no_benchmark = sum(1 for r in scoring_results.values() if r.get('status') == 'no_benchmark')
         
         logger.info(f"Evaluation complete: {successful_scorings} scored, {failed_reports} failed, {errors} errors, {no_benchmark} no benchmark data")
+        
+        # # Persist aggregate summary at reports root
+        # try:
+        #     aggregate = {}
+        #     for pid, res in scoring_results.items():
+        #         if res.get('status') == 'scored':
+        #             agg_res = res.get('result', {})
+        #             aggregate[pid] = {
+        #                 'expected': agg_res.get('total_expected', 0),
+        #                 'found': agg_res.get('true_positives', 0),
+        #                 'timestamp': agg_res.get('timestamp')
+        #             }
+        #     aggregate_path = Path(reports_dir) / "scoring_summary.json"
+        #     with open(aggregate_path, 'w') as af:
+        #         json.dump(aggregate, af, indent=2)
+        # except Exception as e:
+        #     logger.error(f"Failed to write aggregate scoring summary: {str(e)}")
         
         return scoring_results
 
