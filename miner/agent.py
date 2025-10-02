@@ -309,7 +309,9 @@ class BaselineRunner:
                 except Exception as e:
                     console.print(f"[red]Error processing {file_path.name}: {e}[/red]")
                     files_skipped += 1
-                    raise
+                    # Continue to next file instead of aborting the whole run
+                    progress.advance(task)
+                    continue
 
                 progress.advance(task)
         
