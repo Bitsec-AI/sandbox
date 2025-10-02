@@ -175,7 +175,7 @@ class SandboxManager:
             logger.info(f"Filtering to specific project: {project_id}")
         
         # Load benchmark data
-        benchmark_file = os.path.join(self.curr_dir, 'curated-2025-08-08.json')
+        benchmark_file = os.path.join(self.curr_dir, 'curated-highs-only-2025-08-08.json')
         if not os.path.exists(benchmark_file):
             logger.error(f"Benchmark file not found: {benchmark_file}")
             return {}
