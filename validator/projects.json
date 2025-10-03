@@ -1,47 +1,5 @@
 [
   {
-    "project_id": "code4rena_superposition_2025_01",
-    "name": "Superposition",
-    "platform": "code4rena",
-    "codebases": [
-      {
-        "codebase_id": "Superposition_4528c9",
-        "repo_url": "https://github.com/code-423n4/2024-08-superposition",
-        "commit": "4528c9d2dbe1550d2660dac903a8246076044905",
-        "tree_url": "https://github.com/code-423n4/2024-08-superposition/tree/4528c9d2dbe1550d2660dac903a8246076044905",
-        "tarball_url": "https://github.com/code-423n4/2024-08-superposition/archive/4528c9d2dbe1550d2660dac903a8246076044905.tar.gz"
-      }
-    ]
-  },
-  {
-    "project_id": "code4rena_lambowin_2025_02",
-    "name": "Lambo.win",
-    "platform": "code4rena",
-    "codebases": [
-      {
-        "codebase_id": "Lambo.win_main",
-        "repo_url": "https://github.com/code-423n4/2024-12-lambowin",
-        "commit": "main",
-        "tree_url": "https://github.com/code-423n4/2024-12-lambowin/tree/main",
-        "tarball_url": "https://github.com/code-423n4/2024-12-lambowin/archive/main.tar.gz"
-      }
-    ]
-  },
-  {
-    "project_id": "code4rena_loopfi_2025_02",
-    "name": "LoopFi",
-    "platform": "code4rena",
-    "codebases": [
-      {
-        "codebase_id": "LoopFi_main",
-        "repo_url": "https://github.com/code-423n4/2024-10-loopfi",
-        "commit": "main",
-        "tree_url": "https://github.com/code-423n4/2024-10-loopfi/tree/main",
-        "tarball_url": "https://github.com/code-423n4/2024-10-loopfi/archive/main.tar.gz"
-      }
-    ]
-  },
-  {
     "project_id": "code4rena_secondswap_2025_02",
     "name": "SecondSwap",
     "platform": "code4rena",
@@ -56,58 +14,16 @@
     ]
   },
   {
-    "project_id": "code4rena_bakerfi-invitational_2025_02",
-    "name": "BakerFi Invitational",
+    "project_id": "code4rena_lambowin_2025_02",
+    "name": "Lambo.win",
     "platform": "code4rena",
     "codebases": [
       {
-        "codebase_id": "BakerFi Invitational_main",
-        "repo_url": "https://github.com/code-423n4/2024-12-bakerfi",
+        "codebase_id": "Lambo.win_main",
+        "repo_url": "https://github.com/code-423n4/2024-12-lambowin",
         "commit": "main",
-        "tree_url": "https://github.com/code-423n4/2024-12-bakerfi/tree/main",
-        "tarball_url": "https://github.com/code-423n4/2024-12-bakerfi/archive/main.tar.gz"
-      }
-    ]
-  },
-  {
-    "project_id": "code4rena_kinetiq_2025_07",
-    "name": "Kinetiq",
-    "platform": "code4rena",
-    "codebases": [
-      {
-        "codebase_id": "Kinetiq_7f29c9",
-        "repo_url": "https://github.com/code-423n4/2025-04-kinetiq",
-        "commit": "7f29c917c09341672e73be2f7917edf920ea2adb",
-        "tree_url": "https://github.com/code-423n4/2025-04-kinetiq/tree/7f29c917c09341672e73be2f7917edf920ea2adb",
-        "tarball_url": "https://github.com/code-423n4/2025-04-kinetiq/archive/7f29c917c09341672e73be2f7917edf920ea2adb.tar.gz"
-      }
-    ]
-  },
-  {
-    "project_id": "cantina_smart-contract-audit-of-tn-contracts_2025_08",
-    "name": "Smart Contract Audit of Tn Contracts",
-    "platform": "cantina",
-    "codebases": [
-      {
-        "codebase_id": "Smart Contract Audit of Tn Contracts_b3d811",
-        "repo_url": "https://github.com/Telcoin-Association/tn-contracts",
-        "commit": "b3d8116094e67fdbc5977725eea3e7cf577866bd",
-        "tree_url": "https://github.com/Telcoin-Association/tn-contracts/tree/b3d8116094e67fdbc5977725eea3e7cf577866bd",
-        "tarball_url": "https://github.com/Telcoin-Association/tn-contracts/archive/b3d8116094e67fdbc5977725eea3e7cf577866bd.tar.gz"
-      }
-    ]
-  },
-  {
-    "project_id": "cantina_minimal-delegation_2025_04",
-    "name": "minimal-delegation",
-    "platform": "cantina",
-    "codebases": [
-      {
-        "codebase_id": "minimal-delegation_732247",
-        "repo_url": "https://github.com/Uniswap/minimal-delegation",
-        "commit": "732247c5e3146b9340cb29e0f2b8f9e2f1df67a4",
-        "tree_url": "https://github.com/Uniswap/minimal-delegation/tree/732247c5e3146b9340cb29e0f2b8f9e2f1df67a4",
-        "tarball_url": "https://github.com/Uniswap/minimal-delegation/archive/732247c5e3146b9340cb29e0f2b8f9e2f1df67a4.tar.gz"
+        "tree_url": "https://github.com/code-423n4/2024-12-lambowin/tree/main",
+        "tarball_url": "https://github.com/code-423n4/2024-12-lambowin/archive/main.tar.gz"
       }
     ]
   }
