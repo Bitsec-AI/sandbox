@@ -33,7 +33,7 @@ def run_agent(agent_file, queue):
                 tb_str = traceback.format_exc()
                 resp = {"success": False, "error": f"Report serialization error: {e}: {tb_str}"}
             else:
-                resp = {"success": True, "result": result}
+                resp = {"success": True, "report": result}
 
     except SystemExit as e:
         resp = {"success": False, "error": f"Exited with code {e.code}"}
