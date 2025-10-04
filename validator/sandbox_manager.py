@@ -254,7 +254,7 @@ class SandboxManager:
                         expected_findings = benchmark_map.get(current_project_id, [])
                         project_summary = {
                             'project': current_project_id,
-                            'timestamp': report_data.get('result', {}).get('timestamp') or '',
+                            'timestamp': report_data.get('report', {}).get('timestamp') or '',
                             'expected': len(expected_findings),
                             'found': 0
                         }
@@ -268,9 +268,9 @@ class SandboxManager:
                 # Extract findings from the report
                 tool_findings = report_data.get('findings', [])
                 
-                # If no findings at top level, check under 'result.vulnerabilities'
-                if not tool_findings and 'result' in report_data:
-                    tool_findings = report_data['result'].get('vulnerabilities', [])
+                # If no findings at top level, check under 'report.vulnerabilities'
+                if not tool_findings and 'report' in report_data:
+                    tool_findings = report_data['report'].get('vulnerabilities', [])
                 
                 if not tool_findings:
                     logger.warning(f"No findings found in report for {current_project_id}")
@@ -375,7 +375,7 @@ class SandboxManager:
         #     aggregate = {}
         #     for pid, res in scoring_results.items():
         #         if res.get('status') == 'scored':
-        #             agg_res = res.get('result', {})
+        #             agg_res = res.get('report', {})
         #             aggregate[pid] = {
         #                 'expected': agg_res.get('total_expected', 0),
         #                 'found': agg_res.get('true_positives', 0),
@@ -392,7 +392,7 @@ class SandboxManager:
 if __name__ == '__main__':
     m = SandboxManager()
     # m.run()
-    reports_dir = m.process_job('local', agent_filepath="miner/agent.py")
+
     
     # Evaluate all reports using ScaBenchScorerV2
     # score = m.eval_jobs(reports_dir)

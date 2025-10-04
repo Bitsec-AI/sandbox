@@ -79,7 +79,7 @@ def main():
                 print(f"Status: {result.get('status', 'unknown')}")
                 
                 if result.get('status') == 'scored':
-                    scoring_result = result.get('result', {})
+                    scoring_result = result.get('report', {})
                     print(f"  - Total Expected: {scoring_result.get('total_expected', 0)}")
                     print(f"  - Total Found: {scoring_result.get('total_found', 0)}")
                     print(f"  - True Positives: {scoring_result.get('true_positives', 0)}")
