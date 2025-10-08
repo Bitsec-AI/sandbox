@@ -4,6 +4,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./validator/jobs:/app/validator/jobs
+      - ./validator/projects:/app/validator/projects
     env_file: .env
     environment:
       - HOST_CWD=${PWD}

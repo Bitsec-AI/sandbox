@@ -74,7 +74,7 @@ def run_agent(agent_file, queue, temp_dir):
 
             try:
                 pickle.dumps(result)
-                resp = {"success": True, "result": result}
+                resp = {"success": True, "report": result}
             except (pickle.PicklingError, AttributeError, TypeError) as e:
                 tb_str = traceback.format_exc()
                 resp = {"success": False, "error": f"Report serialization error: {e}: {tb_str}"}
@@ -170,7 +170,7 @@ def run_agent_direct(agent_file):
 
             try:
                 pickle.dumps(result)
-                resp = {"success": True, "result": result}
+                resp = {"success": True, "report": result}
             except (pickle.PicklingError, AttributeError, TypeError) as e:
                 tb_str = traceback.format_exc()
                 resp = {"success": False, "error": f"Report serialization error: {e}: {tb_str}"}
@@ -301,8 +301,8 @@ if __name__ == "__main__":
         }
 
     # Separate logs from the structured JSON report
-    stdout_text = result.pop("stdout", "")
-    stderr_text = result.pop("stderr", "")
+    stdout_text = result.get("stdout", "")
+    stderr_text = result.get("stderr", "")
 
     # Write structured report without stdout/stderr so it remains clean JSON
     with open(REPORT_FILE, "w") as f:
