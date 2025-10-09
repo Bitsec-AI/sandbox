@@ -471,7 +471,7 @@ if __name__ == '__main__':
     # m.run()
 
     agent_filepath = f"{HOST_CWD}/miner/agent.py"
-    for i in range(10):
+    while True:
         job_id = int(time.time())
         job = Job(job_id, 1, 1)
 
