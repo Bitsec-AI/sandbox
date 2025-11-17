@@ -31,7 +31,6 @@ PROXY_IMAGE_TAG = 'bitsec-proxy:latest'
 PROXY_CONTAINER = 'bitsec_proxy'
 PROXY_PORT = os.getenv("PROXY_PORT", 8087)
 
-VALIDATOR_ID = os.getenv("VALIDATOR_ID")
 SKIP_EXECUTION = os.getenv("SKIP_EXECUTION", "").lower() == "true"
 SKIP_EVALUATION = os.getenv("SKIP_EVALUATION", "").lower() == "true"
 
@@ -51,9 +50,10 @@ class SandboxManager:
 
         self.projects_config_filepath = os.path.join(VALIDATOR_DIR, 'projects.json')
 
-        self.validator_id = VALIDATOR_ID
-
         self.platform_client = PlatformClient(is_local=is_local)
+        self.validator = self.platform_client.get_current_validator()
+
+        self.validator_id = self.validator.id
 
         self.build_images()
         self.init_proxy()
@@ -70,7 +70,7 @@ class SandboxManager:
                 logger.info("No job runs available")
                 time.sleep(60)
 
-            if is_local:
+            if self.is_local:
                 break
 
     def build_images(self):

@@ -21,7 +21,6 @@ class MockJobRun(BaseModel):
 class AgentCode(BaseModel):
     code: str
 
-
 class AgentExecution(BaseModel):
     validator_id: int
     job_run_id: int
@@ -36,7 +35,6 @@ class AgentExecution(BaseModel):
     completed_at: datetime | None = None
     created_at: datetime = datetime.utcnow()
     updated_at: datetime = datetime.utcnow()
-
 
 class AgentEvaluation(BaseModel):
     id: int | None = None
@@ -58,14 +56,15 @@ class AgentEvaluation(BaseModel):
     extra_findings: list | None = None
     undecided_findings: list | None = None
 
-
 class UserRole(StrEnum):
-    MINER = "MINER"
-    VALIDATOR = "VALIDATOR"
-
+    MINER = "miner"
+    VALIDATOR = "validator"
 
 class User(BaseModel):
+    id: int
     email: str
     name: str | None = None
-    role: UserRole = UserRole.MINER
+    role: UserRole
+    is_active: bool
+    is_active_validator: bool
     hotkey: str | None = None

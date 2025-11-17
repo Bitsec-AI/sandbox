@@ -130,7 +130,7 @@ class APIPlatformClient:
 
     def start_job_run(self, job_run_id: int) -> dict:
         endpoint = f"jobs/runs/{job_run_id}/start"
-        resp = self._call_api("post", endpoint)
+        resp = self._call_api("post", endpoint, authenticate=True)
         return resp
 
     def complete_job_run(self, job_run_id: int, status='success') -> dict:
@@ -138,7 +138,7 @@ class APIPlatformClient:
         payload = {
             "status": status,
         }
-        resp = self._call_api("post", endpoint, json=payload)
+        resp = self._call_api("post", endpoint, json=payload, authenticate=True)
         return resp
 
     def submit_agent(self, agent_code: AgentCode) -> dict:
@@ -152,6 +152,11 @@ class APIPlatformClient:
         payload = user.model_dump(mode="json")
         resp = self._call_api("post", endpoint, json=payload, authenticate=True)
         return resp
+
+    def get_current_validator(self) -> User:
+        endpoint = f"users/validators/me"
+        resp = self._call_api("get", endpoint, authenticate=True)
+        return User.model_validate(resp)
 
 
 class MockPlatformClient:
