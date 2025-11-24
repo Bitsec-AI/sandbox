@@ -19,11 +19,8 @@ from rich.panel import Panel
 from rich.table import Table
 from rich import box
 
-from loggers.logger import get_logger
 
 console = Console()
-
-logger = get_logger()
 
 
 class Severity(str, Enum):

@@ -102,6 +102,11 @@ class APIPlatformClient:
         except json.JSONDecodeError:
             raise PlatformError(f"Expected JSON response from {url}, got invalid JSON.")
 
+    def get_projects(self):
+        endpoint = f"projects/"
+        resp = self._call_api('get', endpoint)
+        return resp
+
     def get_next_job_run(self, validator_id: int):
         endpoint = f"jobs/runs/validator/{validator_id}"
         resp = self._call_api('get', endpoint)
@@ -115,6 +120,11 @@ class APIPlatformClient:
         endpoint = f"jobs/runs/{job_run_id}/code"
         resp = self._call_api('get', endpoint)
         return resp['code']
+
+    def get_job_run_agent(self, job_run_id: int):
+        endpoint = f"jobs/runs/{job_run_id}/agent"
+        resp = self._call_api('get', endpoint)
+        return resp
 
     def submit_agent_execution(self, agent_execution: AgentExecution) -> dict:
         endpoint = f"agents/execution/"
@@ -153,10 +163,10 @@ class APIPlatformClient:
         resp = self._call_api("post", endpoint, json=payload, authenticate=True)
         return resp
 
-    def get_current_validator(self) -> User:
+    def get_current_validator(self) -> dict:
         endpoint = f"users/validators/me"
         resp = self._call_api("get", endpoint, authenticate=True)
-        return User.model_validate(resp)
+        return resp
 
 
 class MockPlatformClient:
@@ -172,6 +182,15 @@ class MockPlatformClient:
             validator_id=1,
         )
         return job_run
+
+    def get_projects(self):
+        projects = [
+            {"project_key": "code4rena_superposition_2025_01"},
+            # {"project_key": "code4rena_loopfi_2025_02"},
+            {"project_key": "code4rena_lambowin_2025_02"},
+            {"project_key": "code4rena_secondswap_2025_02"},
+        ]
+        return projects
 
 
 class PlatformClient:
