@@ -11,6 +11,7 @@ services:
     environment:
       - HOST_CWD=${PWD}
       - PLATFORM_URL=http://host.docker.internal:8000
+      - PROXY_URL=http://host.docker.internal:8087
       - LOCAL
       # - SKIP_EXECUTION
       # - SKIP_EVALUATION

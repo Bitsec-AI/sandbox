@@ -3,6 +3,15 @@ from enum import StrEnum
 from pydantic import BaseModel
 
 
+class Status(StrEnum):
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCESS = "success"
+    ERROR = "error"
+    TIMED_OUT = "timed_out"
+    CANCELLED = "cancelled"
+
+
 class JobRun(BaseModel):
     id: int
     job_id: int

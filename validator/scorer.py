@@ -16,6 +16,8 @@ from typing import Dict, List, Any, Optional, Tuple
 from datetime import datetime
 from dataclasses import dataclass, asdict
 
+import requests
+
 # Rich for console output
 from rich.console import Console
 from rich.table import Table
@@ -23,8 +25,6 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 from rich import box
 
-# LLM for intelligent matching
-import llm
 
 console = Console()
 
@@ -55,25 +55,17 @@ class ScaBenchScorerV2:
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """Initialize the scorer with optional configuration."""
         self.config = config or {}
-        # Use gpt-4o for best accuracy
-        self.model_id = self.config.get('model', 'gpt-4o')
-        self.api_key = self.config.get('api_key') or os.getenv("OPENAI_API_KEY")
+
         self.confidence_threshold = self.config.get('confidence_threshold', 0.75)
         # Strict matching mode: no confidence ratings, only exact matches count
         self.strict_matching = bool(self.config.get('strict_matching', False))
-        
+
+        self.model_id = self.config.get('model', 'deepseek-ai/DeepSeek-V3-0324')
+
+        self.api_url = self.config.get('api_url')
+        self.api_key = self.config.get('api_key')
         if not self.api_key:
-            # llm will fall back to other key mechanisms, so this is not a fatal error
-            # We will pass the key to the prompt method if it exists.
-            pass
-        
-        try:
-            self.model = llm.get_model(self.model_id)
-        except llm.UnknownModelError:
-            console.print(f"[red]Error: Model '{self.model_id}' not found. Is the plugin installed?[/red]")
-            raise
-        except Exception as e:
-            console.print(f"[red]Error initializing LLM model: {e}[/red]")
+            console.print(f"[red]Error: Chutes API key is required for validation! [/red]")
             raise
             
         self.debug = self.config.get('debug', False)
@@ -85,6 +77,66 @@ class ScaBenchScorerV2:
         self.prefilter_limit = int(self.config.get('prefilter_limit', 0))
         # Truncate long descriptions to keep prompts compact
         self.desc_max_chars = int(self.config.get('desc_max_chars', 800))
+
+    def clean_json_response(self, response_content: str) -> dict[str, Any]:
+        while response_content.startswith("_\n"):
+            response_content = response_content[2:]
+
+        response_content = response_content.strip()
+
+        if response_content.startswith("return"):
+            response_content = response_content[6:]
+
+        response_content = response_content.strip()
+
+        # Remove code block markers if present
+        if response_content.startswith("```") and response_content.endswith("```"):
+            lines = response_content.splitlines()
+
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+
+            response_content = "\n".join(lines).strip()
+
+        resp_json = json.loads(response_content)
+
+        return resp_json
+
+    def prompt(self, prompt: str, system: str):
+        payload = {
+            "model": self.model_id,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ],
+        }
+
+        headers = {}
+
+        resp = None
+
+        try:
+            resp = requests.post(
+                f"{self.api_url}/inference",
+                headers=headers,
+                json=payload,
+            )
+            resp.raise_for_status()
+
+        except requests.exceptions.HTTPError as e:
+            body = resp.json() if resp else ""
+            console.print(f"Inference Proxy Error: {e} {body}")
+            raise
+
+        except requests.exceptions.RequestException as e:
+            body = resp.json() if resp else ""
+            console.print(f"Inference Error: {e} {body}")
+            raise
+
+        return resp.json()
 
     # --------------------------
     # Similarity + hint helpers
@@ -158,34 +210,6 @@ Description: {self._truncate(finding.get('description', 'N/A'))}
         Returns: (found_match, matched_finding, justification, confidence, decision)
         """
 
-        def _prompt_with_fallback(prompt: str, system: str, schema: Dict[str, Any]):
-            """Call model.prompt avoiding unsupported params; no temperature is set."""
-            last_err: Optional[Exception] = None
-            # Prefer determinism via seed if supported
-            try:
-                return self.model.prompt(
-                    prompt,
-                    system=system,
-                    key=self.api_key,
-                    schema=schema,
-                    seed=42,
-                    stream=False,
-                )
-            except Exception as e1:
-                last_err = e1
-                # Retry without seed
-                try:
-                    return self.model.prompt(
-                        prompt,
-                        system=system,
-                        key=self.api_key,
-                        schema=schema,
-                        stream=False,
-                    )
-                except Exception as e2:
-                    last_err = e2
-                    raise last_err
-        
         # Build prefilter ranking (optional) to focus the model
         indices = list(range(len(tool_findings)))
         if self.enable_prefilter and tool_findings:
@@ -285,7 +309,9 @@ Return confidence between 0.0-1.0 based on match quality:
 - 0.6 = Moderate match (likely same, some uncertainty)
 - Below 0.5 = Poor match or different vulnerability
 
-When in doubt, lean towards lower confidence."""
+When in doubt, lean towards lower confidence.
+
+IMPORTANT: Begin your response with `{{"found":`"""
                 response_schema = {
                     "type": "object",
                     "properties": {
@@ -298,21 +324,16 @@ When in doubt, lean towards lower confidence."""
                 }
 
             try:
-                response = _prompt_with_fallback(
+                system = "You are a precise vulnerability matcher. Be strict."
+
+                response = self.prompt(
                     prompt,
-                    system="You are a precise vulnerability matcher. Be strict.",
-                    schema=response_schema,
+                    system=system,
                 )
 
-                # Parse response
-                if hasattr(response, 'text'):
-                    result_text = response.text()
-                elif hasattr(response, 'content'):
-                    result_text = response.content
-                else:
-                    result_text = str(response)
+                response_content = response['content'].strip()
 
-                result = json.loads(result_text)
+                result = self.clean_json_response(response_content)
 
                 if self.strict_matching:
                     decision = str(result.get('decision', 'no')).lower()

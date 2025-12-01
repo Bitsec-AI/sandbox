@@ -191,6 +191,17 @@ class MockPlatformClient:
 
         return _method
 
+    def get_job_run_agent(self, job_run_id: int):
+        agent = {
+            "project_keys": [
+                "code4rena_secondswap_2025_02",
+                "code4rena_superposition_2025_01",
+                "code4rena_loopfi_2025_02",
+                "code4rena_lambowin_2025_02",
+            ]
+        }
+        return agent
+
     def get_next_job_run(self, validator_id: int):
         job_run = MockJobRun(
             id=int(time.time()),

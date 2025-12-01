@@ -69,6 +69,8 @@ class BaselineRunner:
         self.project_id = os.getenv('PROJECT_ID', "local")
         self.job_id = os.getenv('JOB_ID', "local")
 
+        console.print(f"Inference: {self.inference_api}")
+
     def inference(self, messages: dict[str, Any]) -> dict[str, Any]:
         payload = {
             "model": self.config['model'],
@@ -383,7 +385,7 @@ class BaselineRunner:
 
 def agent_main(project_dir=None):
     config = {
-        'model': "deepseek-ai/DeepSeek-V3.1"
+        'model': "deepseek-ai/DeepSeek-V3.1-Terminus"
     }
 
     if not project_dir:

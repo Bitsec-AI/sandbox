@@ -16,4 +16,4 @@ COPY validator/ validator/
 COPY loggers/ loggers/
 COPY miner/ miner/
 
-CMD ["python", "-m", "validator.sandbox_manager"]
+CMD ["python", "-m", "validator.manager"]

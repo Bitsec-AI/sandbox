@@ -12,8 +12,13 @@ class Settings(BaseSettings):
     platform_url: str = "bitsec.ai"
 
     host_cwd: str = "."
+    validator_dir: str = "validator"
 
+    proxy_container: str = "bitsec_proxy"
+    proxy_network: str = "bitsec-net"
     proxy_port: int = 8087
+    proxy_url: str = "http://localhost:8087"
+
     skip_execution: bool = False
     skip_evaluation: bool = False
 
