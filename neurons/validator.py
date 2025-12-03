@@ -17,11 +17,15 @@
 # OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
 
-
 import time
+import asyncio
+import numpy as np
 
 # Bittensor
 import bittensor as bt
+
+from config import settings
+from validator.manager import SandboxManager
 
 # import base validator class which takes care of most of the boilerplate
 from template.base.validator import BaseValidatorNeuron
@@ -46,6 +50,45 @@ class Validator(BaseValidatorNeuron):
         self.load_state()
 
         # TODO(developer): Anything specific to your use case you can do here
+        self.sandbox_manager = SandboxManager(
+            is_local=settings.local,
+            wallet_name=self.wallet.name,
+        )
+        bt.logging.info("SandboxManager initialized")
+
+    def update_top_miner_scores(self):
+        """
+        Fetch the top miner from the platform and set weights to 1 for that miner only.
+        """
+        try:
+            top_agents = self.sandbox_manager.platform_client.get_top_agents()
+        except Exception as e:
+            bt.logging.error(f"Failed to fetch top agents: {e}")
+            return
+
+        if not top_agents:
+            bt.logging.info("No top agents returned from platform")
+            return
+
+        uid = None
+        hotkey = None
+        for agent in top_agents:
+            hotkey = agent.get("hotkey")
+            if not hotkey:
+                continue
+            try:
+                uid = self.metagraph.hotkeys.index(hotkey)
+                break
+            except ValueError:
+                continue
+
+        if uid is None:
+            bt.logging.warning("No top agent hotkeys found in metagraph")
+            return
+
+        self.scores = np.zeros(self.metagraph.n, dtype=np.float32)
+        self.scores[uid] = 1.0
+        bt.logging.info(f"Setting 1.0 weight to top miner hotkey {hotkey} (uid {uid})")
 
     async def forward(self):
         """
@@ -56,13 +99,20 @@ class Validator(BaseValidatorNeuron):
         - Rewarding the miners
         - Updating the scores
         """
+        # Dispatch sandbox polling in a worker thread so we do not block the event loop.
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self.sandbox_manager.poll_job_run)
+        await loop.run_in_executor(None, self.update_top_miner_scores)
+
+        time.sleep(60)
+
         # TODO(developer): Rewrite this function based on your protocol definition.
-        return await forward(self)
+        # return await forward(self)
 
 
 # The main function parses the configuration and runs the validator.
 if __name__ == "__main__":
     with Validator() as validator:
         while True:
-            bt.logging.info(f"Validator running... {time.time()}")
+            bt.logging.info(f"Validator running... {int(time.time())}")
             time.sleep(5)

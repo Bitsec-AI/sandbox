@@ -13,7 +13,7 @@ from pathlib import Path
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
-from validator.sandbox_manager import SandboxManager
+from validator.manager import SandboxManager
 
 def main():
     print("Testing eval_jobs function on a single project...")

@@ -141,6 +141,16 @@ class APIPlatformClient:
         resp = self._call_api("get", endpoint)
         return resp
 
+    def get_top_agents(self, limit: int = 10):
+        endpoint = "agents/top/"
+
+        params = {}
+        if limit:
+            params["limit"] = limit
+
+        resp = self._call_api("get", endpoint, params=params)
+        return resp
+
     def submit_agent_execution(self, agent_execution: AgentExecution) -> dict:
         endpoint = "agents/execution/"
         payload = agent_execution.model_dump(mode="json")

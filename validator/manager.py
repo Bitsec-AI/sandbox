@@ -20,12 +20,12 @@ HOST_PROJECTS_DIR = os.path.abspath(os.path.join(HOST_CWD, settings.validator_di
 
 
 class SandboxManager:
-    def __init__(self, is_local=False):
+    def __init__(self, is_local=False, wallet_name=None):
         self.proxy_docker_dir = os.path.join(settings.validator_dir, 'proxy')
         self.projects_dir = os.path.join(settings.validator_dir, 'projects')
         self.all_jobs_dir = os.path.join(settings.validator_dir, 'jobs')
 
-        self.platform_client = PlatformClient(is_local=is_local)
+        self.platform_client = PlatformClient(is_local=is_local, wallet_name=wallet_name)
         self.validator = self.platform_client.get_current_validator()
 
         self.validator_id = self.validator['id']
@@ -37,16 +37,25 @@ class SandboxManager:
 
     def run(self):
         while True:
-            job_run = self.platform_client.get_next_job_run(self.validator_id)
-            if job_run:
-                self.process_job_run(job_run)
-
-            else:
-                logger.info("No job runs available")
+            has_job = self.poll_job_run()
+            if not has_job:
                 time.sleep(60)
 
             if self.is_local:
                 break
+
+    def poll_job_run(self):
+        """
+        Attempt to fetch and process a single job run.
+        Returns True if a job was processed, False otherwise.
+        """
+        job_run = self.platform_client.get_next_job_run(self.validator_id)
+        if not job_run:
+            logger.info("No job runs available")
+            return False
+
+        self.process_job_run(job_run)
+        return True
 
     def build_images(self):
         docker.build(
