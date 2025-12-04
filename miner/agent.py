@@ -18,8 +18,6 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeRemainingColumn
 from rich.panel import Panel
 
-from scripts.projects import fetch_projects
-
 
 console = Console()
 
@@ -441,7 +439,9 @@ def agent_main(project_dir: str = None, inference_api: str = None):
 
 
 if __name__ == '__main__':
+    from scripts.projects import fetch_projects
     from validator.manager import SandboxManager
+
     SandboxManager(is_local=True)
     time.sleep(10) # wait for proxy to start
     fetch_projects()
