@@ -18,9 +18,9 @@ PROXY_IMAGE_TAG = 'bitsec-proxy:latest'
 
 class SandboxManager:
     def __init__(self, is_local=False, wallet_name=None):
-        self.proxy_docker_dir = os.path.join(settings.validator_dir, 'proxy')
-        self.all_jobs_dir = os.path.join(settings.host_cwd, 'jobs')
 
+        self.proxy_docker_dir = os.path.join(settings.validator_dir, 'proxy')
+        self.all_jobs_dir = os.path.join(os.getcwd(), 'jobs')
         self.platform_client = PlatformClient(is_local=is_local, wallet_name=wallet_name)
         self.validator = self.platform_client.get_current_validator()
 

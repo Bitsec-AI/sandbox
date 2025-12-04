@@ -4,8 +4,7 @@ services:
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./validator/jobs:/app/validator/jobs
-      - ./validator/projects:/app/validator/projects
+      - ./jobs:/app/jobs
       - "${HOME}/.bittensor/wallets/${WALLET_NAME}/hotkeys:/root/.bittensor/wallets/${WALLET_NAME}/hotkeys"
     env_file: .env
     environment:
