@@ -1,0 +1,46 @@
+[
+  {
+    "platform": "code4rena",
+    "repo_url": "https://github.com/code-423n4/2024-08-superposition",
+    "num_files": null,
+    "slug": "superposition_2025_01",
+    "id": 1,
+    "name": "Superposition",
+    "commit": "4528c9d2dbe1550d2660dac903a8246076044905",
+    "timeout": null,
+    "project_key": "code4rena_superposition_2025_01"
+  },
+  {
+    "platform": "code4rena",
+    "repo_url": "https://github.com/code-423n4/2024-12-lambowin",
+    "num_files": null,
+    "slug": "lambowin_2025_02",
+    "id": 2,
+    "name": "Lambo.win",
+    "commit": "main",
+    "timeout": null,
+    "project_key": "code4rena_lambowin_2025_02"
+  },
+  {
+    "platform": "code4rena",
+    "repo_url": "https://github.com/code-423n4/2024-10-loopfi",
+    "num_files": null,
+    "slug": "loopfi_2025_02",
+    "id": 3,
+    "name": "LoopFi",
+    "commit": "main",
+    "timeout": null,
+    "project_key": "code4rena_loopfi_2025_02"
+  },
+  {
+    "platform": "code4rena",
+    "repo_url": "https://github.com/code-423n4/2024-12-secondswap",
+    "num_files": null,
+    "slug": "secondswap_2025_02",
+    "id": 4,
+    "name": "SecondSwap",
+    "commit": "214849c3517eb26b31fe194bceae65cb0f52d2c0",
+    "timeout": null,
+    "project_key": "code4rena_secondswap_2025_02"
+  }
+]
