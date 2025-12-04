@@ -96,9 +96,9 @@ class AgentExecutor:
                 "PROJECT_KEY": self.project_key,
             },
             # read_only=True,
-            # memory="512m",
-            # cpu_quota=25000,
-            # pids_limit=64,
+            memory="512m",
+            cpu_quota=25000,
+            pids_limit=64,
             detach=True,
         )
         docker.wait(container)
