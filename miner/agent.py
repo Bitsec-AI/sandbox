@@ -94,11 +94,26 @@ class BaselineRunner:
             resp.raise_for_status()
 
         except requests.exceptions.HTTPError as e:
-            console.print(f"Inference Proxy Error: {e} {resp.json()}")
+            # This prevents the AttributeError when requests.post() raises a RequestException before returning
+            if resp is not None:
+                try:
+                    error_detail = resp.json()
+                except (ValueError, AttributeError):
+                    error_detail = resp.text if hasattr(resp, 'text') else str(resp)
+            else:
+                error_detail = "No response received"
+            console.print(f"Inference Proxy Error: {e} {error_detail}")
             raise
 
         except requests.exceptions.RequestException as e:
-            console.print(f"Inference Error: {e} {resp.json()}")
+            if resp is not None:
+                try:
+                    error_detail = resp.json()
+                except (ValueError, AttributeError):
+                    error_detail = resp.text if hasattr(resp, 'text') else str(resp)
+            else:
+                error_detail = "No response received"
+            console.print(f"Inference Error: {e} {error_detail}")
             raise
 
         return resp.json()
