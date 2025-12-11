@@ -1,9 +1,9 @@
 from datetime import datetime
-from enum import StrEnum
+from enum import Enum
 from pydantic import BaseModel
 
 
-class Status(StrEnum):
+class Status(str, Enum):
     PENDING = "pending"
     RUNNING = "running"
     SUCCESS = "success"
@@ -65,7 +65,7 @@ class AgentEvaluation(BaseModel):
     extra_findings: list | None = None
     undecided_findings: list | None = None
 
-class UserRole(StrEnum):
+class UserRole(str, Enum):
     MINER = "miner"
     VALIDATOR = "validator"
 
