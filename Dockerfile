@@ -15,5 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY validator/ validator/
 COPY loggers/ loggers/
 COPY miner/ miner/
+COPY neurons/ neurons/
+COPY template/ template/
 
 CMD ["python", "-m", "validator.manager"]

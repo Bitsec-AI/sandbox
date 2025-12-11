@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 import requests
 from bittensor_wallet import Wallet
+from requests.adapters import HTTPAdapter, Retry
 
 from config import settings
 from validator.models.platform import (
@@ -39,6 +40,22 @@ class APIPlatformClient:
         self.timeout = timeout
         self.set_wallet(wallet_name)
 
+        self.session = self.init_session()
+
+    def init_session(self):
+        session = requests.Session()
+
+        retry = Retry(
+            total=10,
+            backoff_factor=0.5,
+            status_forcelist=[500, 502, 503, 504],
+        )
+
+        session.mount("https://", HTTPAdapter(max_retries=retry))
+        session.mount("http://", HTTPAdapter(max_retries=retry))
+
+        return session
+
     def set_wallet(self, wallet_name: str | None = None):
         wallet_name = wallet_name or settings.wallet_name
         wallet = Wallet(wallet_name)
@@ -50,7 +67,7 @@ class APIPlatformClient:
         payload = {
             "address": self.hotkey.ss58_address,
             "nonce": secrets.token_hex(16),
-            "domain": settings.app_url,
+            "domain": settings.platform_url,
             "iat": iat,
             "exp": exp,
         }
@@ -83,7 +100,7 @@ class APIPlatformClient:
             headers["Authorization"] = f"Bearer {token}"
 
         try:
-            response = requests.request(
+            response = self.session.request(
                 method=method,
                 url=url,
                 params=params,

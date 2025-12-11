@@ -1,0 +1,22 @@
+services:
+  validator:
+    build: .
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./jobs:/app/jobs
+      - "${HOME}/.bittensor/wallets/${WALLET_NAME}/hotkeys:/root/.bittensor/wallets/${WALLET_NAME}/hotkeys"
+      - "${HOME}/.bittensor/wallets/${WALLET_NAME}/coldkeypub.txt:/root/.bittensor/wallets/${WALLET_NAME}/coldkeypub.txt"
+    env_file: .env
+    environment:
+      - HOST_CWD=${PWD}
+      - CHUTES_API_KEY
+      - PROXY_URL=http://host.docker.internal:8087
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: >
+      python -m neurons.validator
+        --netuid ${NETUID}
+        --subtensor.network ${NETWORK}
+        --wallet.name ${WALLET_NAME}
+        --logging.info

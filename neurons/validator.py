@@ -99,20 +99,12 @@ class Validator(BaseValidatorNeuron):
         - Rewarding the miners
         - Updating the scores
         """
-        # Dispatch sandbox polling in a worker thread so we do not block the event loop.
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, self.sandbox_manager.poll_job_run)
-        await loop.run_in_executor(None, self.update_top_miner_scores)
-
-        await asyncio.sleep(60)
-
         # TODO(developer): Rewrite this function based on your protocol definition.
-        # return await forward(self)
+        return await forward(self)
 
 
 # The main function parses the configuration and runs the validator.
 if __name__ == "__main__":
     with Validator() as validator:
         while True:
-            bt.logging.info(f"Validator running... {int(time.time())}")
             time.sleep(5)

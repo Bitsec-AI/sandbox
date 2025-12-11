@@ -22,3 +22,28 @@ def get_logger(name: str = "bitsec"):
     logger.setLevel(logging.INFO)
     logger.propagate = False
     return logger
+
+
+class PrefixedLogger:
+    def __init__(self, logger, prefix):
+        self.logger = logger
+        self.prefix = prefix
+
+    def debug(self, msg, *args, **kwargs):
+        return self.logger.debug(f"{self.prefix}{msg}", *args, **kwargs)
+
+    def info(self, msg, *args, **kwargs):
+        return self.logger.info(f"{self.prefix}{msg}", *args, **kwargs)
+
+    def error(self, msg, *args, **kwargs):
+        return self.logger.error(f"{self.prefix}{msg}", *args, **kwargs)
+
+    def warning(self, msg, *args, **kwargs):
+        return self.logger.warning(f"{self.prefix}{msg}", *args, **kwargs)
+
+    def exception(self, msg, *args, **kwargs):
+        return self.logger.exception(f"{self.prefix}{msg}", *args, **kwargs)
+
+    def __getattr__(self, name):
+        # Forward ALL other attributes/methods to underlying logger
+        return getattr(self.logger, name)

@@ -8,7 +8,7 @@ from python_on_whales import docker
 from python_on_whales.exceptions import DockerException
 
 from config import settings
-from loggers.logger import get_logger
+from loggers.logger import get_logger, PrefixedLogger
 from validator.models.platform import AgentExecution, AgentEvaluation, Status
 from validator.platform_client import PlatformError
 from validator.scorer import ScaBenchScorerV2
@@ -18,7 +18,6 @@ logger = get_logger()
 
 SANDBOX_CONTAINER_TMPL = 'bitsec_sandbox_{job_run_id}_{project_key}'
 PROJECT_IMAGE_TAG_TMPL = 'ghcr.io/bitsec-ai/{project_key}:latest'
-
 
 
 class AgentExecutor:
@@ -46,20 +45,16 @@ class AgentExecutor:
         self.init_logger()
 
     def init_logger(self):
-        log_prefix = f"[J:{self.job_run.job_id}|JR:{self.job_run.id}|P:{self.project_key}]"
-        self.logger = logging.LoggerAdapter(logger, {'prefix': log_prefix})
+        prefix = f"[J:{self.job_run.job_id}|JR:{self.job_run.id}|P:{self.project_key}] "
 
-        def process(msg, kwargs):
-            return f"{log_prefix} {msg}", kwargs
-
-        self.logger.process = process
+        self.logger = PrefixedLogger(logger, prefix)
 
     def remove_container(self, container_name):
         try:
             docker.remove(container_name, force=True)
 
         except DockerException as e:
-            logger.error(f"Exit code {e.return_code} while running {e.docker_command}")
+            self.logger.error(f"Exit code {e.return_code} while running {e.docker_command}")
             raise
 
     def run(self):
@@ -109,7 +104,7 @@ class AgentExecutor:
 
         except DockerException as e:
             if e.return_code == 1 and "does not exist" in str(e):
-                logger.error("Report not found in container")
+                self.logger.error("Report not found in container")
             else:
                 raise
 
@@ -292,6 +287,11 @@ class AgentExecutor:
                 f"Detection: {detection_pct}% | "
                 f"Found: {result.true_positives} | "
                 f"Expected: {result.total_expected}"
+            )
+            self.logger.info(
+                "Tokens | "
+                f"Input: {result.input_tokens} (cached: {result.cached_tokens}) | "
+                f"Output: {result.output_tokens}"
             )
 
             return scoring_result

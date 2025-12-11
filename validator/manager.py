@@ -21,6 +21,7 @@ class SandboxManager:
 
         self.proxy_docker_dir = os.path.join(settings.validator_dir, 'proxy')
         self.all_jobs_dir = os.path.join(os.getcwd(), 'jobs')
+        self.host_jobs_dir = os.path.join(settings.host_cwd, 'jobs')
         self.platform_client = PlatformClient(is_local=is_local, wallet_name=wallet_name)
         self.validator = self.platform_client.get_current_validator()
 
@@ -39,6 +40,24 @@ class SandboxManager:
 
             if self.is_local:
                 break
+
+    def poll_job_run(self):
+        retries = 10
+        job_run = None
+        for _ in range(retries):
+            try:
+                job_run = self.platform_client.get_next_job_run(self.validator_id)
+                break
+            except PlatformError as e:
+                logger.error(f"Error fetching job run: {e}")
+                time.sleep(delay)
+
+        if not job_run:
+            logger.info("No job runs available")
+            return False
+
+        self.process_job_run(job_run)
+        return True
 
     def poll_job_run(self):
         """
@@ -105,7 +124,11 @@ class SandboxManager:
             with open(agent_filepath_rel, "w", encoding="utf-8") as f:
                 f.write(agent['code'])
 
-            agent_filepath = os.path.abspath(agent_filepath_rel)
+            agent_filepath = os.path.join(
+                self.host_jobs_dir,
+                f"job_run_{job_run.id}",
+                'agent.py',
+            )
 
         for project_key in agent['project_keys']:
             executor = AgentExecutor(

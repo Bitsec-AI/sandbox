@@ -14,7 +14,7 @@ if not username or not token:
 IMAGE = f"ghcr.io/{username}/agent-sandbox:{version}"
 
 docker.login(server="ghcr.io", username=username, password=token)
-docker.build(".", tags=[IMAGE])
+docker.build(".", tags=[IMAGE], platforms=["linux/amd64", "linux/arm64"])
 docker.push(IMAGE)
 
 print(IMAGE)

@@ -121,6 +121,16 @@ def validator_create(
     client = get_platform_client(wallet)
     create_user(email=email, name=name, client=client, is_miner=False)
 
+@validator_app.command("run")
+def validator_run():
+    """Run the validator."""
+    cmd = [
+        "docker", "compose",
+        "-f", "docker-compose.validator.yaml",
+        "up", "--build", "-d",
+    ]
+    subprocess.run(cmd, check=True)
+
 # -------------------------------------------------------
 # Entry point
 # -------------------------------------------------------

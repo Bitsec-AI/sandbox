@@ -47,6 +47,9 @@ class ScoringResult:
     undecided_findings: List[Dict[str, Any]]
     extra_findings: List[Dict[str, Any]]
     potential_matches: List[Dict[str, Any]]
+    input_tokens: int
+    output_tokens: int
+    cached_tokens: int
 
 
 class ScaBenchScorerV2:
@@ -77,6 +80,10 @@ class ScaBenchScorerV2:
         self.prefilter_limit = int(self.config.get('prefilter_limit', 0))
         # Truncate long descriptions to keep prompts compact
         self.desc_max_chars = int(self.config.get('desc_max_chars', 800))
+
+        self.input_tokens = 0
+        self.cached_tokens = 0
+        self.output_tokens = 0
 
     def clean_json_response(self, response_content: str) -> dict[str, Any]:
         while response_content.startswith("_\n"):
@@ -136,7 +143,12 @@ class ScaBenchScorerV2:
             console.print(f"Inference Error: {e} {body}")
             raise
 
-        return resp.json()
+        resp_json = resp.json()
+        self.input_tokens += resp_json["input_tokens"]
+        self.cached_tokens += resp_json["cached_tokens"]
+        self.output_tokens += resp_json["output_tokens"]
+
+        return resp_json
 
     # --------------------------
     # Similarity + hint helpers
@@ -646,7 +658,10 @@ IMPORTANT: Begin your response with `{{"found":`"""
             missed_findings=missed_findings,
             undecided_findings=undecided_findings,
             extra_findings=extra_findings,
-            potential_matches=[]  # Not used in V2
+            potential_matches=[],
+            input_tokens=self.input_tokens,
+            output_tokens=self.output_tokens,
+            cached_tokens=self.cached_tokens,
         )
 
 

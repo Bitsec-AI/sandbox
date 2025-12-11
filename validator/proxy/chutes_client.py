@@ -103,5 +103,6 @@ def call_chutes(
         content=msg["content"],
         role=msg["role"],
         input_tokens=resp_json["usage"]["prompt_tokens"],
+        cached_tokens=resp_json["usage"]["prompt_tokens_details"]["cached_tokens"],
         output_tokens=resp_json["usage"]["completion_tokens"],
     )

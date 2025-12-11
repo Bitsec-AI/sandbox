@@ -20,4 +20,5 @@ class InferenceResponse(BaseModel):
     content: str
     role: Role
     input_tokens: int
+    cached_tokens: int
     output_tokens: int
