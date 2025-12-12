@@ -99,7 +99,10 @@ def call_chutes(
 
     msg = resp_json["choices"][0]["message"]
 
-    cached_tokens = resp_json["usage"].get("prompt_tokens_details", {}).get("cached_tokens", 0)
+    cached_tokens = 0
+    prompt_tokens_details = resp_json["usage"].get("prompt_tokens_details")
+    if prompt_tokens_details:
+        cached_tokens = prompt_tokens_details.get("cached_tokens", 0)
 
     return InferenceResponse(
         content=msg["content"],
