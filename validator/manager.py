@@ -100,13 +100,14 @@ class SandboxManager:
     async def process_job_run(self, job_run):
         logger.info(f"[J:{job_run.job_id}|JR:{job_run.id}] Processing job run")
 
-        self.platform_client.start_job_run(job_run.id)
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self.platform_client.start_job_run, job_run.id)
 
         job_run_dir = os.path.join(self.all_jobs_dir, f"job_run_{job_run.id}")
         job_run_reports_dir = os.path.join(job_run_dir, "reports")
         os.makedirs(job_run_reports_dir, exist_ok=True)
 
-        agent = self.platform_client.get_job_run_agent(job_run_id=job_run.id)
+        agent = await loop.run_in_executor(None, self.platform_client.get_job_run_agent, job_run.id)
 
         if self.is_local:
             agent_filepath = f"{settings.host_cwd}/miner/agent.py"
@@ -123,7 +124,6 @@ class SandboxManager:
                 'agent.py',
             )
 
-        loop = asyncio.get_event_loop()
         tasks = []
 
         for project_key in agent['project_keys']:
@@ -137,10 +137,14 @@ class SandboxManager:
             task = loop.run_in_executor(None, executor.run)
             tasks.append(task)
 
-        await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                project_key = agent['project_keys'][i]
+                logger.error(f"Executor failed for {project_key}: {result}")
 
         # TODO: Check if finished successfully or part-fail
-        self.platform_client.complete_job_run(job_run.id)
+        await loop.run_in_executor(None, self.platform_client.complete_job_run, job_run.id)
 
 if __name__ == '__main__':
     LOCAL = settings.local
