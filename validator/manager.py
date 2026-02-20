@@ -1,5 +1,6 @@
 import asyncio
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 from python_on_whales import docker, Network
@@ -97,6 +98,9 @@ class SandboxManager:
             },
         )
         docker.network.connect(settings.proxy_network, settings.proxy_container)
+
+        # wait for proxy to start up
+        time.sleep(10)
 
     async def process_job_run(self, job_run):
         logger.info(f"[J:{job_run.job_id}|JR:{job_run.id}] Processing job run")

@@ -17,6 +17,7 @@ logger = get_logger()
 
 SANDBOX_CONTAINER_TMPL = "bitsec_sandbox_{job_run_id}_{project_key}"
 PROJECT_IMAGE_TAG_TMPL = "ghcr.io/bitsec-ai/{project_key}:latest"
+EVAL_MAX_VULNS = 100
 
 
 class AgentExecutor:
@@ -62,11 +63,11 @@ class AgentExecutor:
         """
         try:
             self.logger.info(f"Pulling latest image: {image_tag}")
-            docker.pull(image_tag)
+            docker.pull(image_tag, quiet=True)
             self.logger.info(f"Image {image_tag} is up-to-date")
         except DockerException as e:
             self.logger.warning(
-                f"Failed to pull image {image_tag}: {e}. "
+                f"Failed to pull image {image_tag} "
                 "Will attempt to use local image if available."
             )
 
@@ -274,6 +275,8 @@ class AgentExecutor:
             except AttributeError as e:
                 logger.error(f"Invalid report vulnerabilities ({e}): {report_data['report']}")
                 agent_findings = []
+
+            agent_findings = agent_findings[:EVAL_MAX_VULNS]
 
             self.logger.info(
                 f"Scoring {self.project_key}: {len(expected_findings)} expected vs {len(agent_findings)} found"

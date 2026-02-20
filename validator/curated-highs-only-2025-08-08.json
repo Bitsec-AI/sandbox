@@ -781,16 +781,14 @@
     ]
   },
   {
-    "project_id": "sherlock_20240913---final---perennial-v2-update-3-audit-report_2024_09",
+    "project_id": "sherlock_perennial_v2_update_3_2024_08",
     "name": "2024.09.13 - Final - Perennial V2 Update 3 Audit Report",
     "platform": "sherlock",
     "codebases": [
       {
         "codebase_id": "2024.09.13 - Final - Perennial V2 Update 3 Audit Report_90b1b5",
-        "repo_url": "https://github.com/equilibria-xyz/emptyset-mono",
-        "commit": "90b1b5e9422f7a06afadeb7d2d7bc00ca1cfd459",
-        "tree_url": "https://github.com/equilibria-xyz/emptyset-mono/tree/90b1b5e9422f7a06afadeb7d2d7bc00ca1cfd459",
-        "tarball_url": "https://github.com/equilibria-xyz/emptyset-mono/archive/90b1b5e9422f7a06afadeb7d2d7bc00ca1cfd459.tar.gz"
+        "repo_url": "https://github.com/sherlock-audit/2024-08-perennial-v2-update-3",
+        "commit": "main"
       }
     ],
     "vulnerabilities": [
@@ -901,10 +899,8 @@
     "codebases": [
       {
         "codebase_id": "Oku_9e31b4",
-        "repo_url": "https://github.com/gfx-labs/oku-custom-order-types",
-        "commit": "9e31b40",
-        "tree_url": "https://github.com/gfx-labs/oku-custom-order-types/tree/9e31b40",
-        "tarball_url": "https://github.com/gfx-labs/oku-custom-order-types/archive/9e31b40.tar.gz"
+        "repo_url": "https://github.com/sherlock-audit/2024-11-oku",
+        "commit": "main"
       }
     ],
     "vulnerabilities": [
@@ -1103,10 +1099,8 @@
     "codebases": [
       {
         "codebase_id": "AXION_9a9ada",
-        "repo_url": "https://github.com/AXION-MONEY/liquidity-amo",
-        "commit": "9a9adab905878a3a8c4fbe7c0851354185d8466a",
-        "tree_url": "https://github.com/AXION-MONEY/liquidity-amo/tree/9a9adab905878a3a8c4fbe7c0851354185d8466a",
-        "tarball_url": "https://github.com/AXION-MONEY/liquidity-amo/archive/9a9adab905878a3a8c4fbe7c0851354185d8466a.tar.gz"
+        "repo_url": "https://github.com/sherlock-audit/2024-10-axion",
+        "commit": "main"
       }
     ],
     "vulnerabilities": [
