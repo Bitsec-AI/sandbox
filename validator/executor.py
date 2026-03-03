@@ -171,10 +171,6 @@ class AgentExecutor:
             return None
 
     def submit_agent_evaluation(self, project_scoring_results):
-        if not self.agent_execution_id:
-            self.logger.info("Not running from agent execution. Skipping submit evaluation")
-            return None
-
         scoring_data = {}
         scoring_data["agent_execution_id"] = self.agent_execution_id
         scoring_data["status"] = project_scoring_results["status"]
@@ -198,6 +194,10 @@ class AgentExecutor:
             self.logger.info(f"Saved evaluation to {evaluation_path}")
         except Exception as e:
             self.logger.error(f"Failed to write evaluation file: {e}")
+
+        if not self.agent_execution_id:
+            self.logger.info("Not running from agent execution. Skipping submit evaluation")
+            return None
 
         agent_evaluation = AgentEvaluation.model_validate(scoring_data)
 

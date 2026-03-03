@@ -168,9 +168,12 @@ testing/
 
 .DS_Store
 
+# BitSec
 jobs/
 projects/
+reports/
 agent_report.json
+PROMPT.md
 
 # AI
 .claude/
