@@ -3,7 +3,11 @@ import json
 import time
 import requests
 from loggers.logger import get_logger
-from models import InferenceRequest, InferenceResponse
+
+try:
+    from .models import InferenceRequest, InferenceResponse
+except ImportError:
+    from models import InferenceRequest, InferenceResponse
 
 
 logger = get_logger()
@@ -42,10 +46,11 @@ def call_chutes(
         "Authorization": f"Bearer {api_key}",
         "X-Identifier": "Bitsec",
     }
-    payload_dict = request.model_dump()
+    payload_dict = request.model_dump(exclude={"json_response"})
     resp = None
 
-    payload_dict["response_format"] = {"type": "json_object"}
+    if request.json_response:
+        payload_dict["response_format"] = {"type": "json_object"}
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
@@ -99,7 +104,14 @@ def call_chutes(
         logger.exception(f"{msg}: {resp_json}")
         raise ChutesError(msg)
 
-    msg = resp_json["choices"][0]["message"]
+    choice = resp_json["choices"][0]
+    msg = choice["message"]
+    finish_reason = choice.get("finish_reason")
+
+    if request.json_response and finish_reason in ("length", "content_filter"):
+        err = f"Chutes error: response unusable (finish_reason={finish_reason}); increase max_tokens or review content policy"
+        logger.error(err)
+        raise ChutesError(err)
 
     cached_tokens = 0
     prompt_tokens_details = resp_json["usage"].get("prompt_tokens_details")
@@ -112,4 +124,7 @@ def call_chutes(
         input_tokens=resp_json["usage"]["prompt_tokens"],
         cached_tokens=cached_tokens,
         output_tokens=resp_json["usage"]["completion_tokens"],
+        model=resp_json.get("model"),
+        finish_reason=finish_reason,
+        chutes_id=resp_json.get("id"),
     )

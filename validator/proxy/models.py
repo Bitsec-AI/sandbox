@@ -18,6 +18,7 @@ class InferenceRequest(BaseModel):
     messages: list[Message]
     max_tokens: int = Field(default=4096)
     temperature: float = Field(default=0.2)
+    json_response: bool = Field(default=True)
 
 
 class InferenceResponse(BaseModel):
@@ -26,3 +27,6 @@ class InferenceResponse(BaseModel):
     input_tokens: int
     cached_tokens: int
     output_tokens: int
+    model: str | None = None
+    finish_reason: str | None = None
+    chutes_id: str | None = None

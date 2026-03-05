@@ -1,8 +1,21 @@
 import asyncio
+import sys
+from pathlib import Path
+
+# Ensure project root is on path when running from validator/proxy (e.g. uvicorn api:app)
+_root = Path(__file__).resolve().parents[2]
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))
+
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse
-from models import InferenceRequest, InferenceResponse
-from chutes_client import call_chutes, ChutesError
+
+try:
+    from .models import InferenceRequest, InferenceResponse
+    from .chutes_client import call_chutes, ChutesError
+except ImportError:
+    from models import InferenceRequest, InferenceResponse
+    from chutes_client import call_chutes, ChutesError
 
 
 app = FastAPI(title="Chutes Proxy")
