@@ -126,6 +126,7 @@ class ScaBenchScorerV2:
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt},
             ],
+            "response_format": {"type": "json_object"},
         }
 
         headers = {}
@@ -151,9 +152,10 @@ class ScaBenchScorerV2:
             raise
 
         resp_json = resp.json()
-        self.input_tokens += resp_json["input_tokens"]
-        self.cached_tokens += resp_json["cached_tokens"]
-        self.output_tokens += resp_json["output_tokens"]
+        usage = resp_json.get("usage", {})
+        self.input_tokens += usage.get("prompt_tokens", 0)
+        self.cached_tokens += usage.get("prompt_tokens_details", {}).get("cached_tokens", 0)
+        self.output_tokens += usage.get("completion_tokens", 0)
 
         return resp_json
 
@@ -372,7 +374,7 @@ class ScaBenchScorerV2:
                     system=system,
                 )
 
-                response_content = response["content"].strip()
+                response_content = (response["choices"][0]["message"].get("content") or "").strip()
 
                 result = self.clean_json_response(response_content)
 

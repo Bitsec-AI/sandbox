@@ -2,6 +2,7 @@ import os
 import json
 import time
 import requests
+from typing import Any
 from loggers.logger import get_logger
 
 try:
@@ -46,11 +47,13 @@ def call_chutes(
         "Authorization": f"Bearer {api_key}",
         "X-Identifier": "Bitsec",
     }
-    payload_dict = request.model_dump(exclude={"json_response"})
-    resp = None
+    payload_dict = request.model_dump()
 
-    if request.json_response:
+    # Default to JSON mode unless caller provided a valid response_format dict
+    if not isinstance(payload_dict.get("response_format"), dict):
         payload_dict["response_format"] = {"type": "json_object"}
+
+    resp = None
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
@@ -65,7 +68,6 @@ def call_chutes(
             break
 
         except requests.RequestException as e:
-            # No response object
             if resp is None:
                 msg = "Chutes error: no response received"
                 logger.exception(msg)
@@ -73,13 +75,11 @@ def call_chutes(
 
             status = resp.status_code
 
-            # Non-retriable HTTP status
             if status not in (502, 429):
                 msg = f"Chutes error: non-retriable failure (status {status})"
                 logger.exception(f"{msg}: {resp.text}")
                 raise ChutesError(msg) from e
 
-            # Retryable HTTP status but out of retries
             if attempt == MAX_RETRIES:
                 msg = f"Chutes error: retry limit reached (status {status})"
                 logger.exception(f"{msg}: {resp.text}")
@@ -104,27 +104,14 @@ def call_chutes(
         logger.exception(f"{msg}: {resp_json}")
         raise ChutesError(msg)
 
-    choice = resp_json["choices"][0]
-    msg = choice["message"]
-    finish_reason = choice.get("finish_reason")
+    # Guard: reject truncated/filtered responses when JSON format was requested
+    response_format = payload_dict.get("response_format", {})
+    is_json_mode = response_format.get("type") in ("json_object", "json_schema")
+    finish_reason = resp_json["choices"][0].get("finish_reason")
 
-    if request.json_response and finish_reason in ("length", "content_filter"):
+    if is_json_mode and finish_reason in ("length", "content_filter"):
         err = f"Chutes error: response unusable (finish_reason={finish_reason}); increase max_tokens or review content policy"
         logger.error(err)
         raise ChutesError(err)
 
-    cached_tokens = 0
-    prompt_tokens_details = resp_json["usage"].get("prompt_tokens_details")
-    if prompt_tokens_details:
-        cached_tokens = prompt_tokens_details.get("cached_tokens", 0)
-
-    return InferenceResponse(
-        content=msg["content"],
-        role=msg["role"],
-        input_tokens=resp_json["usage"]["prompt_tokens"],
-        cached_tokens=cached_tokens,
-        output_tokens=resp_json["usage"]["completion_tokens"],
-        model=resp_json.get("model"),
-        finish_reason=finish_reason,
-        chutes_id=resp_json.get("id"),
-    )
+    return InferenceResponse(**resp_json)

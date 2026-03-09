@@ -79,6 +79,7 @@ class BaselineRunner:
         payload = {
             "model": self.config['model'],
             "messages": messages,
+            "response_format": {"type": "json_object"},
         }
 
         headers = {
@@ -218,7 +219,7 @@ class BaselineRunner:
             ]
 
             response = self.inference(messages=messages)
-            response_content = response['content'].strip()
+            response_content = (response['choices'][0]['message'].get('content') or '').strip()
 
             msg_json = self.clean_json_response(response_content)
 
@@ -231,8 +232,9 @@ class BaselineRunner:
             else:
                 console.print("[yellow]  → No vulnerabilities found[/yellow]")
 
-            input_tokens = response.get('input_tokens', 0)
-            output_tokens = response.get('output_tokens', 0)
+            usage = response.get('usage', {})
+            input_tokens = usage.get('prompt_tokens', 0)
+            output_tokens = usage.get('completion_tokens', 0)
 
             return vulnerabilities, input_tokens, output_tokens
             
