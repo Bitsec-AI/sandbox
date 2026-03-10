@@ -45,7 +45,9 @@ def call_chutes(
     payload_dict = request.model_dump()
     resp = None
 
-    payload_dict["response_format"] = {"type": "json_object"}
+    # Only set JSON response format if not using tools
+    if not request.tools:
+        payload_dict["response_format"] = {"type": "json_object"}
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
@@ -106,10 +108,14 @@ def call_chutes(
     if prompt_tokens_details:
         cached_tokens = prompt_tokens_details.get("cached_tokens", 0)
 
+    # Handle tool calls in response
+    tool_calls = msg.get("tool_calls")
+
     return InferenceResponse(
-        content=msg["content"],
+        content=msg.get("content"),
         role=msg["role"],
         input_tokens=resp_json["usage"]["prompt_tokens"],
         cached_tokens=cached_tokens,
         output_tokens=resp_json["usage"]["completion_tokens"],
+        tool_calls=tool_calls,
     )

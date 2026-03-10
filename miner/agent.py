@@ -13,7 +13,6 @@ from typing import Any
 from textwrap import dedent
 
 
-from langchain.output_parsers import PydanticOutputParser
 from pydantic import BaseModel
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeRemainingColumn
@@ -21,6 +20,7 @@ from rich.panel import Panel
 
 
 MAX_WORKERS = 4
+MAX_TURNS = 10  # Maximum number of tool use turns
 
 console = Console()
 
@@ -65,6 +65,62 @@ class AnalysisResult(BaseModel):
     token_usage: dict[str, int]
 
 
+# Tool definition for reporting vulnerabilities
+REPORT_VULNERABILITY_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "report_vulnerability",
+        "description": "Report a security vulnerability found in the code. Call this tool for each vulnerability you identify.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "A clear, concise title describing the vulnerability"
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Detailed description including what the vulnerability is, where it occurs (function name, line references), why it's a security issue, and potential impact"
+                },
+                "vulnerability_type": {
+                    "type": "string",
+                    "description": "The type of vulnerability (e.g., reentrancy, access control, integer overflow, unchecked call, etc.)"
+                },
+                "severity": {
+                    "type": "string",
+                    "enum": ["critical", "high", "medium", "low"],
+                    "description": "Severity level of the vulnerability"
+                },
+                "confidence": {
+                    "type": "number",
+                    "minimum": 0.0,
+                    "maximum": 1.0,
+                    "description": "Confidence level from 0.0 to 1.0"
+                },
+                "location": {
+                    "type": "string",
+                    "description": "Specific location in the code (e.g., function name, line numbers)"
+                }
+            },
+            "required": ["title", "description", "vulnerability_type", "severity", "confidence", "location"]
+        }
+    }
+}
+
+FINISH_ANALYSIS_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "finish_analysis",
+        "description": "Signal that you have completed analyzing the code and reported all vulnerabilities. Call this when you have no more vulnerabilities to report.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    }
+}
+
+
 class BaselineRunner:
     def __init__(self, config: dict[str, Any] | None = None, inference_api: str = None):
         self.config = config or {}
@@ -75,11 +131,25 @@ class BaselineRunner:
 
         console.print(f"Inference: {self.inference_api}")
 
-    def inference(self, messages: dict[str, Any]) -> dict[str, Any]:
+    def inference(self, messages: list[dict[str, Any]], tools: list[dict] | None = None) -> dict[str, Any]:
+        """Make an inference request to the proxy.
+        
+        Args:
+            messages: List of message dictionaries with role and content
+            tools: Optional list of tool definitions for tool use
+            
+        Returns:
+            Response dictionary from the proxy
+        """
         payload = {
             "model": self.config['model'],
             "messages": messages,
         }
+        
+        # Add tools if provided (for tool use mode)
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
 
         headers = {
             "x_project_id": self.project_id or "local",
