@@ -13,7 +13,6 @@ from typing import Any
 from textwrap import dedent
 
 
-from langchain.output_parsers import PydanticOutputParser
 from pydantic import BaseModel
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeRemainingColumn
@@ -21,8 +20,75 @@ from rich.panel import Panel
 
 
 MAX_WORKERS = 4
+MAX_TOOL_TURNS = 10
 
 console = Console()
+
+TOOL_DEFINITIONS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "list_files",
+            "description": "List files in a directory. Returns file paths relative to the project root.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "directory": {
+                        "type": "string",
+                        "description": "Directory path relative to project root. Use '.' for the root directory."
+                    }
+                },
+                "required": ["directory"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_file",
+            "description": "Read the contents of a file.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "File path relative to the project root."
+                    }
+                },
+                "required": ["file_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "report_vulnerabilities",
+            "description": "Report security vulnerabilities found in the project. Call this when you have completed your analysis.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "vulnerabilities": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "title": {"type": "string", "description": "Short title of the vulnerability"},
+                                "description": {"type": "string", "description": "Detailed description of the vulnerability and its impact"},
+                                "vulnerability_type": {"type": "string", "description": "Category (e.g., reentrancy, overflow, access-control)"},
+                                "severity": {"type": "string", "enum": ["critical", "high", "medium", "low"]},
+                                "confidence": {"type": "number", "description": "Confidence score 0.0-1.0"},
+                                "location": {"type": "string", "description": "Specific location (e.g., function name, line range)"},
+                                "file": {"type": "string", "description": "File path where the vulnerability was found"}
+                            },
+                            "required": ["title", "description", "vulnerability_type", "severity", "confidence", "location", "file"]
+                        }
+                    }
+                },
+                "required": ["vulnerabilities"]
+            }
+        }
+    }
+]
 
 
 class Severity(str, Enum):
@@ -75,12 +141,15 @@ class BaselineRunner:
 
         console.print(f"Inference: {self.inference_api}")
 
-    def inference(self, messages: dict[str, Any]) -> dict[str, Any]:
+    def inference(self, messages: list[dict[str, Any]], **kwargs) -> dict[str, Any]:
         payload = {
             "model": self.config['model'],
             "messages": messages,
             "response_format": {"type": "json_object"},
         }
+
+        # Allow callers to override/add fields (tools, tool_choice, response_format)
+        payload.update(kwargs)
 
         headers = {
             "x_project_id": self.project_id or "local",
@@ -149,6 +218,133 @@ class BaselineRunner:
 
         return resp_json
 
+    def _execute_tool_call(self, tool_call: dict, source_dir: Path) -> str:
+        """Execute a tool call and return the result as a string."""
+        name = tool_call["function"]["name"]
+        args = json.loads(tool_call["function"]["arguments"])
+
+        if name == "list_files":
+            return self._tool_list_files(source_dir, args["directory"])
+        elif name == "read_file":
+            return self._tool_read_file(source_dir, args["file_path"])
+        elif name == "report_vulnerabilities":
+            return json.dumps(args)
+        else:
+            return json.dumps({"error": f"Unknown tool: {name}"})
+
+    def _tool_list_files(self, source_dir: Path, directory: str) -> str:
+        """List files in directory, scoped to project root."""
+        root = source_dir.resolve()
+        target = (source_dir / directory).resolve()
+        if not str(target).startswith(str(root)):
+            return json.dumps({"error": "Access denied: path outside project"})
+        if not target.is_dir():
+            return json.dumps({"error": f"Not a directory: {directory}"})
+        files = []
+        for item in sorted(target.iterdir()):
+            rel = str(item.resolve().relative_to(root))
+            files.append(rel + ("/" if item.is_dir() else ""))
+        return json.dumps({"files": files})
+
+    def _tool_read_file(self, source_dir: Path, file_path: str) -> str:
+        """Read file contents, scoped to project root."""
+        root = source_dir.resolve()
+        target = (source_dir / file_path).resolve()
+        if not str(target).startswith(str(root)):
+            return json.dumps({"error": "Access denied: path outside project"})
+        if not target.is_file():
+            return json.dumps({"error": f"Not a file: {file_path}"})
+        try:
+            content = target.read_text(encoding="utf-8")
+            return content
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def analyze_project_with_tools(self, source_dir: Path, project_name: str) -> AnalysisResult:
+        """Analyze a project using multi-turn tool use."""
+        system_prompt = dedent("""\
+            You are a senior smart contract security auditor. You have access to tools to explore a project directory and read source files. Your job is to:
+
+            1. List files in the project to understand its structure
+            2. Read relevant source files (focus on .sol, .vy, .cairo, .rs, .move files, skip tests/mocks)
+            3. Analyze the code for security vulnerabilities
+            4. Report your findings using the report_vulnerabilities tool
+
+            Be thorough but focused. Look for common vulnerability patterns like reentrancy, access control issues, integer overflow, and logic errors.
+        """)
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"Analyze the smart contract project in the root directory '.'. The project is: {project_name}"},
+        ]
+
+        all_vulnerabilities = []
+        total_input_tokens = 0
+        total_output_tokens = 0
+        reported = False
+
+        for turn in range(MAX_TOOL_TURNS):
+            response = self.inference(
+                messages=messages,
+                tools=TOOL_DEFINITIONS,
+                tool_choice="auto",
+                response_format={"type": "text"},
+            )
+
+            usage = response.get("usage", {})
+            total_input_tokens += usage.get("prompt_tokens", 0)
+            total_output_tokens += usage.get("completion_tokens", 0)
+
+            message = response["choices"][0]["message"]
+            tool_calls = message.get("tool_calls")
+
+            if not tool_calls:
+                break
+
+            # Append assistant message (with tool_calls) to conversation
+            messages.append(message)
+
+            # Execute each tool call and append results
+            for tc in tool_calls:
+                result_str = self._execute_tool_call(tc, source_dir)
+
+                if tc["function"]["name"] == "report_vulnerabilities":
+                    reported = True
+                    try:
+                        args = json.loads(tc["function"]["arguments"])
+                        for v_data in args.get("vulnerabilities", []):
+                            v_data["reported_by_model"] = self.config["model"]
+                            v = Vulnerability(**v_data)
+                            all_vulnerabilities.append(v)
+                    except Exception as e:
+                        console.print(f"[red]Error parsing report_vulnerabilities: {e}[/red]")
+
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc["id"],
+                    "content": result_str,
+                })
+
+            if reported:
+                break
+
+        # Deduplicate
+        unique = {v.id: v for v in all_vulnerabilities}
+        vulns = list(unique.values())
+
+        return AnalysisResult(
+            project=project_name,
+            timestamp=datetime.now().isoformat(),
+            files_analyzed=0,
+            files_skipped=0,
+            total_vulnerabilities=len(vulns),
+            vulnerabilities=vulns,
+            token_usage={
+                "total_input": total_input_tokens,
+                "total_output": total_output_tokens,
+            },
+        )
+
     def analyze_file(self, relative_path: str, content: str) -> tuple[Vulnerabilities, int, int]:
         """Analyze a single file for security vulnerabilities.
         
@@ -159,6 +355,7 @@ class BaselineRunner:
 
         console.print(f"[dim]  → Analyzing {relative_path} ({len(content)} bytes)[/dim]")
 
+        from langchain_core.output_parsers import PydanticOutputParser
         parser = PydanticOutputParser(pydantic_object=Vulnerabilities)
         format_instructions = parser.get_format_instructions()
 
@@ -448,7 +645,7 @@ def agent_main(project_dir: str = None, inference_api: str = None):
             console.print(f"[red]Error: Invalid source directory: {project_dir}[/red]")
             sys.exit(1)
         
-        result = runner.analyze_project(
+        result = runner.analyze_project_with_tools(
             source_dir=source_dir,
             project_name=project_dir,
         )
