@@ -19,10 +19,17 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeRe
 from rich.panel import Panel
 
 
-MAX_WORKERS = 4
+MAX_WORKERS = 2
 MAX_TOOL_TURNS = 25
 
 console = Console()
+
+REASONING_MODELS = {
+    "deepseek-ai/DeepSeek-R1-0528",
+    "deepseek-ai/DeepSeek-R1-0528-TEE",
+    "tngtech/DeepSeek-TNG-R1T2-Chimera-TEE",
+}
+JSON_MODEL = "deepseek-ai/DeepSeek-V3.1-Terminus"
 
 TOOL_DEFINITIONS = [
     {
@@ -365,94 +372,149 @@ class BaselineRunner:
 
     def analyze_file(self, relative_path: str, content: str) -> tuple[Vulnerabilities, int, int]:
         """Analyze a single file for security vulnerabilities.
-        
+
+        For reasoning models (R1): two-step approach — R1 reasons in text mode (user-only),
+        then V3 converts analysis to structured JSON (system+user).
+        For non-reasoning models: single call with system+user and json_object mode.
+
         Returns:
             Tuple of (vulnerabilities, input_tokens, output_tokens)
         """
         file_path = Path(relative_path)
+        is_reasoning = self.config['model'] in REASONING_MODELS
 
-        console.print(f"[dim]  → Analyzing {relative_path} ({len(content)} bytes)[/dim]")
+        console.print(f"[dim]  -> Analyzing {relative_path} ({len(content)} bytes)[/dim]")
 
-        from langchain_core.output_parsers import PydanticOutputParser
-        parser = PydanticOutputParser(pydantic_object=Vulnerabilities)
-        format_instructions = parser.get_format_instructions()
-
-        system_prompt = dedent(f"""
-            You are a security auditor analyzing smart contract code for vulnerabilities.
-
-            Analyze the provided code file and identify security vulnerabilities. For each vulnerability found, provide:
-
-            1. A clear title describing the issue
-            2. A detailed description including:
-               - What the vulnerability is
-               - Where it occurs (function name, line references)
-               - Why it's a security issue
-               - Potential impact
-            3. The vulnerability type (e.g., reentrancy, access control, integer overflow, etc.)
-            4. Severity level (critical, high, medium, low)
-            5. Confidence level (0.0 to 1.0)
-
-            Focus on REAL security issues that could lead to:
-            - Loss of funds
-            - Unauthorized access
-            - Denial of service
-            - Data corruption
-            - Privilege escalation
-            - Protocol manipulation
-
-            DO NOT report:
-            - Code quality issues without security impact
-            - Gas optimization suggestions unless they prevent DoS
-            - Style or naming convention issues
-            - Missing comments or documentation
-            - Theoretical issues without practical exploit paths
-
-            IMPORTANT: Your response must be ONLY the raw valid JSON object, without any markdown formatting, comments, or other text.
-
-            Do not add any explanations or markdown formatting (e.g., ```json) to the output.
-
-            {format_instructions}
-
-            IMPORTANT: Begin your response with `{{"vulnerabilities":`
-        """)
-
-        user_prompt = dedent(f"""
-            Analyze this {file_path.suffix} file for security vulnerabilities:
-
-            File: {relative_path}
-            ```{file_path.suffix[1:] if file_path.suffix else 'txt'}
-            {content}
-            ```
-
-            Identify and report security vulnerabilities found.
-        """)
+        total_input_tokens = 0
+        total_output_tokens = 0
 
         try:
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ]
+            if is_reasoning:
+                # Step 1: R1 reasoning analysis (text mode, user-only — R1 has no system role)
+                analysis_prompt = dedent(f"""\
+                    You are a senior smart contract security auditor. Analyze this code file for security vulnerabilities.
 
-            response = self.inference(messages=messages)
-            response_content = (response['choices'][0]['message'].get('content') or '').strip()
+                    File: {relative_path}
+                    ```{file_path.suffix[1:] if file_path.suffix else 'txt'}
+                    {content}
+                    ```
+
+                    Focus on REAL security issues: loss of funds, unauthorized access, denial of service, privilege escalation, protocol manipulation.
+                    DO NOT report: code quality issues, gas optimizations, style issues, missing comments, theoretical issues without practical exploit paths.
+
+                    For each vulnerability found, describe: title, what it is, where it occurs (function/line), why it's a security issue, impact, type, severity (critical/high/medium/low), and confidence (0.0-1.0).
+                """)
+
+                response = None
+                for attempt in range(5):
+                    try:
+                        response = self.inference(
+                            messages=[{"role": "user", "content": analysis_prompt}],
+                            response_format={"type": "text"},
+                        )
+                        break
+                    except (requests.exceptions.HTTPError, requests.exceptions.ConnectionError) as e:
+                        if attempt < 4:
+                            wait = 3 * (attempt + 1)
+                            console.print(f"[yellow]  -> Retry {attempt+1}/4 for R1 step on {relative_path} (wait {wait}s)[/yellow]")
+                            time.sleep(wait)
+                        else:
+                            raise
+
+                if response is None:
+                    raise RuntimeError(f"R1 analysis failed after retries for {relative_path}")
+
+                usage = response.get("usage", {})
+                total_input_tokens += usage.get("prompt_tokens", 0)
+                total_output_tokens += usage.get("completion_tokens", 0)
+
+                reasoning_tokens = usage.get("reasoning_tokens", 0)
+                if reasoning_tokens:
+                    console.print(f"[dim]  -> Reasoning tokens: {reasoning_tokens}[/dim]")
+
+                analysis_text = (response["choices"][0]["message"].get("content") or "").strip()
+
+                # Step 2: V3 JSON structuring (json mode, system+user) — retry on 502
+                json_system = dedent("""\
+                    Convert the security audit analysis into a JSON object. Extract every vulnerability mentioned.
+                    Respond with ONLY a JSON object: {"vulnerabilities": [{"title": "...", "description": "...", "vulnerability_type": "...", "severity": "critical|high|medium|low", "confidence": 0.0-1.0, "location": "...", "file": "..."}]}
+                    If no vulnerabilities were found, respond with: {"vulnerabilities": []}
+                """)
+
+                json_user = f"Analysis of {relative_path}:\n\n{analysis_text}"
+
+                json_response = None
+                for attempt in range(5):
+                    try:
+                        json_response = self.inference(
+                            messages=[
+                                {"role": "system", "content": json_system},
+                                {"role": "user", "content": json_user},
+                            ],
+                            model=JSON_MODEL,
+                        )
+                        break
+                    except (requests.exceptions.HTTPError, requests.exceptions.ConnectionError) as e:
+                        if attempt < 4:
+                            wait = 3 * (attempt + 1)
+                            console.print(f"[yellow]  -> Retry {attempt+1}/4 for JSON step on {relative_path} (wait {wait}s)[/yellow]")
+                            time.sleep(wait)
+                        else:
+                            raise
+
+                if json_response is None:
+                    raise RuntimeError(f"JSON structuring failed after retries for {relative_path}")
+
+                usage2 = json_response.get("usage", {})
+                total_input_tokens += usage2.get("prompt_tokens", 0)
+                total_output_tokens += usage2.get("completion_tokens", 0)
+
+                response_content = (json_response["choices"][0]["message"].get("content") or "").strip()
+
+            else:
+                # Non-reasoning: single call with system+user, json mode
+                system_prompt = dedent(f"""\
+                    You are a security auditor analyzing smart contract code for vulnerabilities.
+                    Focus on REAL security issues: loss of funds, unauthorized access, denial of service, privilege escalation, protocol manipulation.
+                    DO NOT report: code quality issues, gas optimizations, style issues, missing comments, theoretical issues without practical exploit paths.
+                    Respond with ONLY a JSON object: {{"vulnerabilities": [{{"title": "...", "description": "...", "vulnerability_type": "...", "severity": "critical|high|medium|low", "confidence": 0.0-1.0, "location": "...", "file": "..."}}]}}
+                    If no vulnerabilities are found, respond with: {{"vulnerabilities": []}}
+                """)
+
+                user_prompt = dedent(f"""\
+                    Analyze this file for security vulnerabilities:
+
+                    File: {relative_path}
+                    ```{file_path.suffix[1:] if file_path.suffix else 'txt'}
+                    {content}
+                    ```
+                """)
+
+                response = self.inference(
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                )
+
+                usage = response.get("usage", {})
+                total_input_tokens += usage.get("prompt_tokens", 0)
+                total_output_tokens += usage.get("completion_tokens", 0)
+
+                response_content = (response["choices"][0]["message"].get("content") or "").strip()
 
             msg_json = self.clean_json_response(response_content)
-
             vulnerabilities = Vulnerabilities(**msg_json)
             for v in vulnerabilities.vulnerabilities:
-                v.reported_by_model = self.config['model']
+                v.reported_by_model = self.config["model"]
 
-            if vulnerabilities:
-                console.print(f"[green]  → Found {len(vulnerabilities.vulnerabilities)} vulnerabilities[/green]")
+            if vulnerabilities.vulnerabilities:
+                console.print(f"[green]  -> Found {len(vulnerabilities.vulnerabilities)} vulnerabilities[/green]")
             else:
-                console.print("[yellow]  → No vulnerabilities found[/yellow]")
+                console.print("[yellow]  -> No vulnerabilities found[/yellow]")
 
-            usage = response.get('usage', {})
-            input_tokens = usage.get('prompt_tokens', 0)
-            output_tokens = usage.get('completion_tokens', 0)
+            return vulnerabilities, total_input_tokens, total_output_tokens
 
-            return vulnerabilities, input_tokens, output_tokens
-            
         except Exception as e:
             console.print(f"[red]Error analyzing {file_path.name}: {e}[/red]")
             return Vulnerabilities(vulnerabilities=[]), 0, 0
@@ -512,11 +574,11 @@ class BaselineRunner:
                 files.extend(source_dir.glob(pattern))
         
         # Remove duplicates and filter
-        exclude_dirs = {"testing", "mocks", "examples"}
+        exclude_dirs = {"testing", "mocks", "examples", "interfaces", "script", "broadcast", "libraries"}
         files = set(files)
         files = [
-            f for f 
-            in files 
+            f for f
+            in files
             if f.is_file() and 'test' not in f.name.lower()
             and not any(part.lower() in exclude_dirs for part in f.parts)
         ]
@@ -643,15 +705,18 @@ class BaselineRunner:
 
 def agent_main(project_dir: str = None, inference_api: str = None):
     config = {
-        'model': "deepseek-ai/DeepSeek-V3.1-Terminus"
+        'model': "tngtech/DeepSeek-TNG-R1T2-Chimera-TEE",
     }
 
     if not project_dir:
         project_dir = "/app/project_code"
 
+    is_reasoning = config['model'] in REASONING_MODELS
+
     console.print(Panel.fit(
         "[bold cyan]SCABENCH BASELINE RUNNER[/bold cyan]\n"
-        f"[dim]Model: {config['model']}[/dim]\n",
+        f"[dim]Model: {config['model']}[/dim]\n"
+        f"[dim]Mode: {'reasoning (file-by-file)' if is_reasoning else 'tool-use'}[/dim]\n",
         border_style="cyan"
     ))
 
@@ -662,11 +727,17 @@ def agent_main(project_dir: str = None, inference_api: str = None):
         if not source_dir or not source_dir.exists() or not source_dir.is_dir():
             console.print(f"[red]Error: Invalid source directory: {project_dir}[/red]")
             sys.exit(1)
-        
-        result = runner.analyze_project_with_tools(
-            source_dir=source_dir,
-            project_name=project_dir,
-        )
+
+        if is_reasoning:
+            result = runner.analyze_project(
+                source_dir=source_dir,
+                project_name=project_dir,
+            )
+        else:
+            result = runner.analyze_project_with_tools(
+                source_dir=source_dir,
+                project_name=project_dir,
+            )
         
         output_file = runner.save_result(result)
         
