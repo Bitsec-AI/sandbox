@@ -20,7 +20,7 @@ from rich.panel import Panel
 
 
 MAX_WORKERS = 4
-MAX_TOOL_TURNS = 10
+MAX_TOOL_TURNS = 25
 
 console = Console()
 
@@ -281,13 +281,24 @@ class BaselineRunner:
         all_vulnerabilities = []
         total_input_tokens = 0
         total_output_tokens = 0
+        files_analyzed = set()
         reported = False
 
         for turn in range(MAX_TOOL_TURNS):
+            # Force reporting on the last turn
+            if turn == MAX_TOOL_TURNS - 1 and not reported:
+                messages.append({
+                    "role": "user",
+                    "content": "You are running out of turns. Call report_vulnerabilities NOW with all vulnerabilities you have found so far.",
+                })
+                tool_choice = {"type": "function", "function": {"name": "report_vulnerabilities"}}
+            else:
+                tool_choice = "auto"
+
             response = self.inference(
                 messages=messages,
                 tools=TOOL_DEFINITIONS,
-                tool_choice="auto",
+                tool_choice=tool_choice,
                 response_format={"type": "text"},
             )
 
@@ -307,6 +318,13 @@ class BaselineRunner:
             # Execute each tool call and append results
             for tc in tool_calls:
                 result_str = self._execute_tool_call(tc, source_dir)
+
+                if tc["function"]["name"] == "read_file":
+                    try:
+                        args = json.loads(tc["function"]["arguments"])
+                        files_analyzed.add(args.get("file_path", ""))
+                    except Exception:
+                        pass
 
                 if tc["function"]["name"] == "report_vulnerabilities":
                     reported = True
@@ -335,7 +353,7 @@ class BaselineRunner:
         return AnalysisResult(
             project=project_name,
             timestamp=datetime.now().isoformat(),
-            files_analyzed=0,
+            files_analyzed=len(files_analyzed),
             files_skipped=0,
             total_vulnerabilities=len(vulns),
             vulnerabilities=vulns,

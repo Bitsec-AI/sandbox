@@ -3,9 +3,12 @@ import sys
 from pathlib import Path
 
 # Ensure project root is on path when running from validator/proxy (e.g. uvicorn api:app)
-_root = Path(__file__).resolve().parents[2]
-if str(_root) not in sys.path:
-    sys.path.insert(0, str(_root))
+try:
+    _root = Path(__file__).resolve().parents[2]
+    if str(_root) not in sys.path:
+        sys.path.insert(0, str(_root))
+except IndexError:
+    pass
 
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse
