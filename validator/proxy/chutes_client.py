@@ -114,4 +114,16 @@ def call_chutes(
         logger.error(err)
         raise ChutesError(err)
 
-    return InferenceResponse(**resp_json)
+    msg = resp_json["choices"][0].get("message", {})
+    usage = resp_json.get("usage", {})
+    cached_tokens = (usage.get("prompt_tokens_details") or {}).get("cached_tokens", 0)
+
+    return InferenceResponse(
+        **resp_json,
+        content=msg.get("content"),
+        role=msg.get("role", "assistant"),
+        tool_calls=msg.get("tool_calls"),
+        input_tokens=usage.get("prompt_tokens", 0),
+        cached_tokens=cached_tokens,
+        output_tokens=usage.get("completion_tokens", 0),
+    )
