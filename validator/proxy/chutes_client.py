@@ -69,9 +69,16 @@ def call_chutes(
 
         except requests.RequestException as e:
             if resp is None:
-                msg = "Chutes error: no response received"
-                logger.exception(msg)
-                raise ChutesError(msg) from e
+                # ConnectionError / timeout — no HTTP response, but still retryable
+                if attempt == MAX_RETRIES:
+                    msg = "Chutes error: no response received after retries"
+                    logger.exception(msg)
+                    raise ChutesError(msg) from e
+
+                sleep_time = BACKOFF_FACTOR * (2 ** (attempt - 1))
+                logger.warning(f"Connection error, retrying in {sleep_time:.1f}s... ({e.__class__.__name__})")
+                time.sleep(sleep_time)
+                continue
 
             status = resp.status_code
 
