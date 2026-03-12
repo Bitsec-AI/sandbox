@@ -25,8 +25,6 @@ MAX_TOOL_TURNS = 25
 console = Console()
 
 REASONING_MODELS = {
-    "deepseek-ai/DeepSeek-R1-0528",
-    "deepseek-ai/DeepSeek-R1-0528-TEE",
     "tngtech/DeepSeek-TNG-R1T2-Chimera-TEE",
 }
 JSON_MODEL = "deepseek-ai/DeepSeek-V3.1-Terminus"
@@ -705,7 +703,8 @@ class BaselineRunner:
 
 def agent_main(project_dir: str = None, inference_api: str = None):
     config = {
-        'model': "tngtech/DeepSeek-TNG-R1T2-Chimera-TEE",
+        'model': "tngtech/DeepSeek-TNG-R1T2-Chimera-TEE", # reasoning model
+        # 'model': 'deepseek-ai/DeepSeek-V3.1-Terminus', # tool use model
     }
 
     if not project_dir:
