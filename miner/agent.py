@@ -72,6 +72,7 @@ class BaselineRunner:
         self.inference_api = inference_api or os.getenv('INFERENCE_API', "http://bitsec_proxy:8000")
         self.project_id = os.getenv('PROJECT_ID', "local")
         self.job_id = os.getenv('JOB_ID', "local")
+        self.chutes_api_key = os.getenv('CHUTES_API_KEY')
 
         console.print(f"Inference: {self.inference_api}")
 
@@ -84,6 +85,7 @@ class BaselineRunner:
         headers = {
             "x_project_id": self.project_id or "local",
             "x_job_id": self.job_id,
+            "x-chutes-api-key": self.chutes_api_key,
         }
 
         resp = None

@@ -28,12 +28,14 @@ class AgentExecutor:
         project_key,
         job_run_reports_dir,
         platform_client,
+        chutes_api_key=None,
     ):
         self.job_run = job_run
         self.agent_filepath = agent_filepath
         self.project_key = project_key
         self.job_run_reports_dir = job_run_reports_dir
         self.platform_client = platform_client
+        self.chutes_api_key = chutes_api_key
 
         self.project_report_dir = os.path.join(self.job_run_reports_dir, f"{self.project_key}")
         os.makedirs(self.project_report_dir, exist_ok=True)
@@ -106,6 +108,7 @@ class AgentExecutor:
             envs={
                 "JOB_RUN_ID": self.job_run.id,
                 "PROJECT_KEY": self.project_key,
+                "CHUTES_API_KEY": self.chutes_api_key,
             },
             # read_only=True,
             memory="512m",
@@ -245,7 +248,7 @@ class AgentExecutor:
             return {"status": Status.ERROR, "error": "no benchmark data for project"}
 
         scorer_config = {
-            "api_key": settings.chutes_api_key,
+            "api_key": self.chutes_api_key,
             "api_url": settings.proxy_url,
             "debug": True,
             "verbose": True,
