@@ -222,6 +222,10 @@ class AgentExecutor:
         """
         self.logger.info("Starting evaluation")
 
+        if not settings.chutes_api_key:
+            self.logger.error("Validator CHUTES_API_KEY not set. Cannot run evaluation.")
+            return {"status": Status.ERROR, "error": "validator chutes_api_key not configured"}
+
         report_file = Path(self.job_run_reports_dir) / self.project_key / "report.json"
 
         if not report_file.exists():
@@ -248,7 +252,7 @@ class AgentExecutor:
             return {"status": Status.ERROR, "error": "no benchmark data for project"}
 
         scorer_config = {
-            "api_key": self.chutes_api_key,
+            "api_key": settings.chutes_api_key,
             "api_url": settings.proxy_url,
             "debug": True,
             "verbose": True,
