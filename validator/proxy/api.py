@@ -47,12 +47,13 @@ _sem = asyncio.Semaphore(INFER_CONCURRENCY)
 @app.post("/inference", response_model=InferenceResponse)
 async def inference(
     request: InferenceRequest,
+    x_chutes_api_key: str = Header(),
     x_job_id: str = Header(default="unknown"),
     x_project_id: str = Header(default="unknown"),
 ):
     try:
         async with _sem:
             # Run the blocking call_chutes function in a thread pool to allow parallel requests
-            return await asyncio.to_thread(call_chutes, request, x_job_id, x_project_id)
+            return await asyncio.to_thread(call_chutes, request, x_job_id, x_project_id, x_chutes_api_key)
     except ChutesError as e:
         raise HTTPException(status_code=502, detail=str(e))

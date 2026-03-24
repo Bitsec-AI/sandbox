@@ -74,14 +74,17 @@ def miner_create(
     create_user(email=email, name=name, client=client, is_miner=True)
 
 @miner_app.command("submit")
-def miner_submit(wallet: str | None = Option(None, help="Bittensor wallet name")):
+def miner_submit(
+    chutes_api_key: str = Option(..., prompt="Chutes API key", hide_input=True, help="Your Chutes API key (will be sent to the platform)"),
+    wallet: str | None = Option(None, help="Bittensor wallet name"),
+):
     """Submit the miner agent code to the platform."""
     agent_path = Path("miner/agent.py")
     if not agent_path.exists():
         raise FileNotFoundError(agent_path)
 
     code_str = agent_path.read_text(encoding="utf-8")
-    agent_code = AgentCode(code=code_str)
+    agent_code = AgentCode(code=code_str, chutes_api_key=chutes_api_key)
 
     client = get_platform_client(wallet)
     agent = client.submit_agent(agent_code)

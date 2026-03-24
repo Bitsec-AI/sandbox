@@ -1,4 +1,3 @@
-import os
 import json
 import time
 import requests
@@ -17,8 +16,6 @@ logger = get_logger()
 class ChutesError(Exception):
     pass
 
-
-CHUTES_API_KEY = os.getenv("CHUTES_API_KEY")
 
 CHUTES_API_URL = "https://llm.chutes.ai/v1/chat/completions"
 DEFAULT_MODEL = "unsloth/gemma-3-12b-it"
@@ -41,7 +38,7 @@ def call_chutes(
     logger.info(f'Request from [J:{job_id}|P:{project_key}] | model="{request.model}"')
 
     if not api_key:
-        api_key = CHUTES_API_KEY
+        raise ChutesError("CHUTES_API_KEY is required. Pass x-chutes-api-key header.")
 
     headers = {
         "Authorization": f"Bearer {api_key}",

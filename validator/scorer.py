@@ -75,8 +75,7 @@ class ScaBenchScorerV2:
         self.api_url = self.config.get("api_url")
         self.api_key = self.config.get("api_key")
         if not self.api_key:
-            console.print("[red]Error: Chutes API key is required for validation! [/red]")
-            raise
+            raise ValueError("Chutes API key is required for validation.")
 
         self.debug = self.config.get("debug", False)
         self.verbose = self.config.get("verbose", False)
@@ -129,7 +128,9 @@ class ScaBenchScorerV2:
             "response_format": {"type": "json_object"},
         }
 
-        headers = {}
+        headers = {
+            "x-chutes-api-key": self.api_key,
+        }
 
         resp = None
 
