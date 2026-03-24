@@ -1,8 +1,13 @@
 import json
 import time
 import requests
+from typing import Any
 from loggers.logger import get_logger
-from models import InferenceRequest, InferenceResponse
+
+try:
+    from .models import InferenceRequest, InferenceResponse
+except ImportError:
+    from models import InferenceRequest, InferenceResponse
 
 
 logger = get_logger()
@@ -40,9 +45,12 @@ def call_chutes(
         "X-Identifier": "Bitsec",
     }
     payload_dict = request.model_dump()
-    resp = None
 
-    payload_dict["response_format"] = {"type": "json_object"}
+    # Default to JSON mode unless caller provided a valid response_format dict
+    if not isinstance(payload_dict.get("response_format"), dict):
+        payload_dict["response_format"] = {"type": "json_object"}
+
+    resp = None
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
@@ -57,21 +65,25 @@ def call_chutes(
             break
 
         except requests.RequestException as e:
-            # No response object
             if resp is None:
-                msg = "Chutes error: no response received"
-                logger.exception(msg)
-                raise ChutesError(msg) from e
+                # ConnectionError / timeout — no HTTP response, but still retryable
+                if attempt == MAX_RETRIES:
+                    msg = "Chutes error: no response received after retries"
+                    logger.exception(msg)
+                    raise ChutesError(msg) from e
+
+                sleep_time = BACKOFF_FACTOR * (2 ** (attempt - 1))
+                logger.warning(f"Connection error, retrying in {sleep_time:.1f}s... ({e.__class__.__name__})")
+                time.sleep(sleep_time)
+                continue
 
             status = resp.status_code
 
-            # Non-retriable HTTP status
             if status not in (502, 429):
                 msg = f"Chutes error: non-retriable failure (status {status})"
                 logger.exception(f"{msg}: {resp.text}")
                 raise ChutesError(msg) from e
 
-            # Retryable HTTP status but out of retries
             if attempt == MAX_RETRIES:
                 msg = f"Chutes error: retry limit reached (status {status})"
                 logger.exception(f"{msg}: {resp.text}")
@@ -96,17 +108,26 @@ def call_chutes(
         logger.exception(f"{msg}: {resp_json}")
         raise ChutesError(msg)
 
-    msg = resp_json["choices"][0]["message"]
+    # Guard: reject truncated/filtered responses when JSON format was requested
+    response_format = payload_dict.get("response_format", {})
+    is_json_mode = response_format.get("type") in ("json_object", "json_schema")
+    finish_reason = resp_json["choices"][0].get("finish_reason")
 
-    cached_tokens = 0
-    prompt_tokens_details = resp_json["usage"].get("prompt_tokens_details")
-    if prompt_tokens_details:
-        cached_tokens = prompt_tokens_details.get("cached_tokens", 0)
+    if is_json_mode and finish_reason in ("length", "content_filter"):
+        err = f"Chutes error: response unusable (finish_reason={finish_reason}); increase max_tokens or review content policy"
+        logger.error(err)
+        raise ChutesError(err)
+
+    msg = resp_json["choices"][0].get("message", {})
+    usage = resp_json.get("usage", {})
+    cached_tokens = (usage.get("prompt_tokens_details") or {}).get("cached_tokens", 0)
 
     return InferenceResponse(
-        content=msg["content"],
-        role=msg["role"],
-        input_tokens=resp_json["usage"]["prompt_tokens"],
+        **resp_json,
+        content=msg.get("content"),
+        role=msg.get("role", "assistant"),
+        tool_calls=msg.get("tool_calls"),
+        input_tokens=usage.get("prompt_tokens", 0),
         cached_tokens=cached_tokens,
-        output_tokens=resp_json["usage"]["completion_tokens"],
+        output_tokens=usage.get("completion_tokens", 0),
     )
