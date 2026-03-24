@@ -67,13 +67,15 @@ class TopAgentsSplitTestCase(unittest.TestCase):
         self.assertEqual(burn_hotkey, "missing-burn")
         self.assertEqual(burn_fraction, 0.5)
 
-    def test_split_top_agent_scores_without_burn_uses_agent_weight(self):
+    def test_split_top_agent_scores_with_zero_burn_uses_agent_weight(self):
         scores, selected_agent_hotkey, burn_hotkey, burn_fraction = split_top_agent_scores(
             top_agents_payload={
                 "agents": [
                     {"agent_id": 1, "hotkey": "agent-hotkey"},
                 ],
-                "burn": {},
+                "burn": {
+                    "percentage": 0,
+                },
             },
             metagraph_hotkeys=["agent-hotkey", "burn-hotkey"],
             metagraph_size=2,
