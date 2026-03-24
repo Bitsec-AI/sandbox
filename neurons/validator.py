@@ -84,10 +84,8 @@ class Validator(BaseValidatorNeuron):
 
         self.scores = new_scores
         bt.logging.info(
-            "Updated top miner scores with agent hotkey %s, burn hotkey %s, burn fraction %.2f",
-            selected_agent_hotkey,
-            burn_hotkey,
-            burn_fraction,
+            f"Updated top miner scores with agent hotkey {selected_agent_hotkey}, "
+            f"burn hotkey {burn_hotkey}, burn fraction {burn_fraction:.2f}"
         )
 
     async def forward(self):
