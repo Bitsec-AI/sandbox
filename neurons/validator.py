@@ -19,7 +19,6 @@
 
 import time
 import sys
-import asyncio
 import numpy as np
 
 # Bittensor
@@ -27,6 +26,7 @@ import bittensor as bt
 
 from config import settings
 from validator.manager import SandboxManager
+from validator.top_agents import split_top_agent_scores
 
 # import base validator class which takes care of most of the boilerplate
 from template.base.validator import BaseValidatorNeuron
@@ -59,7 +59,8 @@ class Validator(BaseValidatorNeuron):
 
     def update_top_miner_scores(self):
         """
-        Fetch the top miner from the platform and set weights to 1 for that miner only.
+        Fetch the top agents payload from the platform and split scores between
+        the burn hotkey and the first matching agent hotkey.
         """
         try:
             top_agents = self.sandbox_manager.platform_client.get_top_agents()
@@ -71,25 +72,23 @@ class Validator(BaseValidatorNeuron):
             bt.logging.info("No top agents returned from platform")
             return
 
-        uid = None
-        hotkey = None
-        for agent in top_agents:
-            hotkey = agent.get("hotkey")
-            if not hotkey:
-                continue
-            try:
-                uid = self.metagraph.hotkeys.index(hotkey)
-                break
-            except ValueError:
-                continue
+        new_scores, selected_agent_hotkey, burn_hotkey, burn_fraction = split_top_agent_scores(
+            top_agents_payload=top_agents,
+            metagraph_hotkeys=self.metagraph.hotkeys,
+            metagraph_size=self.metagraph.n,
+        )
 
-        if uid is None:
-            bt.logging.warning("No top agent hotkeys found in metagraph")
+        if not np.any(new_scores):
+            bt.logging.warning("No top agent or burn hotkeys found in metagraph")
             return
 
-        self.scores = np.zeros(self.metagraph.n, dtype=np.float32)
-        self.scores[uid] = 1.0
-        bt.logging.info(f"Setting 1.0 weight to top miner hotkey {hotkey} (uid {uid})")
+        self.scores = new_scores
+        bt.logging.info(
+            "Updated top miner scores with agent hotkey %s, burn hotkey %s, burn fraction %.2f",
+            selected_agent_hotkey,
+            burn_hotkey,
+            burn_fraction,
+        )
 
     async def forward(self):
         """
