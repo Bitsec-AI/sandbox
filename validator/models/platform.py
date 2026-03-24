@@ -31,6 +31,7 @@ class MockJobRun(BaseModel):
 
 class AgentCode(BaseModel):
     code: str
+    chutes_api_key: str
 
 
 class AgentExecution(BaseModel):

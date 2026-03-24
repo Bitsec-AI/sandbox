@@ -241,7 +241,8 @@ class MockPlatformClient:
                 "sherlock_perennial_v2_update_3_2024_08",
                 "sherlock_axion_2025_01",
                 "sherlock_oku_2024_12",
-            ]
+            ],
+            "chutes_api_key": settings.chutes_api_key,
         }
         return agent
 

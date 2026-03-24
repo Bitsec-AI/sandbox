@@ -93,9 +93,6 @@ class SandboxManager:
             name=settings.proxy_container,
             detach=True,
             publish=[(settings.proxy_port, 8000)],
-            envs={
-                "CHUTES_API_KEY": settings.chutes_api_key,
-            },
         )
         docker.network.connect(settings.proxy_network, settings.proxy_container)
 
@@ -112,6 +109,12 @@ class SandboxManager:
         os.makedirs(job_run_reports_dir, exist_ok=True)
 
         agent = self.platform_client.get_job_run_agent(job_run_id=job_run.id)
+
+        chutes_api_key = agent.get("chutes_api_key")
+        if not chutes_api_key:
+            logger.error(f"[J:{job_run.job_id}|JR:{job_run.id}] Miner did not provide CHUTES_API_KEY. Skipping job run.")
+            self.platform_client.complete_job_run(job_run.id, status="error")
+            return
 
         if self.is_local:
             agent_filepath = f"{settings.host_cwd}/miner/agent.py"
@@ -138,6 +141,7 @@ class SandboxManager:
                 project_key,
                 job_run_reports_dir,
                 platform_client=self.platform_client,
+                chutes_api_key=chutes_api_key,
             )
             task = loop.run_in_executor(self.executor_pool, executor.run)
             tasks.append(task)
