@@ -155,14 +155,9 @@ class APIPlatformClient:
         resp = self._call_api("get", endpoint)
         return resp
 
-    def get_top_agents(self, limit: int = 10):
-        endpoint = "agents/top/"
-
-        params = {}
-        if limit:
-            params["limit"] = limit
-
-        resp = self._call_api("get", endpoint, params=params)
+    def get_top_agents(self):
+        endpoint = "agents/top-with-burn/"
+        resp = self._call_api("get", endpoint)
         return resp
 
     def submit_agent_execution(self, agent_execution: AgentExecution) -> dict:
@@ -262,7 +257,6 @@ class MockPlatformClient:
             {"project_key": "code4rena_secondswap_2025_02"},
         ]
         return projects
-
 
 class PlatformClient:
     """
