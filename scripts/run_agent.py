@@ -1,0 +1,274 @@
+#!/usr/bin/env python3
+"""
+Run a miner agent across projects with resume support.
+Skips projects that already have successful results.
+
+Usage:
+    # Run on all 31 benchmark projects
+    python scripts/run_agent.py
+
+    # Run on specific projects
+    python scripts/run_agent.py --projects code4rena_secondswap_2025_02 code4rena_lambowin_2025_02
+
+    # Use a different agent file
+    python scripts/run_agent.py --agent miner/agent_v2.py
+
+    # Use a different output directory
+    python scripts/run_agent.py --output reports/agent2
+
+    # Dry run (show what would be run)
+    python scripts/run_agent.py --dry-run
+"""
+
+import argparse
+import importlib.util
+import json
+import os
+import sys
+import time
+import traceback
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
+BENCHMARK_FILE = "validator/curated-highs-only-2025-08-08.json"
+PROJECTS_DIR = "projects"
+DEFAULT_OUTPUT = "reports"
+DEFAULT_AGENT = "miner/agent.py"
+DEFAULT_INFERENCE_API = "http://localhost:8087"
+
+
+def load_benchmark_project_ids():
+    with open(BENCHMARK_FILE, "r") as f:
+        data = json.load(f)
+    return [e["project_id"] for e in data if e.get("project_id")]
+
+
+def is_already_done(output_dir, project_key):
+    """Check if a project already has a successful result."""
+    result_file = os.path.join(output_dir, f"{project_key}.json")
+    if not os.path.exists(result_file):
+        return False
+
+    try:
+        with open(result_file, "r") as f:
+            data = json.load(f)
+        return data.get("success", False)
+    except (json.JSONDecodeError, OSError):
+        return False
+
+
+def load_agent_module(agent_path):
+    spec = importlib.util.spec_from_file_location("agent", agent_path)
+    agent = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(agent)
+    if not hasattr(agent, "agent_main"):
+        raise AttributeError(f"{agent_path} does not define agent_main()")
+
+    patch_agent(agent)
+    return agent
+
+
+def patch_agent(agent):
+    """Patch agent module to fix missing API key header, file patterns, and silent errors."""
+    chutes_api_key = os.getenv("CHUTES_API_KEY")
+    if not chutes_api_key:
+        raise RuntimeError("CHUTES_API_KEY not set. Add it to .env or export it.")
+
+    # Patch InferenceClient.call to inject x-chutes-api-key header
+    if hasattr(agent, "InferenceClient"):
+        original_call = agent.InferenceClient.call
+
+        def patched_call(self, messages):
+            import requests as req
+
+            payload = {"model": self.config["model"], "messages": messages}
+            headers = {
+                "x-chutes-api-key": chutes_api_key,
+                "x-project-id": self.project_id or "local",
+                "x-job-id": self.job_id,
+            }
+            resp = req.post(
+                f"{self.inference_api}/inference",
+                headers=headers,
+                json=payload,
+                timeout=300,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+        agent.InferenceClient.call = patched_call
+
+    # Patch _get_file_patterns to include .cairo files
+    if hasattr(agent, "ImprovedBaselineRunner"):
+        original_get_patterns = agent.ImprovedBaselineRunner._get_file_patterns
+
+        def patched_get_file_patterns(self, file_patterns):
+            patterns = original_get_patterns(file_patterns)
+            if "**/*.cairo" not in patterns:
+                patterns.append("**/*.cairo")
+            return patterns
+
+        agent.ImprovedBaselineRunner._get_file_patterns = patched_get_file_patterns
+
+        # Patch analyze_file to raise on errors instead of silently returning empty
+        original_analyze_file = agent.ImprovedBaselineRunner.analyze_file
+
+        def patched_analyze_file(self, relative_path, content):
+            file_path = Path(relative_path)
+            parser = agent.PydanticOutputParser(pydantic_object=agent.Vulnerabilities)
+            format_instructions = parser.get_format_instructions()
+            system_prompt = agent.PromptBuilder.build_system_prompt(format_instructions)
+            user_prompt = agent.PromptBuilder.build_user_prompt(
+                relative_path, content, file_path.suffix
+            )
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ]
+            response = self.inference_client.call(messages=messages)
+            response_content = response["content"].strip()
+            msg_json = agent.ResponseProcessor.clean_json_response(response_content)
+            vulnerabilities = agent.Vulnerabilities(**msg_json)
+            vulnerabilities = agent.ResponseProcessor.filter_vulnerabilities(
+                vulnerabilities, self.config["model"]
+            )
+            input_tokens = response.get("input_tokens", 0)
+            output_tokens = response.get("output_tokens", 0)
+            return vulnerabilities, input_tokens, output_tokens
+
+        agent.ImprovedBaselineRunner.analyze_file = patched_analyze_file
+
+
+def run_one_project(agent_module, project_dir, project_key, output_dir, inference_api):
+    """Run agent on a single project and save result. Returns True on success."""
+    result_file = os.path.join(output_dir, f"{project_key}.json")
+    start = time.time()
+
+    try:
+        result = agent_module.agent_main(project_dir, inference_api=inference_api)
+        elapsed = time.time() - start
+
+        # Detect silent failures: 0 tokens means inference never ran
+        report = result or {}
+        tokens = report.get("token_usage", {}).get("total_tokens", 0)
+        files_analyzed = report.get("files_analyzed", 0)
+        if files_analyzed > 0 and tokens == 0:
+            raise RuntimeError(
+                f"Analyzed {files_analyzed} files but got 0 tokens — inference calls failed silently"
+            )
+
+        output = {
+            "success": True,
+            "report": result,
+            "elapsed_seconds": round(elapsed, 1),
+        }
+        with open(result_file, "w") as f:
+            json.dump(output, f, indent=2)
+
+        print(f"  OK  {project_key} ({elapsed:.0f}s)")
+        return True
+
+    except Exception as e:
+        elapsed = time.time() - start
+        output = {
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc(),
+            "elapsed_seconds": round(elapsed, 1),
+        }
+        with open(result_file, "w") as f:
+            json.dump(output, f, indent=2)
+
+        print(f"  FAIL {project_key}: {e}")
+        return False
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Run miner agent with resume support")
+    parser.add_argument("--agent", default=DEFAULT_AGENT, help=f"Agent file (default: {DEFAULT_AGENT})")
+    parser.add_argument("--output", default=DEFAULT_OUTPUT, help=f"Output directory (default: {DEFAULT_OUTPUT})")
+    parser.add_argument("--inference-api", default=DEFAULT_INFERENCE_API, help=f"Inference API URL (default: {DEFAULT_INFERENCE_API})")
+    parser.add_argument("--projects", nargs="+", help="Specific project keys to run (default: all 31)")
+    parser.add_argument("--projects-dir", default=PROJECTS_DIR, help=f"Projects source dir (default: {PROJECTS_DIR})")
+    parser.add_argument("--dry-run", action="store_true", help="Show what would run without running")
+    parser.add_argument("--force", action="store_true", help="Re-run even if result exists")
+    args = parser.parse_args()
+
+    # Resolve project list
+    if args.projects:
+        project_keys = args.projects
+    else:
+        project_keys = load_benchmark_project_ids()
+
+    os.makedirs(args.output, exist_ok=True)
+
+    # Classify projects
+    to_run = []
+    skipped = []
+    missing = []
+
+    for key in project_keys:
+        project_dir = os.path.join(args.projects_dir, key)
+        if not os.path.isdir(project_dir):
+            missing.append(key)
+            continue
+        if not args.force and is_already_done(args.output, key):
+            skipped.append(key)
+            continue
+        to_run.append((key, project_dir))
+
+    # Summary
+    print(f"Agent:    {args.agent}")
+    print(f"Output:   {args.output}")
+    print(f"API:      {args.inference_api}")
+    print(f"Projects: {len(project_keys)} total, {len(to_run)} to run, {len(skipped)} done, {len(missing)} missing source")
+
+    if missing:
+        print(f"\nMissing source ({len(missing)}):")
+        for key in missing:
+            print(f"  - {key}")
+
+    if skipped:
+        print(f"\nSkipping ({len(skipped)} already done):")
+        for key in skipped:
+            print(f"  - {key}")
+
+    if not to_run:
+        print("\nNothing to run.")
+        return
+
+    print(f"\nWill run ({len(to_run)}):")
+    for key, _ in to_run:
+        print(f"  - {key}")
+
+    if args.dry_run:
+        print("\n(dry run, exiting)")
+        return
+
+    # Load agent once
+    print(f"\nLoading agent: {args.agent}")
+    agent_module = load_agent_module(args.agent)
+
+    # Run
+    success = 0
+    fail = 0
+    total_start = time.time()
+
+    for i, (key, project_dir) in enumerate(to_run, 1):
+        print(f"\n[{i}/{len(to_run)}] {key}")
+        if run_one_project(agent_module, project_dir, key, args.output, args.inference_api):
+            success += 1
+        else:
+            fail += 1
+
+    total_elapsed = time.time() - total_start
+    print(f"\n{'='*60}")
+    print(f"Done: {success} ok, {fail} failed, {len(skipped)} skipped ({total_elapsed:.0f}s)")
+
+
+if __name__ == "__main__":
+    main()
