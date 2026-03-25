@@ -91,14 +91,22 @@ def patch_agent(agent):
                 "x-project-id": self.project_id or "local",
                 "x-job-id": self.job_id,
             }
+            t0 = time.time()
             resp = req.post(
                 f"{self.inference_api}/inference",
                 headers=headers,
                 json=payload,
                 timeout=300,
             )
+            elapsed = time.time() - t0
+            if resp.status_code != 200:
+                print(f"    inference HTTP {resp.status_code} ({elapsed:.1f}s)", flush=True)
             resp.raise_for_status()
-            return resp.json()
+            data = resp.json()
+            in_tok = data.get("input_tokens", 0)
+            out_tok = data.get("output_tokens", 0)
+            print(f"    inference OK ({elapsed:.1f}s, {in_tok}+{out_tok} tokens)", flush=True)
+            return data
 
         agent.InferenceClient.call = patched_call
 
@@ -107,7 +115,7 @@ def patch_agent(agent):
         original_get_patterns = agent.ImprovedBaselineRunner._get_file_patterns
 
         def patched_get_file_patterns(self, file_patterns):
-            patterns = original_get_patterns(file_patterns)
+            patterns = original_get_patterns(self, file_patterns)
             if "**/*.cairo" not in patterns:
                 patterns.append("**/*.cairo")
             return patterns
@@ -118,6 +126,7 @@ def patch_agent(agent):
         original_analyze_file = agent.ImprovedBaselineRunner.analyze_file
 
         def patched_analyze_file(self, relative_path, content):
+            print(f"    analyzing {relative_path} ({len(content)} bytes)...", flush=True)
             file_path = Path(relative_path)
             parser = agent.PydanticOutputParser(pydantic_object=agent.Vulnerabilities)
             format_instructions = parser.get_format_instructions()
@@ -136,6 +145,8 @@ def patch_agent(agent):
             vulnerabilities = agent.ResponseProcessor.filter_vulnerabilities(
                 vulnerabilities, self.config["model"]
             )
+            n = len(vulnerabilities.vulnerabilities)
+            print(f"    done {relative_path} — {n} vulnerabilities found", flush=True)
             input_tokens = response.get("input_tokens", 0)
             output_tokens = response.get("output_tokens", 0)
             return vulnerabilities, input_tokens, output_tokens
@@ -152,11 +163,16 @@ def run_one_project(agent_module, project_dir, project_key, output_dir, inferenc
         result = agent_module.agent_main(project_dir, inference_api=inference_api)
         elapsed = time.time() - start
 
-        # Detect silent failures: 0 tokens means inference never ran
+        # Detect silent failures
         report = result or {}
         tokens = report.get("token_usage", {}).get("total_tokens", 0)
         files_analyzed = report.get("files_analyzed", 0)
-        if files_analyzed > 0 and tokens == 0:
+        files_skipped = report.get("files_skipped", 0)
+        if files_analyzed == 0:
+            raise RuntimeError(
+                f"0 files analyzed ({files_skipped} skipped) — no files were successfully processed"
+            )
+        if tokens == 0:
             raise RuntimeError(
                 f"Analyzed {files_analyzed} files but got 0 tokens — inference calls failed silently"
             )
@@ -171,6 +187,20 @@ def run_one_project(agent_module, project_dir, project_key, output_dir, inferenc
 
         print(f"  OK  {project_key} ({elapsed:.0f}s)")
         return True
+
+    except SystemExit as e:
+        elapsed = time.time() - start
+        output = {
+            "success": False,
+            "error": f"agent_main called sys.exit({e.code})",
+            "traceback": traceback.format_exc(),
+            "elapsed_seconds": round(elapsed, 1),
+        }
+        with open(result_file, "w") as f:
+            json.dump(output, f, indent=2)
+
+        print(f"  FAIL {project_key}: agent_main called sys.exit({e.code})")
+        return False
 
     except Exception as e:
         elapsed = time.time() - start
