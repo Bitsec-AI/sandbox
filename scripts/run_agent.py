@@ -40,11 +40,54 @@ DEFAULT_OUTPUT = "reports"
 DEFAULT_AGENT = "miner/agent.py"
 DEFAULT_INFERENCE_API = "http://localhost:8087"
 
+PROJECTS_INDEX_FILE = "miner/projects.json"
+
 
 def load_benchmark_project_ids():
     with open(BENCHMARK_FILE, "r") as f:
         data = json.load(f)
     return [e["project_id"] for e in data if e.get("project_id")]
+
+
+def _load_projects_index():
+    with open(PROJECTS_INDEX_FILE, "r", encoding="utf-8") as f:
+        projects = json.load(f)
+    return {p.get("project_key"): p for p in projects if p.get("project_key")}
+
+
+def fetch_missing_projects(project_keys):
+    """
+    Fetch missing projects into projects/<project_key>/ using scripts/projects.py logic.
+    Returns (fetched_keys, still_missing_keys).
+    """
+    try:
+        repo_root = Path(__file__).resolve().parents[1]
+        if str(repo_root) not in sys.path:
+            sys.path.insert(0, str(repo_root))
+        projects_py = Path(__file__).resolve().parent / "projects.py"
+        spec = importlib.util.spec_from_file_location("projects_fetcher", str(projects_py))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        init_project = getattr(mod, "init_project")
+    except Exception as e:
+        print(f"\nERROR: could not load scripts/projects.py to fetch projects: {e}", flush=True)
+        return [], list(project_keys)
+
+    index = _load_projects_index()
+    fetched = []
+    still_missing = []
+    for key in project_keys:
+        project = index.get(key)
+        if not project:
+            still_missing.append(key)
+            continue
+        try:
+            init_project(project)
+            fetched.append(key)
+        except Exception as e:
+            print(f"  FAIL fetch {key}: {e}", flush=True)
+            still_missing.append(key)
+    return fetched, still_missing
 
 
 def is_already_done(output_dir, project_key):
@@ -72,59 +115,105 @@ def load_agent_module(agent_path):
     return agent
 
 
+def _inference_call(inference_api, chutes_api_key, project_id, job_id, payload):
+    """Shared inference HTTP call with API key header, heartbeat, and logging."""
+    import requests as req
+    import threading
+
+    headers = {
+        "x-chutes-api-key": chutes_api_key,
+        "x-project-id": project_id or "local",
+        "x-job-id": job_id,
+    }
+    t0 = time.time()
+    done = threading.Event()
+
+    def heartbeat():
+        while not done.wait(60):
+            elapsed = time.time() - t0
+            print(f"    ... still waiting ({elapsed:.0f}s elapsed)", flush=True)
+
+    hb = threading.Thread(target=heartbeat, daemon=True)
+    hb.start()
+    try:
+        resp = req.post(
+            f"{inference_api}/inference",
+            headers=headers,
+            json=payload,
+            timeout=300,
+        )
+    finally:
+        done.set()
+    elapsed = time.time() - t0
+    if resp.status_code != 200:
+        print(f"    inference HTTP {resp.status_code} ({elapsed:.1f}s)", flush=True)
+    resp.raise_for_status()
+    data = resp.json()
+    in_tok = data.get("input_tokens", 0)
+    out_tok = data.get("output_tokens", 0)
+    print(f"    inference OK ({elapsed:.1f}s, {in_tok}+{out_tok} tokens)", flush=True)
+    return data
+
+
 def patch_agent(agent):
     """Patch agent module to fix missing API key header, file patterns, and silent errors."""
     chutes_api_key = os.getenv("CHUTES_API_KEY")
     if not chutes_api_key:
         raise RuntimeError("CHUTES_API_KEY not set. Add it to .env or export it.")
 
-    # Patch InferenceClient.call to inject x-chutes-api-key header
+    # --- Patch inference methods to inject x-chutes-api-key header ---
+
+    # agent-317: InferenceClient.call(self, messages)
     if hasattr(agent, "InferenceClient"):
-        original_call = agent.InferenceClient.call
-
         def patched_call(self, messages):
-            import requests as req
-
             payload = {"model": self.config["model"], "messages": messages}
-            headers = {
-                "x-chutes-api-key": chutes_api_key,
-                "x-project-id": self.project_id or "local",
-                "x-job-id": self.job_id,
-            }
-            t0 = time.time()
-            resp = req.post(
-                f"{self.inference_api}/inference",
-                headers=headers,
-                json=payload,
-                timeout=300,
+            return _inference_call(
+                self.inference_api, chutes_api_key, self.project_id, self.job_id, payload
             )
-            elapsed = time.time() - t0
-            if resp.status_code != 200:
-                print(f"    inference HTTP {resp.status_code} ({elapsed:.1f}s)", flush=True)
-            resp.raise_for_status()
-            data = resp.json()
-            in_tok = data.get("input_tokens", 0)
-            out_tok = data.get("output_tokens", 0)
-            print(f"    inference OK ({elapsed:.1f}s, {in_tok}+{out_tok} tokens)", flush=True)
-            return data
-
         agent.InferenceClient.call = patched_call
 
-    # Patch _get_file_patterns to include .cairo files
+    # agent-794: AgenticFileRanker.inference(self, messages, model=...)
+    if hasattr(agent, "AgenticFileRanker"):
+        import inspect
+        orig_sig = inspect.signature(agent.AgenticFileRanker.inference)
+        ranker_default_model = orig_sig.parameters["model"].default
+
+        def patched_ranker_inference(self, messages, model=ranker_default_model):
+            payload = {"model": model, "messages": messages}
+            return _inference_call(
+                self.inference_api, chutes_api_key, self.project_id, self.job_id, payload
+            )
+        agent.AgenticFileRanker.inference = patched_ranker_inference
+
+    # agent-794: BaselineRunner.inference(self, messages, model=None)
+    if hasattr(agent, "BaselineRunner"):
+        def patched_runner_inference(self, messages, model=None):
+            payload = {
+                "model": model or self.config["model"],
+                "messages": messages,
+                "temperature": 0.01,
+            }
+            return _inference_call(
+                self.inference_api, chutes_api_key, self.project_id, self.job_id, payload
+            )
+        agent.BaselineRunner.inference = patched_runner_inference
+
+    # --- Patch _get_file_patterns to include .cairo files ---
+    for cls_name in ("ImprovedBaselineRunner", "BaselineRunner"):
+        cls = getattr(agent, cls_name, None)
+        if cls and hasattr(cls, "_get_file_patterns"):
+            orig = cls._get_file_patterns
+
+            def patched_get_file_patterns(self, file_patterns, _orig=orig):
+                patterns = _orig(self, file_patterns)
+                if "**/*.cairo" not in patterns:
+                    patterns.append("**/*.cairo")
+                return patterns
+
+            cls._get_file_patterns = patched_get_file_patterns
+
+    # --- Patch analyze_file to raise on errors instead of silently returning empty (agent-317) ---
     if hasattr(agent, "ImprovedBaselineRunner"):
-        original_get_patterns = agent.ImprovedBaselineRunner._get_file_patterns
-
-        def patched_get_file_patterns(self, file_patterns):
-            patterns = original_get_patterns(self, file_patterns)
-            if "**/*.cairo" not in patterns:
-                patterns.append("**/*.cairo")
-            return patterns
-
-        agent.ImprovedBaselineRunner._get_file_patterns = patched_get_file_patterns
-
-        # Patch analyze_file to raise on errors instead of silently returning empty
-        original_analyze_file = agent.ImprovedBaselineRunner.analyze_file
-
         def patched_analyze_file(self, relative_path, content):
             print(f"    analyzing {relative_path} ({len(content)} bytes)...", flush=True)
             file_path = Path(relative_path)
@@ -226,6 +315,7 @@ def main():
     parser.add_argument("--projects-dir", default=PROJECTS_DIR, help=f"Projects source dir (default: {PROJECTS_DIR})")
     parser.add_argument("--dry-run", action="store_true", help="Show what would run without running")
     parser.add_argument("--force", action="store_true", help="Re-run even if result exists")
+    parser.add_argument("--fetch-missing", action="store_true", help="If source is missing, fetch it from miner/projects.json into projects/<key>/ before running")
     args = parser.parse_args()
 
     # Resolve project list
@@ -261,6 +351,32 @@ def main():
         print(f"\nMissing source ({len(missing)}):")
         for key in missing:
             print(f"  - {key}")
+
+        if args.fetch_missing and not args.dry_run:
+            print("\nFetching missing projects...", flush=True)
+            fetched, still_missing = fetch_missing_projects(missing)
+            if fetched:
+                print(f"Fetched ({len(fetched)}):")
+                for key in fetched:
+                    print(f"  - {key}")
+            if still_missing:
+                print(f"\nStill missing ({len(still_missing)}):")
+                for key in still_missing:
+                    print(f"  - {key}")
+
+            # Re-classify after fetch
+            to_run = []
+            skipped = []
+            missing = []
+            for key in project_keys:
+                project_dir = os.path.join(args.projects_dir, key)
+                if not os.path.isdir(project_dir):
+                    missing.append(key)
+                    continue
+                if not args.force and is_already_done(args.output, key):
+                    skipped.append(key)
+                    continue
+                to_run.append((key, project_dir))
 
     if skipped:
         print(f"\nSkipping ({len(skipped)} already done):")
