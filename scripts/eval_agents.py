@@ -90,7 +90,7 @@ def main():
     )
     parser.add_argument("--agents", nargs="+", help="Specific agent dirs to evaluate (default: all)")
     parser.add_argument("--projects", nargs="+", help="Specific project keys to evaluate (default: all)")
-    parser.add_argument("--model", default="deepseek-ai/DeepSeek-V3-0324", help="Scorer LLM model")
+    parser.add_argument("--model", default="deepseek-ai/DeepSeek-V3.2-TEE", help="Scorer LLM model")
     parser.add_argument("--confidence-threshold", type=float, default=0.75)
     parser.add_argument("--strict-matching", action="store_true")
     parser.add_argument("--verbose", action="store_true")
@@ -156,7 +156,7 @@ def main():
         to_score = []
         already_done = []
         for project_key, rf in scoreable:
-            score_file = agent_output_dir / f"{project_key}.json"
+            score_file = agent_output_dir / f"score_{project_key}.json"
             if args.resume and score_file.exists():
                 already_done.append(project_key)
             else:
@@ -172,7 +172,7 @@ def main():
             print(f"  Nothing to score")
             # Still load existing results for summary
             for project_key in already_done:
-                score_file = agent_output_dir / f"{project_key}.json"
+                score_file = agent_output_dir / f"score_{project_key}.json"
                 try:
                     with open(score_file) as f:
                         all_summaries.setdefault(agent_name, []).append(json.load(f))
@@ -199,7 +199,7 @@ def main():
 
         # Load existing results for summary
         for project_key in already_done:
-            score_file = agent_output_dir / f"{project_key}.json"
+            score_file = agent_output_dir / f"score_{project_key}.json"
             try:
                 with open(score_file) as f:
                     agent_results.append(json.load(f))
@@ -219,7 +219,7 @@ def main():
                     "status": "error",
                     "error": error,
                 }
-                score_file = agent_output_dir / f"{project_key}.json"
+                score_file = agent_output_dir / f"score_{project_key}.json"
                 with open(score_file, "w") as f:
                     json.dump(result_data, f, indent=2)
                 agent_results.append(result_data)
@@ -263,7 +263,7 @@ def main():
                 "cached_tokens": result.cached_tokens,
             }
 
-            score_file = agent_output_dir / f"{project_key}.json"
+            score_file = agent_output_dir / f"score_{project_key}.json"
             with open(score_file, "w") as f:
                 json.dump(result_data, f, indent=2)
 

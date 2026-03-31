@@ -6,6 +6,7 @@ Processes each expected finding sequentially for better consistency.
 """
 
 import json
+import os
 import sys
 import argparse
 import re
@@ -70,7 +71,7 @@ class ScaBenchScorerV2:
         # Strict matching mode: no confidence ratings, only exact matches count
         self.strict_matching = bool(self.config.get("strict_matching", False))
 
-        self.model_id = self.config.get("model", "deepseek-ai/DeepSeek-V3-0324")
+        self.model_id = self.config.get("model", "deepseek-ai/DeepSeek-V3.2-TEE")
 
         self.api_url = self.config.get("api_url")
         self.api_key = self.config.get("api_key")
@@ -763,7 +764,9 @@ def main():
     parser.add_argument("--results-dir", required=True, help="Directory containing tool results")
     parser.add_argument("--output", default="scoring_results", help="Output directory")
     parser.add_argument("--project", help="Score only a specific project")
-    parser.add_argument("--model", default="gpt-4o", help="LLM model to use")
+    parser.add_argument("--model", default="deepseek-ai/DeepSeek-V3.2-TEE", help="LLM model to use")
+    parser.add_argument("--api-key", default=os.environ.get("CHUTES_API_KEY"), help="Chutes API key (default: $CHUTES_API_KEY)")
+    parser.add_argument("--api-url", default="http://localhost:8087", help="Inference proxy URL (default: http://localhost:8087)")
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose output")
     parser.add_argument(
@@ -812,6 +815,8 @@ def main():
 
     # Initialize scorer
     config = {
+        "api_key": args.api_key,
+        "api_url": args.api_url,
         "model": args.model,
         "debug": args.debug,
         "verbose": args.verbose,
@@ -857,7 +862,7 @@ def main():
             tool_results = json.load(f)
 
         # Get tool findings
-        tool_findings = tool_results.get("findings", [])
+        tool_findings = tool_results.get("report", {}).get("vulnerabilities", [])
 
         # Find corresponding benchmark entry
         expected_findings = []
