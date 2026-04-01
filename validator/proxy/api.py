@@ -40,6 +40,7 @@ async def root():
         }
     )
 
+
 INFER_CONCURRENCY = 8  # per worker
 _sem = asyncio.Semaphore(INFER_CONCURRENCY)
 

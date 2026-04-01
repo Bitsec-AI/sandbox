@@ -19,6 +19,7 @@ FORCE_MULTIPROCESSING = os.getenv("FORCE_MULTIPROCESSING", "true").lower() == "t
 
 logger = logging.getLogger(__name__)
 
+
 def get_result_size(result):
     """Estimate the size of a result object in bytes."""
     try:

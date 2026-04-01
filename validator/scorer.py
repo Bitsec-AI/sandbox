@@ -67,6 +67,7 @@ MODELS = [
 ]
 CHUTES_MODELS = f"{','.join(MODELS)}:throughput"
 
+
 class ScaBenchScorerV2:
     """Improved scorer with one-by-one matching for consistency."""
 

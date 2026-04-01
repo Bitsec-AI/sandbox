@@ -100,7 +100,7 @@ class SandboxManager:
         time.sleep(10)
 
     async def process_job_run(self, job_run):
-        logger.info(f"[J:{job_run.job_id}|JR:{job_run.id}] Processing job run")
+        logger.info(f"[A:{job_run.agent_id}|JR:{job_run.id}] Processing job run")
 
         self.platform_client.start_job_run(job_run.id)
 
@@ -112,7 +112,9 @@ class SandboxManager:
 
         chutes_api_key = agent.get("chutes_api_key")
         if not chutes_api_key:
-            logger.error(f"[J:{job_run.job_id}|JR:{job_run.id}] Miner did not provide CHUTES_API_KEY. Skipping job run.")
+            logger.error(
+                f"[A:{job_run.agent_id}|JR:{job_run.id}] Miner did not provide CHUTES_API_KEY. Skipping job run."
+            )
             self.platform_client.complete_job_run(job_run.id, status="error")
             return
 

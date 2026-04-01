@@ -47,7 +47,7 @@ class AgentExecutor:
         self.init_logger()
 
     def init_logger(self):
-        prefix = f"[J:{self.job_run.job_id}|JR:{self.job_run.id}|P:{self.project_key}] "
+        prefix = f"[A:{self.job_run.agent_id}|JR:{self.job_run.id}|P:{self.project_key}] "
 
         self.logger = PrefixedLogger(logger, prefix)
 
@@ -68,10 +68,7 @@ class AgentExecutor:
             docker.pull(image_tag, quiet=True)
             self.logger.info(f"Image {image_tag} is up-to-date")
         except DockerException as e:
-            self.logger.warning(
-                f"Failed to pull image {image_tag} "
-                "Will attempt to use local image if available."
-            )
+            self.logger.warning(f"Failed to pull image {image_tag} Will attempt to use local image if available.")
 
     def run(self):
         self.started_at = datetime.utcnow()
