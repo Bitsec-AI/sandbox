@@ -47,7 +47,7 @@ class AgentExecutor:
         self.init_logger()
 
     def init_logger(self):
-        prefix = f"[J:{self.job_run.job_id}|JR:{self.job_run.id}|P:{self.project_key}] "
+        prefix = f"[A:{self.job_run.agent_id}|JR:{self.job_run.id}|P:{self.project_key}] "
 
         self.logger = PrefixedLogger(logger, prefix)
 
