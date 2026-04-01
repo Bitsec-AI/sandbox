@@ -68,10 +68,7 @@ class AgentExecutor:
             docker.pull(image_tag, quiet=True)
             self.logger.info(f"Image {image_tag} is up-to-date")
         except DockerException as e:
-            self.logger.warning(
-                f"Failed to pull image {image_tag} "
-                "Will attempt to use local image if available."
-            )
+            self.logger.warning(f"Failed to pull image {image_tag} Will attempt to use local image if available.")
 
     def run(self):
         self.started_at = datetime.utcnow()

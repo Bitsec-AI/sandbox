@@ -26,6 +26,7 @@ BACKOFF_FACTOR = 1.5
 # Global session for connection reuse (one per worker process)
 SESSION = requests.Session()
 
+
 def call_chutes(
     request: InferenceRequest,
     job_id: str = "unknown",

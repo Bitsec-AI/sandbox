@@ -112,7 +112,9 @@ class SandboxManager:
 
         chutes_api_key = agent.get("chutes_api_key")
         if not chutes_api_key:
-            logger.error(f"[A:{job_run.agent_id}|JR:{job_run.id}] Miner did not provide CHUTES_API_KEY. Skipping job run.")
+            logger.error(
+                f"[A:{job_run.agent_id}|JR:{job_run.id}] Miner did not provide CHUTES_API_KEY. Skipping job run."
+            )
             self.platform_client.complete_job_run(job_run.id, status="error")
             return
 

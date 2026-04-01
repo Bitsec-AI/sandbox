@@ -258,6 +258,7 @@ class MockPlatformClient:
         ]
         return projects
 
+
 class PlatformClient:
     """
     Public interface for consumers.
