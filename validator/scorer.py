@@ -60,6 +60,14 @@ class ScoringResult:
     cached_tokens: int
 
 
+MODELS = [
+    "deepseek-ai/DeepSeek-V3-0324-TEE",
+    "zai-org/GLM-4.7-TEE",
+    "moonshotai/Kimi-K2.5-TEE",
+    "MiniMaxAI/MiniMax-M2.5-TEE",
+]
+CHUTES_MODELS = f"{','.join(MODELS)}:throughput"
+
 class ScaBenchScorerV2:
     """Improved scorer with one-by-one matching for consistency."""
 
@@ -71,7 +79,7 @@ class ScaBenchScorerV2:
         # Strict matching mode: no confidence ratings, only exact matches count
         self.strict_matching = bool(self.config.get("strict_matching", False))
 
-        self.model_id = self.config.get("model", "deepseek-ai/DeepSeek-V3.2-TEE")
+        self.model_id = self.config.get("model", CHUTES_MODELS)
 
         self.api_url = self.config.get("api_url")
         self.api_key = self.config.get("api_key")
