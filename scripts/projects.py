@@ -3,12 +3,13 @@ import json
 import requests
 import zipfile
 import shutil
+from pathlib import Path
 
 from loggers.logger import get_logger
 
 logger = get_logger()
 
-REPO_ROOT = os.path.abspath(os.getcwd())
+REPO_ROOT = str(Path(__file__).resolve().parents[1])
 PROJECTS_FILE = os.path.join(REPO_ROOT, "miner", "projects.json")
 PROJECTS_DIR = os.path.join(REPO_ROOT, "projects")
 
@@ -26,7 +27,7 @@ def download_zip(project):
         raise ValueError(f"Missing repo_url for project {project_key}")
 
     project_dir = os.path.join(PROJECTS_DIR, project_key)
-    zip_path = os.path.join(PROJECTS_DIR, f"{project_dir}.zip")
+    zip_path = project_dir + ".zip"
 
     if os.path.exists(project_dir):
         logger.info(f"⏭️  Skipping download for {project_key} (already exists)")

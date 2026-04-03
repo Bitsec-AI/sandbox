@@ -228,12 +228,21 @@ class BaselineRunner:
     def _execute_tool_call(self, tool_call: dict, source_dir: Path) -> str:
         """Execute a tool call and return the result as a string."""
         name = tool_call["function"]["name"]
-        args = json.loads(tool_call["function"]["arguments"])
+        try:
+            args = json.loads(tool_call["function"]["arguments"])
+        except (json.JSONDecodeError, TypeError):
+            return json.dumps({"error": f"Invalid arguments JSON: {tool_call['function']['arguments']}"})
 
         if name == "list_files":
-            return self._tool_list_files(source_dir, args["directory"])
+            directory = args.get("directory") or args.get("dir") or args.get("path")
+            if not directory:
+                return json.dumps({"error": f"Missing 'directory' argument. Expected: {{'directory': '.'}}. Got: {args}"})
+            return self._tool_list_files(source_dir, directory)
         elif name == "read_file":
-            return self._tool_read_file(source_dir, args["file_path"])
+            file_path = args.get("file_path") or args.get("path") or args.get("file")
+            if not file_path:
+                return json.dumps({"error": f"Missing 'file_path' argument. Expected: {{'file_path': 'src/foo.sol'}}. Got: {args}"})
+            return self._tool_read_file(source_dir, file_path)
         elif name == "report_vulnerabilities":
             return json.dumps(args)
         else:
@@ -365,8 +374,9 @@ class BaselineRunner:
             total_vulnerabilities=len(vulns),
             vulnerabilities=vulns,
             token_usage={
-                "total_input": total_input_tokens,
-                "total_output": total_output_tokens,
+                "input_tokens": total_input_tokens,
+                "output_tokens": total_output_tokens,
+                "total_tokens": total_input_tokens + total_output_tokens,
             },
         )
 
@@ -705,8 +715,8 @@ class BaselineRunner:
 
 def agent_main(project_dir: str = None, inference_api: str = None):
     config = {
-        'model': "tngtech/DeepSeek-TNG-R1T2-Chimera-TEE", # reasoning model
-        # 'model': 'deepseek-ai/DeepSeek-V3.1-Terminus', # tool use model
+        # 'model': "tngtech/DeepSeek-TNG-R1T2-Chimera-TEE", # reasoning model
+        'model': 'deepseek-ai/DeepSeek-V3.1-Terminus', # tool use model
     }
 
     if not project_dir:

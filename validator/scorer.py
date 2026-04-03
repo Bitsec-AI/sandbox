@@ -61,8 +61,7 @@ class ScoringResult:
 
 
 MODELS = [
-    "deepseek-ai/DeepSeek-V3-0324-TEE",
-    "zai-org/GLM-4.7-TEE",
+    "deepseek-ai/DeepSeek-V3.2-TEE",
     "moonshotai/Kimi-K2.5-TEE",
     "MiniMaxAI/MiniMax-M2.5-TEE",
 ]
@@ -152,13 +151,25 @@ class ScaBenchScorerV2:
             resp.raise_for_status()
 
         except requests.exceptions.HTTPError as e:
-            body = resp.json() if resp else ""
-            console.print(f"Inference Proxy Error: {e} {body}")
+            body = ""
+            try:
+                body = resp.json() if resp else ""
+            except Exception:
+                body = resp.text[:500] if resp else ""
+            console.print(f"Inference Proxy Error: {e}")
+            if self.debug:
+                console.print(f"  Response body: {body}")
             raise
 
         except requests.exceptions.RequestException as e:
-            body = resp.json() if resp else ""
-            console.print(f"Inference Error: {e} {body}")
+            body = ""
+            try:
+                body = resp.json() if resp else ""
+            except Exception:
+                body = resp.text[:500] if resp else ""
+            console.print(f"Inference Error: {e}")
+            if self.debug:
+                console.print(f"  Response body: {body}")
             raise
 
         resp_json = resp.json()
@@ -166,6 +177,16 @@ class ScaBenchScorerV2:
         self.input_tokens += usage.get("prompt_tokens", 0)
         self.cached_tokens += usage.get("prompt_tokens_details", {}).get("cached_tokens", 0)
         self.output_tokens += usage.get("completion_tokens", 0)
+
+        # Log diagnostic info when content is empty (helps identify which model fails)
+        content = (resp_json.get("choices", [{}])[0].get("message", {}).get("content") or "")
+        if not content.strip():
+            served_model = resp_json.get("model", "unknown")
+            finish_reason = resp_json.get("choices", [{}])[0].get("finish_reason", "unknown")
+            console.print(
+                f"[yellow]Warning: empty content from model={served_model}, "
+                f"finish_reason={finish_reason}[/yellow]"
+            )
 
         return resp_json
 
@@ -445,9 +466,12 @@ class ScaBenchScorerV2:
                             )
 
             except Exception as e:
-                if self.debug:
-                    console.print(f"[red]Error matching: {e}[/red]")
-                # Continue to next chunk, but remember error as reason if nothing else
+                # Always log scoring errors (not just in debug mode) so we can
+                # distinguish inference failures from legitimate "not found"
+                console.print(
+                    f"[red]Scoring error (chunk {start}-{start + len(chunk_idx) - 1}): "
+                    f"{e.__class__.__name__}: {e}[/red]"
+                )
                 if not best_reason:
                     best_reason = f"Error: {str(e)}"
 

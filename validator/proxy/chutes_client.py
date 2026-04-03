@@ -26,6 +26,14 @@ BACKOFF_FACTOR = 1.5
 # Global session for connection reuse (one per worker process)
 SESSION = requests.Session()
 
+
+def _backoff_sleep(attempt: int, reason: str):
+    """Exponential backoff for server-side errors (429, 502, connection)."""
+    sleep_time = BACKOFF_FACTOR * (2 ** (attempt - 1))
+    logger.warning(f"{reason}, retrying in {sleep_time:.1f}s...")
+    time.sleep(sleep_time)
+
+
 def call_chutes(
     request: InferenceRequest,
     job_id: str = "unknown",
@@ -50,9 +58,15 @@ def call_chutes(
     if not isinstance(payload_dict.get("response_format"), dict):
         payload_dict["response_format"] = {"type": "json_object"}
 
-    resp = None
+    response_format = payload_dict.get("response_format", {})
+    is_json_mode = response_format.get("type") in ("json_object", "json_schema")
+
+    last_error = None
 
     for attempt in range(1, MAX_RETRIES + 1):
+        resp = None
+
+        # --- HTTP request ---
         try:
             logger.info(f"Sending request to Chutes. Attempt: {attempt}")
             resp = SESSION.post(
@@ -62,72 +76,90 @@ def call_chutes(
                 timeout=TIMEOUT,
             )
             resp.raise_for_status()
-            break
 
         except requests.RequestException as e:
             if resp is None:
-                # ConnectionError / timeout — no HTTP response, but still retryable
-                if attempt == MAX_RETRIES:
-                    msg = "Chutes error: no response received after retries"
-                    logger.exception(msg)
-                    raise ChutesError(msg) from e
-
-                sleep_time = BACKOFF_FACTOR * (2 ** (attempt - 1))
-                logger.warning(f"Connection error, retrying in {sleep_time:.1f}s... ({e.__class__.__name__})")
-                time.sleep(sleep_time)
-                continue
+                last_error = f"Connection error: {e.__class__.__name__}"
+                if attempt < MAX_RETRIES:
+                    _backoff_sleep(attempt, last_error)
+                    continue
+                raise ChutesError(f"Chutes error: no response after {MAX_RETRIES} retries") from e
 
             status = resp.status_code
-
             if status not in (502, 429):
                 msg = f"Chutes error: non-retriable failure (status {status})"
-                logger.exception(f"{msg}: {resp.text}")
+                logger.error(f"{msg}: {resp.text[:300]}")
                 raise ChutesError(msg) from e
 
-            if attempt == MAX_RETRIES:
-                msg = f"Chutes error: retry limit reached (status {status})"
-                logger.exception(f"{msg}: {resp.text}")
-                raise ChutesError(msg) from e
+            last_error = f"HTTP {status}"
+            if attempt < MAX_RETRIES:
+                _backoff_sleep(attempt, f"Retriable error (status {status})")
+                continue
+            raise ChutesError(f"Chutes error: retry limit reached (status {status})") from e
 
-            sleep_time = BACKOFF_FACTOR * (2 ** (attempt - 1))
-            logger.warning(f"Retryable Chutes error (status {status}), retrying in {sleep_time:.1f}s...")
-            time.sleep(sleep_time)
+        # --- Parse JSON response ---
+        try:
+            resp_json = resp.json()
+        except Exception as e:
+            last_error = f"Invalid JSON: {resp.text[:200]}"
+            logger.error(f"Chutes error: {last_error}")
+            if attempt < MAX_RETRIES:
+                _backoff_sleep(attempt, "Invalid JSON response")
+                continue
+            raise ChutesError(f"Chutes error: invalid JSON after {MAX_RETRIES} retries") from e
 
-    try:
-        resp_json = resp.json()
+        served_model = resp_json.get("model", "unknown")
 
-    except Exception as e:
-        msg = "Chutes error: invalid JSON in response"
-        logger.exception(f"{msg}: {resp.text}")
-        raise ChutesError(msg) from e
+        if "choices" not in resp_json or not resp_json["choices"]:
+            last_error = f"No choices in response (model={served_model})"
+            logger.error(f"Chutes error: {last_error}")
+            if attempt < MAX_RETRIES:
+                _backoff_sleep(attempt, last_error)
+                continue
+            raise ChutesError(f"Chutes error: {last_error}")
 
-    logger.info(f"Received response from Chutes: {json.dumps(resp_json, indent=2)}")
+        finish_reason = resp_json["choices"][0].get("finish_reason")
+        msg_obj = resp_json["choices"][0].get("message", {})
+        content = msg_obj.get("content")
 
-    if "choices" not in resp_json or not resp_json["choices"]:
-        msg = "Chutes error: unexpected response format"
-        logger.exception(f"{msg}: {resp_json}")
-        raise ChutesError(msg)
+        # --- Check finish_reason (server-side truncation) ---
+        if is_json_mode and finish_reason in ("length", "content_filter"):
+            last_error = (
+                f"Unusable response (model={served_model}, finish_reason={finish_reason})"
+            )
+            logger.error(f"Chutes error: {last_error}")
+            if attempt < MAX_RETRIES:
+                _backoff_sleep(attempt, last_error)
+                continue
+            raise ChutesError(f"Chutes error: {last_error}")
 
-    # Guard: reject truncated/filtered responses when JSON format was requested
-    response_format = payload_dict.get("response_format", {})
-    is_json_mode = response_format.get("type") in ("json_object", "json_schema")
-    finish_reason = resp_json["choices"][0].get("finish_reason")
+        # --- Check null/empty content (model-level flake — no backoff) ---
+        if is_json_mode and not (content or "").strip():
+            last_error = (
+                f"Null/empty content (model={served_model}, finish_reason={finish_reason})"
+            )
+            logger.warning(f"Chutes: {last_error}, retrying immediately...")
+            # No sleep — this is model flakiness, not server overload.
+            # Re-rolling immediately maximizes chance of hitting a working response.
+            continue
 
-    if is_json_mode and finish_reason in ("length", "content_filter"):
-        err = f"Chutes error: response unusable (finish_reason={finish_reason}); increase max_tokens or review content policy"
-        logger.error(err)
-        raise ChutesError(err)
+        # --- All checks passed ---
+        logger.info(
+            f"Chutes OK (model={served_model}, finish_reason={finish_reason}, "
+            f"content_len={len(content or '')})"
+        )
 
-    msg = resp_json["choices"][0].get("message", {})
-    usage = resp_json.get("usage", {})
-    cached_tokens = (usage.get("prompt_tokens_details") or {}).get("cached_tokens", 0)
+        usage = resp_json.get("usage", {})
+        cached_tokens = (usage.get("prompt_tokens_details") or {}).get("cached_tokens", 0)
 
-    return InferenceResponse(
-        **resp_json,
-        content=msg.get("content"),
-        role=msg.get("role", "assistant"),
-        tool_calls=msg.get("tool_calls"),
-        input_tokens=usage.get("prompt_tokens", 0),
-        cached_tokens=cached_tokens,
-        output_tokens=usage.get("completion_tokens", 0),
-    )
+        return InferenceResponse(
+            **resp_json,
+            content=content,
+            role=msg_obj.get("role", "assistant"),
+            tool_calls=msg_obj.get("tool_calls"),
+            input_tokens=usage.get("prompt_tokens", 0),
+            cached_tokens=cached_tokens,
+            output_tokens=usage.get("completion_tokens", 0),
+        )
+
+    raise ChutesError(f"Chutes error: exhausted {MAX_RETRIES} retries ({last_error})")

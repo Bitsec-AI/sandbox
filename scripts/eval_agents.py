@@ -90,7 +90,7 @@ def main():
     )
     parser.add_argument("--agents", nargs="+", help="Specific agent dirs to evaluate (default: all)")
     parser.add_argument("--projects", nargs="+", help="Specific project keys to evaluate (default: all)")
-    parser.add_argument("--model", default="deepseek-ai/DeepSeek-V3.2-TEE", help="Scorer LLM model")
+    parser.add_argument("--model", default=None, help="Scorer LLM model (default: multi-model CHUTES_MODELS)")
     parser.add_argument("--confidence-threshold", type=float, default=0.75)
     parser.add_argument("--strict-matching", action="store_true")
     parser.add_argument("--verbose", action="store_true")
@@ -123,7 +123,7 @@ def main():
 
     print(f"Agents: {[d.name for d in agent_dirs]}")
     print(f"Inference API: {args.inference_api}")
-    print(f"Scorer model: {args.model}")
+    print(f"Scorer model: {args.model or 'CHUTES_MODELS (multi-model)'}")
     print()
 
     all_summaries = {}
@@ -185,15 +185,17 @@ def main():
             continue
 
         # Initialize scorer for this agent
-        scorer = ScaBenchScorerV2({
+        scorer_config = {
             "api_key": api_key,
             "api_url": args.inference_api,
-            "model": args.model,
             "debug": args.debug,
             "verbose": args.verbose,
             "confidence_threshold": args.confidence_threshold,
             "strict_matching": args.strict_matching,
-        })
+        }
+        if args.model:
+            scorer_config["model"] = args.model
+        scorer = ScaBenchScorerV2(scorer_config)
 
         agent_results = []
 
