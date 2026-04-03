@@ -10,6 +10,7 @@ import os
 import sys
 import argparse
 import re
+import time
 import math
 from datetime import datetime
 from dataclasses import dataclass, asdict
@@ -140,37 +141,45 @@ class ScaBenchScorerV2:
             "x-chutes-api-key": self.api_key,
         }
 
+        max_retries = 4
         resp = None
 
-        try:
-            resp = requests.post(
-                f"{self.api_url}/inference",
-                headers=headers,
-                json=payload,
-            )
-            resp.raise_for_status()
-
-        except requests.exceptions.HTTPError as e:
-            body = ""
+        for attempt in range(max_retries):
             try:
-                body = resp.json() if resp else ""
-            except Exception:
-                body = resp.text[:500] if resp else ""
-            console.print(f"Inference Proxy Error: {e}")
-            if self.debug:
-                console.print(f"  Response body: {body}")
-            raise
+                resp = requests.post(
+                    f"{self.api_url}/inference",
+                    headers=headers,
+                    json=payload,
+                )
+                resp.raise_for_status()
+                break
 
-        except requests.exceptions.RequestException as e:
-            body = ""
-            try:
-                body = resp.json() if resp else ""
-            except Exception:
-                body = resp.text[:500] if resp else ""
-            console.print(f"Inference Error: {e}")
-            if self.debug:
-                console.print(f"  Response body: {body}")
-            raise
+            except (requests.exceptions.HTTPError, requests.exceptions.ConnectionError) as e:
+                body = ""
+                try:
+                    body = resp.json() if resp else ""
+                except Exception:
+                    body = resp.text[:500] if resp else ""
+
+                if attempt < max_retries - 1:
+                    wait = 5 * (attempt + 1)
+                    console.print(
+                        f"[yellow]Scorer retry {attempt + 1}/{max_retries - 1} "
+                        f"(wait {wait}s): {e}[/yellow]"
+                    )
+                    time.sleep(wait)
+                    resp = None
+                    continue
+
+                console.print(f"[red]Inference failed after {max_retries} attempts: {e}[/red]")
+                if self.debug and body:
+                    console.print(f"  Response body: {body}")
+                raise
+
+            except requests.exceptions.RequestException as e:
+                # Non-retriable errors (DNS, SSL, etc.) — fail immediately
+                console.print(f"[red]Inference Error (non-retriable): {e}[/red]")
+                raise
 
         resp_json = resp.json()
         usage = resp_json.get("usage", {})
