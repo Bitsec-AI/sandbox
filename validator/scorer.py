@@ -61,7 +61,6 @@ class ScoringResult:
 
 MODELS = [
     "deepseek-ai/DeepSeek-V3-0324-TEE",
-    "zai-org/GLM-4.7-TEE",
     "moonshotai/Kimi-K2.5-TEE",
     "MiniMaxAI/MiniMax-M2.5-TEE",
 ]
