@@ -62,9 +62,9 @@ class ScoringResult:
 
 
 MODELS = [
-    "deepseek-ai/DeepSeek-V3.2-TEE",
+    # "deepseek-ai/DeepSeek-V3.2-TEE",
     "moonshotai/Kimi-K2.5-TEE",
-    "MiniMaxAI/MiniMax-M2.5-TEE",
+    # "MiniMaxAI/MiniMax-M2.5-TEE",
 ]
 CHUTES_MODELS = f"{','.join(MODELS)}:throughput"
 
@@ -135,7 +135,13 @@ class ScaBenchScorerV2:
                 {"role": "user", "content": prompt},
             ],
             "response_format": {"type": "json_object"},
+            "max_tokens": 8192,
         }
+
+        if "Kimi" in self.model_id:
+            payload["thinking"] = {"type": "disabled"}
+            payload["chat_template_kwargs"] = {"thinking": False}
+
 
         headers = {
             "x-chutes-api-key": self.api_key,
@@ -184,7 +190,7 @@ class ScaBenchScorerV2:
         resp_json = resp.json()
         usage = resp_json.get("usage", {})
         self.input_tokens += usage.get("prompt_tokens", 0)
-        self.cached_tokens += usage.get("prompt_tokens_details", {}).get("cached_tokens", 0)
+        self.cached_tokens += (usage.get("prompt_tokens_details") or {}).get("cached_tokens", 0)
         self.output_tokens += usage.get("completion_tokens", 0)
 
         # Log diagnostic info when content is empty (helps identify which model fails)

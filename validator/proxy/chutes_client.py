@@ -43,7 +43,10 @@ def call_chutes(
     if not request.model:
         request.model = DEFAULT_MODEL
 
-    logger.info(f'Request from [J:{job_id}|P:{project_key}] | model="{request.model}"')
+    logger.info(
+        f'Request from [J:{job_id}|P:{project_key}] | model="{request.model}" '
+        f'| max_tokens={request.max_tokens}'
+    )
 
     if not api_key:
         raise ChutesError("CHUTES_API_KEY is required. Pass x-chutes-api-key header.")
@@ -53,6 +56,11 @@ def call_chutes(
         "X-Identifier": "Bitsec",
     }
     payload_dict = request.model_dump()
+    logger.info(
+        f"[J:{job_id}|P:{project_key}] Outbound payload max_tokens={payload_dict.get('max_tokens')} "
+        f"| thinking={payload_dict.get('thinking')} "
+        f"| extra_keys={[k for k in payload_dict if k not in ('model','messages','max_tokens','temperature','response_format')]}"
+    )
 
     # Default to JSON mode unless caller provided a valid response_format dict
     if not isinstance(payload_dict.get("response_format"), dict):
@@ -135,12 +143,25 @@ def call_chutes(
 
         # --- Check null/empty content (model-level flake — no backoff) ---
         if is_json_mode and not (content or "").strip():
+            usage = resp_json.get("usage", {})
+            prompt_chars = sum(len(m.get("content", "") or "") for m in payload_dict.get("messages", []))
             last_error = (
                 f"Null/empty content (model={served_model}, finish_reason={finish_reason})"
             )
-            logger.warning(f"Chutes: {last_error}, retrying immediately...")
-            # No sleep — this is model flakiness, not server overload.
-            # Re-rolling immediately maximizes chance of hitting a working response.
+            logger.warning(
+                f"Chutes: {last_error} | attempt={attempt}/{MAX_RETRIES} "
+                f"| prompt_chars={prompt_chars} "
+                f"| prompt_tokens={usage.get('prompt_tokens', '?')} "
+                f"| completion_tokens={usage.get('completion_tokens', '?')} "
+                f"| reasoning_tokens={usage.get('reasoning_tokens', '?')} "
+                f"| content_repr={content!r} "
+                f"| has_reasoning={'reasoning' in msg_obj}"
+            )
+            # Dump full response for debugging
+            try:
+                logger.warning(f"Chutes: full response dump: {json.dumps(resp_json, indent=2, default=str)[:50000]}")
+            except Exception:
+                logger.warning(f"Chutes: raw response keys={list(resp_json.keys())}, choices={resp_json.get('choices')}")
             continue
 
         # --- All checks passed ---
