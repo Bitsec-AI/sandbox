@@ -28,6 +28,7 @@ class MockJobRun(BaseModel):
     id: int
     job_id: int
     validator_id: int
+    agent_id: int
 
 
 class AgentCode(BaseModel):

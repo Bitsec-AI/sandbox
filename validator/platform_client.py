@@ -246,6 +246,7 @@ class MockPlatformClient:
             id=int(time.time()),
             job_id=1,
             validator_id=1,
+            agent_id=1,
         )
         return job_run
 
