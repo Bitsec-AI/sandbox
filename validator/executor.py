@@ -142,16 +142,16 @@ class AgentExecutor:
         report_dict["started_at"] = self.started_at
         report_dict["completed_at"] = datetime.utcnow()
 
-        if "report" not in report_dict:
-            report_dict["status"] = "timed_out"
+        if "report" not in report_dict and report_dict.get("error") == "Agent timeout":
+            report_dict["status"] = Status.TIMED_OUT
 
-        elif isinstance(report_dict["report"], dict) and report_dict["report"].get("vulnerabilities") is not None:
-            report_dict["status"] = "success"
+        elif isinstance(report_dict.get("report"), dict) and report_dict["report"].get("vulnerabilities") is not None:
+            report_dict["status"] = Status.SUCCESS
 
         else:
-            report_dict["status"] = "error"
+            report_dict["status"] = Status.ERROR
             report_dict["report"] = {
-                "report_parsing_error": str(report_dict["report"]),
+                "report_parsing_error": str(report_dict.get("report", {})),
                 "vulnerabilities": [],
             }
 
