@@ -1,6 +1,29 @@
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+def derive_provider_from_api_key(api_key: str) -> str:
+    if api_key.startswith("cpk_"):
+        return "chutes"
+    if api_key.startswith("sk-or-"):
+        return "openrouter"
+    raise ValueError("Unsupported inference API key prefix. Expected 'cpk_' or 'sk-or-'.")
+
+
+class InferenceProvider(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    api_key: str
+    name: str | None = None
+
+    @model_validator(mode="after")
+    def set_or_validate_name(self):
+        derived = derive_provider_from_api_key(self.api_key)
+        if self.name and self.name != derived:
+            raise ValueError(f"Provider name {self.name!r} does not match the API key prefix.")
+        self.name = derived
+        return self
 
 
 class InferenceRequest(BaseModel):
