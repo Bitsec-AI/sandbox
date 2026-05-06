@@ -96,7 +96,7 @@ def miner_submit(
 
     client = get_platform_client(wallet)
     agent = client.submit_agent(agent_code)
-    logger.info(f"Agent submitted: version {agent['version']}")
+    logger.info(f"Agent submitted: Agent ID {agent['id']} version {agent['version']}")
 
 @miner_app.command("run")
 def miner_run():
