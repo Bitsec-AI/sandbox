@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     wallet_name: str | None = None
 
     chutes_api_key: str | None
+    inference_api_key: str | None
 
     app_url: str = "bitsec.ai"
     platform_url: str = "https://bitsec.ai/"
