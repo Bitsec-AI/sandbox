@@ -29,7 +29,8 @@ console = Console()
 REASONING_MODELS = {
     "tngtech/DeepSeek-TNG-R1T2-Chimera-TEE",
 }
-JSON_MODEL = "MiniMaxAI/MiniMax-M2.5-TEE"
+# JSON_MODEL = "MiniMaxAI/MiniMax-M2.5-TEE" # Chutes model
+JSON_MODEL = "qwen/qwen3.6-35b-a3b" # OpenRouter model
 
 TOOL_DEFINITIONS = [
     {
@@ -152,6 +153,10 @@ class BaselineRunner:
         console.print(f"Inference: {self.inference_api}")
 
     def inference(self, messages: list[dict[str, Any]], **kwargs) -> dict[str, Any]:
+        for message in messages:
+            if message.get("role") == "assistant" and 'tool_call_id' in message:
+                message.pop("tool_call_id", None)
+
         payload = {
             "model": self.config['model'],
             "messages": messages,
@@ -867,7 +872,7 @@ class BaselineRunner:
 
 def agent_main(project_dir: str = None, inference_api: str = None):
     config = {
-        'model': "MiniMaxAI/MiniMax-M2.5-TEE", # reasoning model
+        'model': JSON_MODEL, # reasoning model
         # 'model': 'deepseek-ai/DeepSeek-V3.1-Terminus', # tool use model
     }
 
