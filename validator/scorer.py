@@ -135,7 +135,7 @@ class ScaBenchScorerV2:
         }
 
         headers = {
-            "x-chutes-api-key": self.api_key,
+            "x-inference-api-key": self.api_key,
         }
 
         resp = None

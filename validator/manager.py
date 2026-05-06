@@ -110,10 +110,10 @@ class SandboxManager:
 
         agent = self.platform_client.get_job_run_agent(job_run_id=job_run.id)
 
-        chutes_api_key = agent.get("chutes_api_key")
-        if not chutes_api_key:
+        execution_api_key = agent.get("execution_api_key")
+        if not execution_api_key:
             logger.error(
-                f"[A:{job_run.agent_id}|JR:{job_run.id}] Miner did not provide CHUTES_API_KEY. Skipping job run."
+                f"[A:{job_run.agent_id}|JR:{job_run.id}] Miner did not provide an execution API key. Skipping job run."
             )
             self.platform_client.complete_job_run(job_run.id, status="error")
             return
@@ -143,7 +143,7 @@ class SandboxManager:
                 project_key,
                 job_run_reports_dir,
                 platform_client=self.platform_client,
-                chutes_api_key=chutes_api_key,
+                execution_api_key=execution_api_key,
             )
             task = loop.run_in_executor(self.executor_pool, executor.run)
             tasks.append(task)

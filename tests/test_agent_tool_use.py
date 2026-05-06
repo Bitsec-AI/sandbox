@@ -4,6 +4,7 @@ Mocks the inference API to simulate a multi-turn conversation where the model
 calls list_files, read_file, and report_vulnerabilities in sequence.
 """
 import json
+import os
 import tempfile
 from concurrent.futures import Future
 from pathlib import Path
@@ -99,7 +100,15 @@ def project_dir():
 def runner():
     """Create a BaselineRunner with a dummy config."""
     config = {"model": "test-model"}
-    return BaselineRunner(config, inference_api="http://fake:8000")
+    previous = os.environ.get("INFERENCE_API_KEY")
+    os.environ["INFERENCE_API_KEY"] = "cpk_test"
+    try:
+        return BaselineRunner(config, inference_api="http://fake:8000")
+    finally:
+        if previous is None:
+            os.environ.pop("INFERENCE_API_KEY", None)
+        else:
+            os.environ["INFERENCE_API_KEY"] = previous
 
 
 # ── Tests ────────────────────────────────────────────────────────
@@ -538,7 +547,10 @@ class TestInferenceKwargs:
             tool_choice="auto",
         )
 
+        headers = mock_post.call_args.kwargs["headers"]
         payload = mock_post.call_args.kwargs["json"]
+        assert headers["x-inference-api-key"] == "cpk_test"
+        assert "provider" not in payload
         assert payload["tools"] == TOOL_DEFINITIONS
         assert payload["tool_choice"] == "auto"
 

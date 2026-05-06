@@ -13,15 +13,11 @@ except IndexError:
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse
 
-try:
-    from .models import InferenceRequest, InferenceResponse
-    from .chutes_client import call_chutes, ChutesError
-except ImportError:
-    from models import InferenceRequest, InferenceResponse
-    from chutes_client import call_chutes, ChutesError
+from models import InferenceProvider, InferenceRequest, InferenceResponse
+from base_client import ProxyProviderError, get_provider_client
 
 
-app = FastAPI(title="Chutes Proxy")
+app = FastAPI(title="Inference Proxy")
 
 
 @app.get("/")
@@ -29,7 +25,7 @@ async def root():
     """Root endpoint providing proxy information."""
     return JSONResponse(
         {
-            "service": "Chutes Proxy",
+            "service": "Inference Proxy",
             "description": "Inference proxy for LLM requests",
             "endpoints": {
                 "POST /inference": "Submit inference requests",
@@ -48,13 +44,16 @@ _sem = asyncio.Semaphore(INFER_CONCURRENCY)
 @app.post("/inference", response_model=InferenceResponse)
 async def inference(
     request: InferenceRequest,
-    x_chutes_api_key: str = Header(),
+    x_inference_api_key: str | None = Header(default=None),
     x_job_id: str = Header(default="unknown"),
     x_project_id: str = Header(default="unknown"),
 ):
     try:
+        if not x_inference_api_key:
+            raise HTTPException(status_code=422, detail="x-inference-api-key is required")
+        provider = InferenceProvider(api_key=x_inference_api_key)
         async with _sem:
-            # Run the blocking call_chutes function in a thread pool to allow parallel requests
-            return await asyncio.to_thread(call_chutes, request, x_job_id, x_project_id, x_chutes_api_key)
-    except ChutesError as e:
+            client = get_provider_client(provider.name)
+            return await asyncio.to_thread(client.call, request, provider, x_job_id, x_project_id)
+    except ProxyProviderError as e:
         raise HTTPException(status_code=502, detail=str(e))

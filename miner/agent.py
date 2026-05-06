@@ -18,7 +18,6 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeRemainingColumn
 from rich.panel import Panel
 
-
 MAX_WORKERS = 2
 MAX_TOOL_PASS_WORKERS = 16
 MAX_TOOL_RUNTIME_SECONDS = 5 * 60
@@ -30,7 +29,8 @@ console = Console()
 REASONING_MODELS = {
     "tngtech/DeepSeek-TNG-R1T2-Chimera-TEE",
 }
-JSON_MODEL = "MiniMaxAI/MiniMax-M2.5-TEE"
+# JSON_MODEL = "MiniMaxAI/MiniMax-M2.5-TEE" # Chutes model
+JSON_MODEL = "qwen/qwen3.6-35b-a3b" # OpenRouter model
 
 TOOL_DEFINITIONS = [
     {
@@ -146,11 +146,17 @@ class BaselineRunner:
         self.inference_api = inference_api or os.getenv('INFERENCE_API', "http://bitsec_proxy:8000")
         self.project_id = os.getenv('PROJECT_ID', "local")
         self.job_id = os.getenv('JOB_ID', "local")
-        self.chutes_api_key = os.getenv('CHUTES_API_KEY')
+        self.inference_api_key = os.getenv('INFERENCE_API_KEY')
+        if not self.inference_api_key:
+            raise ValueError("An inference API key is required.")
 
         console.print(f"Inference: {self.inference_api}")
 
     def inference(self, messages: list[dict[str, Any]], **kwargs) -> dict[str, Any]:
+        for message in messages:
+            if message.get("role") == "assistant" and 'tool_call_id' in message:
+                message.pop("tool_call_id", None)
+
         payload = {
             "model": self.config['model'],
             "messages": messages,
@@ -161,9 +167,9 @@ class BaselineRunner:
         payload.update(kwargs)
 
         headers = {
-            "x_project_id": self.project_id or "local",
-            "x_job_id": self.job_id,
-            "x-chutes-api-key": self.chutes_api_key,
+            "x-inference-api-key": self.inference_api_key,
+            "x-project-id": self.project_id or "local",
+            "x-job-id": self.job_id,
         }
 
         resp = None
@@ -866,7 +872,7 @@ class BaselineRunner:
 
 def agent_main(project_dir: str = None, inference_api: str = None):
     config = {
-        'model': "MiniMaxAI/MiniMax-M2.5-TEE", # reasoning model
+        'model': JSON_MODEL, # reasoning model
         # 'model': 'deepseek-ai/DeepSeek-V3.1-Terminus', # tool use model
     }
 
