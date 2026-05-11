@@ -1,0 +1,684 @@
+{
+  "project": "code4rena_lambowin_2025_02",
+  "agent": "agent794",
+  "status": "success",
+  "timestamp": "2026-04-06T15:24:11.009322",
+  "elapsed_seconds": 251.6,
+  "total_expected": 4,
+  "total_found": 91,
+  "true_positives": 3,
+  "false_negatives": 1,
+  "false_positives": 88,
+  "detection_rate": 0.75,
+  "precision": 0.03296703296703297,
+  "f1_score": 0.06315789473684211,
+  "matched_findings": [
+    {
+      "id": "code4rena_lambowin_2025_02_expected_000",
+      "expected": "Loss of User Funds in VirtualToken\u2019scashInFunction Due to Incorrect Amount Minting",
+      "matched": "Incorrect Unit Representation in cashIn Function",
+      "confidence": 0.9,
+      "justification": "Finding 1 directly matches the expected vulnerability. It correctly identifies the VirtualToken contract, the cashIn function, and describes the core issue: unit mismatch between ETH (wei) and ERC20 (10^18) representations causing incorrect minting amounts. This aligns with the expected vulnerability title 'Loss of User Funds in VirtualToken's cashIn Function Due to Incorrect Amount Minting'. The description in Finding 1 accurately captures the unit representation problem that would lead to loss of funds through incorrect minting.",
+      "severity": "high",
+      "expected_description": "Submitted by\naldarion\n, also found by\n056Security\n,\n0xaudron\n,\n0xbrett8571\n,\n0xGondar\n,\n0xgremlincat\n,\n0xiehnnkta\n,\n0xiehnnkta\n,\n0xKann\n,\n0xLasadie\n,\n0xleadwizard\n,\n0xLeveler\n,\n0xMitev\n,\n0xMosh\n,\n4B\n,\n4rdiii\n,\nAgontuk\n,\nAkay\n,\nanonymousjoe\n,\nast3ros\n,\naster\n,\naua_oo7\n,\nBauchibred\n,\nBenRai\n,\nBenRai\n,\nBryan_Conquer\n,\nbumbleb33\n,\nc0pp3rscr3w3r\n,\nchaduke\n,\nColdless\n,\nColdless\n,\nCrazyMoose\n,\ncrmx_lom\n,\ndd0x7e8\n,\ndhank\n,\nDharkArtz\n,\ndic0de\n,\nEchoKly\n,\neLSeR17\n,\nEPSec\n,\nETHworker\n,\nEvo\n,\nFalseGenius\n,\nfarismaulana\n,\nfavelanky\n,\nFitro\n,\nFon\n,\nfranfran20\n,\ngkrastenov\n,\nGosho\n,\nharry_cryptodev\n,\nhoney-k12\n,\nhyuunn\n,\nicy_petal\n,\nInfect3d\n,\ninh3l\n,\nIzuMan\n,\njaraxxus\n,\njesusrod15\n,\nJiri123\n,\njkk812812\n,\nJohn_Femi\n,\njrstrunk\n,\njyjh\n,\nKiteWeb3\n,\nKKaminsk\n,\nkomorebi\n,\nKupiaSec\n,\nlanyi2023\n,\nLe_Rems\n,\nLe_Rems\n,\nLeFy\n,\nLordAdhaar\n,\nm4k2\n,\nm4k2\n,\nmacart224\n,\nMatin\n,\nmgf15\n,\nmontecristo\n,\nMoyinmaala\n,\nMrPotatoMagic\n,\nmrudenko\n,\nnewspacexyz\n,\nNexusAudits\n,\nOpaBatyo\n,\nOxsadeeq\n,\nparishill24\n,\npfapostol\n,\npontifex\n,\nprapandey031\n,\nProsperity\n,\nPumpkingWok\n,\nrare_one\n,\nRhaydden\n,\nrilwan99\n,\nRobinx33\n,\nrouhsamad\n,\nrspadi\n,\nsaikumar279\n,\nShubham\n,\nsilver_eth\n,\nSilverwind\n,\nslowbugmayor\n,\nSpicyMeatball\n,\nStingo\n,\nstuart_the_minion\n,\nSummer\n,\nTenderBeastJr\n,\nthreadmodeling\n,\ntpiliposian\n,\ntusharr1411\n,\nTychai0s\n,\ntypicalHuman\n,\nudo\n,\nVagabond\n,\nVasquez\n,\nviking71\n,\nvladi319\n,\nweb3km\n,\nwillycode20\n,\nX0sauce\n,\nxiao\n,\nYoanYJD\n,\nzaevlad\n,\nzaevlad\n,\nZhengZuo999\n,\nzxriptor\n, and\nzzebra83\n\nhttps://github.com/code-423n4/2024-12-lambowin/blob/874fafc7b27042c59bdd765073f5e412a3b79192/src/VirtualToken.sol#L78\n\nIn the VirtualToken contract\ncashIn()\nfunction uses msg.value instead of amount for minting tokens when dealing with ERC20 tokens. This causes users to lose their deposited ERC20 tokens as they receive 0 virtual tokens in return.\n\nThe root cause is the incorrect usage of msg.value in the minting logic. While the function correctly handles the token transfer with the amount parameter, it incorrectly uses msg.value for minting, which is probably 0 for ERC20 token transactions. They receive 0 virtual tokens in return (since msg.value is 0 for ERC20 transactions)\n\nfunction\ncashIn\n(\nuint256\namount\n)\nexternal\npayable\nonlyWhiteListed\n{\nif\n(\nunderlyingToken\n==\nLaunchPadUtils\n.\nNATIVE_TOKEN\n) {\nrequire\n(\nmsg\n.\nvalue\n==\namount\n,\n\"Invalid ETH amount\"\n);\n}\nelse\n{\n_transferAssetFromUser\n(\namount\n);\n}\n// @audit Critical: Using msg.value instead of amount\n_mint\n(\nmsg\n.\nsender\n,\nmsg\n.\nvalue\n);\n// Will be 0 for ERC20 tokens\nemit\nCashIn\n(\nmsg\n.\nsender\n,\nmsg\n.\nvalue\n);\n}\n\nfunction\ncashIn\n(\nuint256\namount\n)\nexternal\npayable\nonlyWhiteListed\n{\nif\n(\nunderlyingToken\n==\nLaunchPadUtils\n.\nNATIVE_TOKEN\n) {\nrequire\n(\nmsg\n.\nvalue\n==\namount\n,\n\"Invalid ETH amount\"\n);\n}\nelse\n{\n_transferAssetFromUser\n(\namount\n);\n}\n_mint\n(\nmsg\n.\nsender\n,\namount\n);\n// Use amount instead of msg.value\n}\n\nShaneson (Lambo.win) confirmed and commented\n:\n\nVirtualToken should support USDT, USDC in the future, so cashIn should use amount instead of msg.value. This is the\nfixed PR\n, please review.",
+      "found_description": "The cashIn function mints VirtualToken based on msg.value (in wei) but uses the same amount parameter for both ETH and ERC20 transfers, creating a unit mismatch between ETH (wei) and ERC20 (10^18) representations that will cause incorrect minting amounts.",
+      "found_id": "75b232a9c7e6bf05",
+      "tool_finding_index": 77
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_expected_002",
+      "expected": "Calculation fordirectionMaskis incorrect",
+      "matched": "High: Incorrect Mask Logic for Buy/Sell Direction Detection",
+      "confidence": 1.0,
+      "justification": "FINDING 0 directly matches the expected vulnerability. It correctly identifies the contract (LamboRebalanceOnUniwap.sol), the function (_getQuoteAndDirection), and accurately describes the core security issue: the incorrect mask logic for buy/sell direction detection where _SELL_MASK = 0 causes the condition 'if (directionMask == _BUY_MASK)' to never be true for sell operations, leading to all sell operations failing. This is exactly what the expected vulnerability describes as 'Calculation for directionMask is incorrect'.",
+      "severity": "high",
+      "expected_description": "Submitted by\n0xleadwizard\n, also found by\nAgontuk\n,\nBenRai\n,\nInfect3d\n,\nJiri123\n,\nNexusAudits\n,\nRhaydden\n,\nrouhsamad\n,\nSpicyMeatball\n, and\nZhengZuo999\n\nhttps://github.com/code-423n4/2024-12-lambowin/blob/main/src/rebalance/LamboRebalanceOnUniwap.sol#L165\n\nThe\n_getQuoteAndDirection\nfunction\u2019s flawed logic can cause incorrect direction determination in the UniswapV3 pool. The recommended mitigation ensures that the function dynamically identifies token0 and token1 and assigns the correct direction mask. This prevents potential financial losses and ensures accurate rebalancing.\n\nThe function\npreviewRebalance\nis called off-chain, to calculate values that can be passed to the function\nrebalance\nwhen making a call for balancing the uniswapV3 vETH/WETH pool.\n\nfunction\npreviewRebalance\n()\npublic\nview\nreturns\n(\nbool\nresult\n,\nuint256\ndirectionMask\n,\nuint256\namountIn\n,\nuint256\namountOut\n)\n{\naddress\ntokenIn\n;\naddress\ntokenOut\n;\n(\ntokenIn\n,\ntokenOut\n,\namountIn\n) =\n_getTokenInOut\n();\n(\namountOut\n,\ndirectionMask\n) =\n_getQuoteAndDirection\n(\ntokenIn\n,\ntokenOut\n,\namountIn\n);\nresult\n=\namountOut\n>\namountIn\n;\n}\n\nThe function\n_getQuoteAndDirection\ntakes\ntokenIn\n,\ntokenOut\n&\namountIn\nas parameter to output\namountOut\n&\ndirectionMask\n.\n\ndirectionMask\nis used to decide if the swap is\nzero-for-one\nor\none-for-zero\nin OKX.\n\nThe\n_getQuoteAndDirection\nfunction assumes that WETH is always token1, which can lead to incorrect direction determination in cases where WETH is actually token0. This is due to the fact that Uniswap sorts token0 and token1 lexicographically by their addresses, and not based on their logical roles.\n\nfunction\n_getQuoteAndDirection\n(\naddress\ntokenIn\n,\naddress\ntokenOut\n,\nuint256\namountIn\n)\ninternal\nview\nreturns\n(\nuint256\namountOut\n,\nuint256\ndirectionMask\n) {\n(\namountOut\n, , , ) =\nIQuoter\n(\nquoter\n).\nquoteExactInputSingleWithPool\n(\nIQuoter\n.\nQuoteExactInputSingleWithPoolParams\n({\ntokenIn:\ntokenIn\n,\ntokenOut:\ntokenOut\n,\namountIn:\namountIn\n,\nfee:\nfee\n,\npool:\nuniswapPool\n,\nsqrtPriceLimitX96:\n0\n})\n);\n>>\ndirectionMask\n= (\ntokenIn\n==\nweth\n) ?\n_BUY_MASK\n:\n_SELL_MASK\n;\n}\n\nExample: If the UniswapV3 pool has token0 as WETH (lower address value) and token1 as vETH (higher address value), and the pool has more vETH than WETH, the tokenIn will be WETH. However, because WETH is token0 in this case, the correct direction would be zero-for-one. The current logic mistakenly assumes WETH is token1, leading to an incorrect direction of one-for-zero.\n\nFor context, here is how the MASK is used in OKX:\n\nMASK defined\n\nuint256\nprivate\nconstant\n_ONE_FOR_ZERO_MASK\n=\n1\n<<\n255\n;\n// Mask for identifying if the swap is one-for-zero\n\nMASK used\n\nlet\nzeroForOne\n:=\neq\n(\nand\n(\n_pool\n,\n_ONE_FOR_ZERO_MASK\n),\n0\n)\n\nAdd the logic for considering if the\ntokenIn\nis\ntoken0\nor\ntoken1\n.\n\nfunction\n_getQuoteAndDirection\n(\naddress\ntokenIn\n,\naddress\ntokenOut\n,\nuint256\namountIn\n)\ninternal\nview\nreturns\n(\nuint256\namountOut\n,\nuint256\ndirectionMask\n) {\n// Retrieve token0 and token1 from the Uniswap pool\naddress\ntoken0\n=\nIUniswapV3Pool\n(\nuniswapPool\n).\ntoken0\n();\naddress\ntoken1\n=\nIUniswapV3Pool\n(\nuniswapPool\n).\ntoken1\n();\n// Call the quoter to get the amountOut\n(\namountOut\n, , , ) =\nIQuoter\n(\nquoter\n).\nquoteExactInputSingleWithPool\n(\nIQuoter\n.\nQuoteExactInputSingleWithPoolParams\n({\ntokenIn:\ntokenIn\n,\ntokenOut:\ntokenOut\n,\namountIn:\namountIn\n,\nfee:\nfee\n,\npool:\nuniswapPool\n,\nsqrtPriceLimitX96:\n0\n})\n);\n// Determine directionMask based on tokenIn position (token0 or token1)\nif\n(\ntokenIn\n==\ntoken0\n) {\ndirectionMask\n=\n_SELL_MASK\n;\n// Zero-for-one direction\n}\nelse\n{\ndirectionMask\n=\n_BUY_MASK\n;\n// One-for-zero direction\n}\n}\n\nShaneson (Lambo.win) acknowledged and commented\n:\n\nWhen the VETH is deployed, the direction will be updated. But yes, this is still a good suggestion.",
+      "found_description": "The code uses _BUY_MASK = 1 << 255 and _SELL_MASK = 0 for buy/sell detection, but the logic in _getQuoteAndDirection always sets directionMask = (tokenIn == weth) ? _BUY_MASK : _SELL_MASK. Since _SELL_MASK = 0, the condition 'if (directionMask == _BUY_MASK)' will never be true for sell operations, causing all sell operations to fail.",
+      "found_id": "9a1ddcfa925a6436",
+      "tool_finding_index": 61
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_expected_003",
+      "expected": "Anyone can callLamboRebalanceOnUniwap.sol::rebalance()function with any arbitrary value, leading to rebalancing goal i.e. (1:1 peg) unsuccessful.",
+      "matched": "Missing Access Control in Interface",
+      "confidence": 0.85,
+      "justification": "FINDING 4 explicitly mentions 'Missing Access Control in Interface' and states 'The `rebalance` function performs critical operations (swaps, profit calculation) without access control modifiers. This allows unauthorized users to execute critical operations.' This directly matches the expected vulnerability which describes that anyone can call the rebalance() function with arbitrary values due to missing access control. While FINDING 4 focuses on access control generally rather than specifically the arbitrary parameter values issue, the core problem is the same: unauthorized users can call rebalance() with any parameters, leading to failed rebalancing goals.",
+      "severity": "high",
+      "expected_description": "Submitted by\norangesantra\n, also found by\nEPSec\nand\nEvo\n\nAnyone can call\nLamboRebalanceOnUniwap.sol::rebalance()\nfunction with any arbitrary value, leading to rebalancing goal i.e. (1:1 peg) unsuccessful.\n\nThe parameters required in\nrebalance()\nfunction will are,\nuint256 directionMask\n,\nuint256 amountIn\n,\nuint256 amountOut\n. The typical value should be -\n\ndirectionMask =\n0\nor\n1<<255\n\namountIn and amountOut obtained from\nLamboRebalanceOnUniwap.sol::previewRebalance()\n\nBut since there is no check, to ensure the typical values of parameter in the function, this can cause the flashloan for wrong amount or flashloan reverting if directionMask is any other value apart from\n0\nor\n1<<255\n.\n\nIf flashloan of wrong amount occurs it means the pool will be unbalanced again with different value instead of balancing.\n\nBy pasting the following code in\nRebalanceTest.t.sol\n, we can see that\nafter_uniswapPoolWETHBalance:2\nand\nafter_uniswapPoolVETHBalance:2\nare much distant.\n\nThe test does the following -\n\nDo the usual rebalancing operation by executing\nrebalance()\n, by proving parameter from\npreviewRebalance()\nand legit\ndirectionMask\n.\nAfter snapshot revert, it calls the\nrebalance()\nfunction from an unauthorised user with an abritrary value.\nIn the console log we can see, that the rebalance with typical parameters does the balancing goal of nearly 1:1\n\n// after_uniswapPoolWETHBalance:  449788833045085369301\n// after_uniswapPoolVETHBalance:  452734978359843468645\n\nBut for second part output statement obtained is as follow (unable to obtain 1:1 peg)-\n\n// after_uniswapPoolWETHBalance:2  350165415961266006942\n// after_uniswapPoolVETHBalance:2  552734978359843468645\n\nPaste the below code in RebalanceTest.t.sol.\n\nfunction test_any_caller() public {\nuint256 amount = 422 ether;\nuint256 _v3pool = uint256(uint160(uniswapPool)) | (_ONE_FOR_ZERO_MASK);\nuint256[] memory pools = new uint256[](1);\npools[0] = _v3pool;\nuint256 amountOut0 = IDexRouter(OKXRouter).uniswapV3SwapTo{value: amount}(\nuint256(uint160(multiSign)),\namount,\n0,\npools\n);\nconsole.log(\"user amountOut0\", amountOut0);\n(bool result, uint256 directionMask, uint256 amountIn, uint256 amountOut) = lamboRebalance.previewRebalance();\nrequire(result, \"Rebalance not profitable\");\nuint256 before_uniswapPoolWETHBalance = IERC20(WETH).balanceOf(uniswapPool);\nuint256 before_uniswapPoolVETHBalance = IERC20(VETH).balanceOf(uniswapPool);\nuint snapshot = vm.snapshot();\nlamboRebalance.rebalance(directionMask, amountIn, amountOut);\nuint256 initialBalance = IERC20(WETH).balanceOf(address(this));\nlamboRebalance.extractProfit(address(this), WETH);\nuint256 finalBalance = IERC20(WETH).balanceOf(address(this));\nrequire(finalBalance > initialBalance, \"Profit must be greater than 0\");\nconsole.log(\"profit :\", finalBalance - initialBalance);\nuint256 after_uniswapPoolWETHBalance = IERC20(WETH).balanceOf(uniswapPool);\nuint256 after_uniswapPoolVETHBalance = IERC20(VETH).balanceOf(uniswapPool);\n// profit : 2946145314758099343\n// before_uniswapPoolWETHBalance:  872000000000000000000\n// before_uniswapPoolVETHBalance:  33469956719686937289\n// after_uniswapPoolWETHBalance:  449788833045085369301\n// after_uniswapPoolVETHBalance:  452734978359843468645\nconsole.log(\"before_uniswapPoolWETHBalance: \", before_uniswapPoolWETHBalance);\nconsole.log(\"before_uniswapPoolVETHBalance: \", before_uniswapPoolVETHBalance);\nconsole.log(\"after_uniswapPoolWETHBalance: \", after_uniswapPoolWETHBalance);\nconsole.log(\"after_uniswapPoolVETHBalance: \", after_uniswapPoolVETHBalance);\nvm.revertTo(snapshot);\n// creating a non-authorised address.\nuint256 signerPrivateKey = 0xabc123;\naddress signer = vm.addr(signerPrivateKey);\ndeal(WETH, signer, amountIn + 100 ether);\ndeal(VETH, signer, amountOut + 100 ether);\nvm.startPrank(signer);\nlamboRebalance.rebalance(directionMask, amountIn + 100 ether, amountOut + 100 ether);\nvm.stopPrank();\ninitialBalance = IERC20(WETH).balanceOf(address(this));\nlamboRebalance.extractProfit(address(this), WETH);\nfinalBalance = IERC20(WETH).balanceOf(address(this));\nrequire(finalBalance > initialBalance, \"Profit must be greater than 0\");\nconsole.log(\"profit :\", finalBalance - initialBalance);\nafter_uniswapPoolWETHBalance = IERC20(WETH).balanceOf(uniswapPool);\nafter_uniswapPoolVETHBalance = IERC20(VETH).balanceOf(uniswapPool);\n// profit : 2569562398577461702\n// before_uniswapPoolWETHBalance:2  872000000000000000000\n// before_uniswapPoolVETHBalance:2  33469956719686937289\n// after_uniswapPoolWETHBalance:2  350165415961266006942\n// after_uniswapPoolVETHBalance:2  552734978359843468645\nconsole.log(\"before_uniswapPoolWETHBalance:2 \", before_uniswapPoolWETHBalance);\nconsole.log(\"before_uniswapPoolVETHBalance:2 \", before_uniswapPoolVETHBalance);\nconsole.log(\"after_uniswapPoolWETHBalance:2 \", after_uniswapPoolWETHBalance);\nconsole.log(\"after_uniswapPoolVETHBalance:2 \", after_uniswapPoolVETHBalance);\nrequire(\n((before_uniswapPoolWETHBalance + before_uniswapPoolVETHBalance) -\n(after_uniswapPoolWETHBalance + after_uniswapPoolVETHBalance) ==\n(finalBalance - initialBalance)),\n\"Rebalance Profit comes from pool's rebalance\"\n);\n}\n\nCheck the parameter of\nrebalance()\nfunction whether they are legit or not, i.e. as per flashloan requirement.\n\nShaneson (Lambo.win) acknowledged",
+      "found_description": "The interface declares critical functions without access control indicators. The `rebalance` function performs critical operations (swaps, profit calculation) without access control modifiers. This allows unauthorized users to execute critical operations.",
+      "found_id": "4f2e677e0cafa4a6",
+      "tool_finding_index": 84
+    }
+  ],
+  "missed_findings": [
+    {
+      "id": "code4rena_lambowin_2025_02_expected_001",
+      "title": "LamboFactory can be permanently DoS-ed due tocreatePaircall reversal",
+      "description": "Submitted by\nzxriptor\n, also found by\nast3ros\n,\nEvo\n,\nFalseGenius\n,\nGiorgio\n,\nInfect3d\n,\ninh3l\n,\nLe_Rems\n,\nm4k2\n,\nmrudenko\n,\npaco\n,\nrouhsamad\n,\nshaflow2\n,\nSpicyMeatball\n,\nTheFabled\n,\nthreadmodeling\n, and\nweb3km\n\nhttps://github.com/code-423n4/2024-12-lambowin/blob/main/src/LamboFactory.sol#L72\n\nLamboFactory.createLaunchPad\ndeploys new token contract and immediately sets up a new Uniswap V2 pool by calling\ncreatePair\n. This can be frontrun by the attacker by setting up a pool for the next token to be deployed.\n\nContract addresses are deterministic and can be calculated in advance. That opens a possibility for the attacker to pre-calculate the address of the next LamboToken to be deployed. As can be seen below, LamboFactory uses\nclone\n() method from OpenZeppelin\nClones\nlibrary, which uses\nCREATE\nEMV opCode under the hood.\n\nfunction\n_deployLamboToken\n(\nstring\nmemory\nname\n,\nstring\nmemory\ntickname\n)\ninternal\nreturns\n(\naddress\nquoteToken\n) {\n// Create a deterministic clone of the LamboToken implementation\n>>>\nquoteToken\n=\nClones\n.\nclone\n(\nlamboTokenImplementation\n);\n// Initialize the cloned LamboToken\nLamboToken\n(\nquoteToken\n).\ninitialize\n(\nname\n,\ntickname\n);\nemit\nTokenDeployed\n(\nquoteToken\n);\n}\n\nCREATE\nopcode calculates new contract address based on factory contract address and nonce (number of deployed contracts the factory has previously deployed):\n\nThe destination address is calculated as the rightmost 20 bytes (160 bits) of the Keccak-256 hash of the rlp encoding of the sender address followed by its nonce. That is:\naddress = keccak256(rlp([sender\naddress,sender\nnonce]))[12:]\n\nhttps://www.evm.codes/#f0\n\nHence an attacker can calculate the address of the next token to be deployed and directly call\nUniswapV2Factory.createPair\nwhich will result in a new liquidity pool being created BEFORE the token has been deployed.\n\nSuch state will lead all subsequent calls to\nLamboFactory.createLaunchPad\nto revert, because of the pair existence check in Uniswap code, without the possibility to fix that:\n\nhttps://github.com/Uniswap/v2-core/blob/master/contracts/UniswapV2Factory.sol#L27\n\nfunction\ncreatePair\n(\naddress\ntokenA\n,\naddress\ntokenB\n)\nexternal\nreturns\n(\naddress\npair\n) {\nrequire\n(\ntokenA\n!=\ntokenB\n,\n'UniswapV2: IDENTICAL_ADDRESSES'\n);\n(\naddress\ntoken0\n,\naddress\ntoken1\n) =\ntokenA\n<\ntokenB\n? (\ntokenA\n,\ntokenB\n) : (\ntokenB\n,\ntokenA\n);\nrequire\n(\ntoken0\n!=\naddress\n(\n0\n),\n'UniswapV2: ZERO_ADDRESS'\n);\n>>>\nrequire\n(\ngetPair\n[\ntoken0\n][\ntoken1\n] ==\naddress\n(\n0\n),\n'UniswapV2: PAIR_EXISTS'\n);\n// single check is sufficient\n// ... the rest of the code is ommitted ...\n}\n\nCheck pool existence using\nIUniswapV2Factory.getPair()\n.\n\nShaneson (Lambo.win) commented\n:\n\nWe would use cloneDeterministic instead of clone, and the backend will pass the random salt from off-chain.\nAnd this is the\nfixed PR\n.\n\nKoolex (judge) commented\n:\n\nI believe with this fix, front-run can still be done.  It is better to check if the pair exists, then simply don\u2019t create it. This way, there is zero DoS.",
+      "severity": "high",
+      "reason": "Not found"
+    }
+  ],
+  "undecided_findings": [],
+  "extra_findings": [
+    {
+      "id": "code4rena_lambowin_2025_02_tool_000",
+      "title": "Missing Access Control on initialize() Allows Fee Manipulation",
+      "description": "The initialize() function lacks access control, allowing any caller to initialize the token contract and mint the entire supply to themselves before legitimate deployment. This bypasses intended deployment controls and enables front-running of the first deployment.",
+      "severity": "critical",
+      "original_id": "88c3da87fe5a6918"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_001",
+      "title": "Missing Initialization Check in initialize() Allows Re-initialization Attack",
+      "description": "The LamboToken contract's initialize() function lacks proper initialization guards, allowing the contract to be re-initialized after deployment. This enables an attacker who gains control of the contract to re-initialize it with malicious parameters, potentially minting unlimited tokens or transferring control to an attacker-controlled address.",
+      "severity": "critical",
+      "original_id": "c4e4c276453865ec"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_002",
+      "title": "Missing Transfer Validation in _transfer() Allows Zero-Value Transfers",
+      "description": "The LamboToken contract's _transfer() function lacks validation for zero-value transfers, allowing attackers to trigger unnecessary state changes and event emissions for zero-value transfers. This can be exploited to manipulate contract state and potentially cause denial of service through gas exhaustion attacks.",
+      "severity": "high",
+      "original_id": "b6a8f70248e467c7"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_003",
+      "title": "Missing Allowance Validation in _approve() Allows Zero-Value Approvals",
+      "description": "The LamboToken contract's _approve() function lacks validation for zero-value approvals, allowing attackers to trigger unnecessary state changes and event emissions for zero-value approvals. This can be exploited to manipulate contract state and potentially cause denial of service through gas exhaustion attacks.",
+      "severity": "high",
+      "original_id": "2c3f6c4dd4c764fd"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_004",
+      "title": "Missing Balance Validation in _update() Allows Negative Balance Transfers",
+      "description": "The LamboToken contract's _update() function lacks validation for balance transfers that could result in negative balances, allowing attackers to create negative balances in the contract. This can be exploited to manipulate contract state and potentially cause accounting errors or denial of service through gas exhaustion attacks.",
+      "severity": "high",
+      "original_id": "1f2afe92a683316e"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_005",
+      "title": "Missing Total Supply Validation in _update() Allows Negative Total Supply Transfers",
+      "description": "The LamboToken contract's _update() function lacks validation for total supply transfers that could result in negative total supply, allowing attackers to create negative total supply in the contract. This can be exploited to manipulate contract state and potentially cause accounting errors or denial of service through gas exhaustion attacks.",
+      "severity": "high",
+      "original_id": "06c2bf95cad6b1cb"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_006",
+      "title": "Missing User Protection in _transfer Function",
+      "description": "The _transfer function in LamboToken.sol does not provide mechanisms for users to specify minimum acceptable outputs when executing transfers. This exposes users to unfavorable execution outcomes without protection against market manipulation or adversarial actions.",
+      "severity": "high",
+      "original_id": "f4d1bc5a3c34c1bc"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_007",
+      "title": "Validation Timing Issue in _transfer Function",
+      "description": "The _transfer function in LamboToken.sol executes state changes before validation. The function calls _update before validating parameters, allowing invalid operations to complete. This is a critical vulnerability as it enables invalid transfers to be processed.",
+      "severity": "high",
+      "original_id": "6c949f13493fd056"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_008",
+      "title": "State Synchronization Issue in _transfer Function",
+      "description": "The _transfer function in LamboToken.sol modifies state before dependent functions execute. The function calls _update before dependent functions execute, causing state synchronization issues. This is a critical vulnerability as it allows state manipulation.",
+      "severity": "high",
+      "original_id": "2d72884a4a940efb"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_009",
+      "title": "Return Value Unit Consistency Issue in _transfer Function",
+      "description": "The _transfer function in LamboToken.sol returns values in incorrect units. The function returns a boolean value when the caller expects a different unit. This is a critical vulnerability as it causes incorrect calculations.",
+      "severity": "high",
+      "original_id": "b639b48a479f1d7a"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_010",
+      "title": "State Commitment Timing Issue in _transfer Function",
+      "description": "The _transfer function in LamboToken.sol commits state before operations that can fail. The function modifies state before verifying that all intended operations succeeded. This is a critical vulnerability as it causes state waste on failed operations.",
+      "severity": "high",
+      "original_id": "a012962d7cf2ea44"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_011",
+      "title": "External System Assumptions Issue in _transfer Function",
+      "description": "The _transfer function in LamboToken.sol makes assumptions about external system structure or behavior. The function assumes external system characteristics that could vary. This is a critical vulnerability as it causes incorrect logic.",
+      "severity": "high",
+      "original_id": "2b8c52cecd18678a"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_012",
+      "title": "Signature Execution Context Binding Issue in _transfer Function",
+      "description": "The _transfer function in LamboToken.sol does not bind signature to execution context. The function does not include intended executor/submitter address in signed digest. This is a critical vulnerability as it allows unauthorized execution.",
+      "severity": "high",
+      "original_id": "272c48ee7db83bac"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_013",
+      "title": "Missing Access Control on initialize() Allows Arbitrary Token Minting",
+      "description": "The initialize() function lacks access control restrictions, allowing any caller to initialize the token contract and mint the entire supply to themselves. This is a critical vulnerability because it enables complete token supply manipulation and potential rug-pull scenarios.",
+      "severity": "critical",
+      "original_id": "c9c1219dcb3fa2bb"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_014",
+      "title": "Critical: Missing Access Control on createLaunchPad Allows Unauthorized Pool Creation",
+      "description": "The createLaunchPad function lacks proper access control, allowing any whitelisted token holder to create launchpads and potentially drain funds. The function uses onlyWhiteListed modifier but does not restrict who can call it beyond whitelist status. This allows malicious actors who gain whitelist status to create launchpads and manipulate the system.",
+      "severity": "critical",
+      "original_id": "2b38b3acbf592e12"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_015",
+      "title": "Missing Access Control on Virtual Token Whitelist Updates",
+      "description": "The `addVTokenWhiteList` and `removeVTokenWhiteList` functions lack proper access control on the `onlyOwner` modifier, allowing any address to manipulate the whitelist state before the owner's intended operations.",
+      "severity": "high",
+      "original_id": "7a358413ec65496d"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_016",
+      "title": "State Not Restored After Whitelist Removal",
+      "description": "The removeVTokenWhiteList function sets the whitelist entry to false but does not restore the previous state, allowing potential re-whitelisting without proper initialization.",
+      "severity": "high",
+      "original_id": "VULN-001"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_017",
+      "title": "Missing Initialization Check for Deployed Token",
+      "description": "The _deployLamboToken function deploys a new LamboToken via Clones.clone and immediately calls initialize without verifying the initialization succeeded or checking if the token is properly initialized.",
+      "severity": "medium",
+      "original_id": "VULN-002"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_018",
+      "title": "Reentrancy in createLaunchPad",
+      "description": "The createLaunchPad function calls external functions (mint, transfer) before the function completes, and uses nonReentrant guard only on createLaunchPad, but internal calls like _deployLamboToken do not have reentrancy protection.",
+      "severity": "high",
+      "original_id": "VULN-003"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_019",
+      "title": "Missing Whitelist Check in createLaunchPad",
+      "description": "The createLaunchPad function uses onlyWhiteListed modifier on virtualLiquidityToken but does not verify that the virtualLiquidityToken is properly initialized or that the token is valid before deploying a new token.",
+      "severity": "medium",
+      "original_id": "VULN-004"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_020",
+      "title": "Missing Initialization Check for Token Implementation",
+      "description": "The constructor accepts lamboTokenImplementation address but does not verify that the implementation contract is a valid LamboToken contract or that it implements the required functions.",
+      "severity": "medium",
+      "original_id": "VULN-005"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_021",
+      "title": "Missing Decimals Validation in Token Initialization",
+      "description": "The LamboToken contract implements a custom initialization pattern where the token name and symbol are set during initialization. However, the contract does not validate that the provided name and symbol are non-empty strings. This can lead to tokens with empty names or symbols, which violates ERC-20 requirements and can cause issues with token explorers, wallets, and other integrations.",
+      "severity": "medium",
+      "original_id": "LAMBO-001"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_022",
+      "title": "Critical: Division by Zero in `AmountCalculatorLib.getMakingAmount` and `AmountCalculatorLib.getTakingAmount`",
+      "description": "The `AmountCalculatorLib.getMakingAmount` and `AmountCalculatorLib.getTakingAmount` functions contain a critical division by zero vulnerability. When `orderTakerAmount` is zero, the division operation `(swapTakerAmount * orderMakerAmount) / orderTakerAmount` will revert with a division by zero error. This can occur when an order is created with a `takingAmount` of zero, which is allowed by the protocol. An attacker can exploit this by creating an order with `takingAmount` of zero, then calling `fillOrder` or `fillOrderArgs` with a non-zero `amount`. The `fillOrder` function will call `calculateMakingAmount`, which calls `AmountCalculatorLib.getMakingAmount`, triggering the division by zero and reverting the entire transaction. This allows an attacker to grief the protocol by creating zero-amount orders that cause all subsequent fills to fail, preventing legitimate users from executing trades.",
+      "severity": "critical",
+      "original_id": "877c2aefe0429163"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_023",
+      "title": "Missing User Protection in Order Filling",
+      "description": "The fillOrder and fillOrderArgs functions in OrderMixin do not provide users with mechanisms to specify minimum acceptable outputs when filling orders. This exposes users to unfavorable execution outcomes without any protection against market manipulation or sandwich attacks.",
+      "severity": "high",
+      "original_id": "d983613157d3a5f3"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_024",
+      "title": "Missing Access Control on `cancelOrder` and `cancelOrders` Functions",
+      "description": "The `cancelOrder` and `cancelOrders` functions in the `OrderMixin` contract lack proper access control. These functions update critical state variables used in economic calculations (remaining amounts and invalidation bits) without verifying that the caller is authorized to do so. This allows any user to manipulate the state of orders, potentially avoiding fees or gaining unfair advantages.",
+      "severity": "high",
+      "original_id": "c152a30c07b0dc24"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_025",
+      "title": "Missing Caller Verification in Automatic Currency Handlers",
+      "description": "The contract has automatic handlers for receiving native currency transfers that do not verify the caller identity or transaction origin before executing operations. This allows malicious actors to trigger unintended operations by sending funds to the contract.",
+      "severity": "high",
+      "original_id": "1490e7b843357c68"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_026",
+      "title": "Unrestricted Minting of LP Tokens to Zero Address",
+      "description": "The createLaunchPad function mints LP tokens to address(this) then immediately transfers them to address(0). However, the mint() call is made directly to the pool contract, and if the pool contract has a fallback function that re-enters the factory, it could cause unexpected behavior. More critically, the mint() call is made before the transfer() to address(0), and if the mint() call fails, the tokens are still considered 'burned' in the factory's accounting, but no actual burn occurs.",
+      "severity": "high",
+      "original_id": "09749324b27513a6"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_027",
+      "title": "Missing Reentrancy Guard on Token Deployment",
+      "description": "The _deployLamboToken function creates a new LamboToken clone and calls initialize() on it. If the LamboToken implementation contract has a malicious initialize() function that re-enters the factory contract, it could cause unexpected behavior. The initialize() call is made without any reentrancy protection, and if the LamboToken implementation is compromised or has a vulnerability, it could be exploited to drain funds or cause accounting errors.",
+      "severity": "high",
+      "original_id": "8ac1dbdf6d2ec3e7"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_028",
+      "title": "Unrestricted Minting of LP Tokens to Factory Address",
+      "description": "The createLaunchPad function mints LP tokens to address(this) then immediately transfers them to address(0). However, the mint() call is made directly to the pool contract, and if the pool contract has a fallback function that re-enters the factory, it could cause unexpected behavior. More critically, the mint() call is made before the transfer() to address(0), and if the mint() call fails, the tokens are still considered 'burned' in the factory's accounting, but no actual burn occurs.",
+      "severity": "high",
+      "original_id": "2f6bb15819be8554"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_029",
+      "title": "Missing Reentrancy Guard on Token Initialization",
+      "description": "The _deployLamboToken function creates a new LamboToken clone and calls initialize() on it. If the LamboToken implementation contract has a malicious initialize() function that re-enters the factory contract, it could cause unexpected behavior. The initialize() call is made without any reentrancy protection, and if the LamboToken implementation is compromised or has a vulnerability, it could be exploited to drain funds or cause accounting errors.",
+      "severity": "high",
+      "original_id": "3ff6f9fbd07a37e0"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_030",
+      "title": "Type System: Raw Bit Comparison for Packed Types",
+      "description": "The MakerTraits and TakerTraits types use uint256 with bit flags and packed values. The isAllowedSender function compares raw bits without decoding, causing equal values with different representations to compare unequal.",
+      "severity": "high",
+      "original_id": "c9ce8ffc5e089c15"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_031",
+      "title": "Type System: Precision Loss in Conversion",
+      "description": "The isExpired function extracts expiration timestamp but ignores higher bits, causing values with different representations to compare equal. This can lead to silent truncation when values are converted between representations.",
+      "severity": "high",
+      "original_id": "ec0e6dd4e5e0c261"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_032",
+      "title": "Operation Lifecycle: Incomplete State Restoration on Cancel",
+      "description": "The cancelOrder function for bit-invalidator orders only updates the invalidator but does not restore the original remaining amount. This leaves the order in an inconsistent state where the remaining amount is not properly tracked.",
+      "severity": "high",
+      "original_id": "434afa3a6279bba4"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_033",
+      "title": "Operation Lifecycle: State Commitment Before Verification",
+      "description": "The fillOrder function commits state changes (remaining amount, invalidator) before verifying all intended operations succeeded. If the external call fails while the parent succeeds, the state is consumed but the operation is incomplete.",
+      "severity": "high",
+      "original_id": "f83e7612fe4bb685"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_034",
+      "title": "Operation Lifecycle: Authorization Context Not Bound",
+      "description": "The signature in fillOrder does not bind the caller, allowing anyone with the authorization to execute. This enables front-running where the authorization is used with a different context.",
+      "severity": "high",
+      "original_id": "0961b1dd8e4c2c63"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_035",
+      "title": "External Integration: Interface Definition Mismatch",
+      "description": "The IClipperExchange interface declares sellEthForToken with 7 parameters, but the actual Clipper protocol uses 8 parameters. This ABI mismatch causes transaction reverts.",
+      "severity": "critical",
+      "original_id": "e3a4706c82112b9b"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_036",
+      "title": "External Integration: Fork Behavioral Divergence",
+      "description": "The UnoswapRouter assumes the UniswapV3 protocol still performs fee accumulation in the pool contract, but the fork moved fee collection to a separate distributor contract. Calling the original function does nothing, and fees accumulate nowhere.",
+      "severity": "critical",
+      "original_id": "9b827e6397b29430"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_037",
+      "title": "Critical: Fee Calculation Bug in _sellQuote Allows Fee Avoidance",
+      "description": "The _sellQuote function incorrectly calculates fees by applying the fee rate to the gross amount before subtracting the fee, but then applies the fee rate again to the already-fee-subtracted amount. This double-application of fees allows attackers to avoid paying fees entirely by setting minReturn to 0, causing the function to return 0 ETH to the user while the protocol loses the full amount.",
+      "severity": "critical",
+      "original_id": "8f839b2e1d2e00dc"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_038",
+      "title": "High: Missing Access Control on createLaunchPadAndInitialBuy Allows Unauthorized Launchpad Creation",
+      "description": "The createLaunchPadAndInitialBuy function lacks access control restrictions, allowing any caller to create launchpads and execute initial buys. Combined with the fee calculation bug, this enables attackers to create launchpads and immediately trigger the fee bug to steal funds.",
+      "severity": "high",
+      "original_id": "6b10621e9e150b56"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_039",
+      "title": "High: State Synchronization Bug in getSellQuote and _sellQuote",
+      "description": "The getSellQuote function calculates fees by subtracting the fee from the gross amount, but _sellQuote applies the fee rate to the already-fee-subtracted amount. This inconsistency allows attackers to exploit the fee calculation difference between the two functions to steal funds.",
+      "severity": "high",
+      "original_id": "bdbba82c450f54a1"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_040",
+      "title": "Medium: Division by Zero Risk in UniswapV2Library.getAmountOut",
+      "description": "The getSellQuote and _sellQuote functions call UnisReserves to get reserves and then call getAmountOut. If the reserveIn is 0, getAmountOut will return 0, but the code does not check for this condition, leading to division by zero.",
+      "severity": "medium",
+      "original_id": "b3b141374e6d9352"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_041",
+      "title": "Low: Reentrancy Risk in _buyQuote",
+      "description": "The _buyQuote function calls payable(owner()).call{value: fee}() and msg.sender.call{value: amountXOut}() without using SafeCall or checking return values properly. If the owner or msg.sender is a contract that reverts on receive, the function will revert, but the code does not handle this case.",
+      "severity": "low",
+      "original_id": "a9b7af05ec9448a8"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_042",
+      "title": "Missing User Protection in Sell Operations",
+      "description": "The sellQuote and _sellQuote functions lack minimum output protection for users. When users call sellQuote, they cannot specify acceptable minimum output amounts, exposing them to unfavorable execution due to market manipulation or adversarial actions.",
+      "severity": "high",
+      "original_id": "144803e6247901f9"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_043",
+      "title": "Validation Timing in _sellQuote",
+      "description": "In _sellQuote, the function transfers tokens from the user before validating the minimum output requirement. The safeTransferFrom occurs at line 202, but the minReturn check occurs at line 206, after the transfer.",
+      "severity": "high",
+      "original_id": "e614e13fdc0fb9b9"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_044",
+      "title": "Return Value Unit Mismatch in _buyQuote",
+      "description": "In _buyQuote, the function calculates amountYOut but returns amountYOut, which represents ETH amount, but caller expects vETH amount. This causes accounting errors when caller uses return value in calculations.",
+      "severity": "high",
+      "original_id": "8468ffba7b56a7ee"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_045",
+      "title": "Missing vETH Transfer Validation in _buyQuote",
+      "description": "The _buyQuote function does not validate that the vETH token transfer to the Uniswap pair succeeds before proceeding with the swap. This can lead to silent failures where the swap executes but the vETH transfer failed, resulting in stuck funds.",
+      "severity": "high",
+      "original_id": "vuln001"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_046",
+      "title": "Missing Access Control on Critical Rebalance Function",
+      "description": "The `rebalance` function performs critical protocol operations including flash loans, token swaps, and profit extraction without any access control restrictions. This allows any external actor to trigger the rebalance logic at will, potentially draining the contract's assets through malicious timing attacks or sandwiching.",
+      "severity": "critical",
+      "original_id": "1bc33214469af9f8"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_047",
+      "title": "Replay Attack Vulnerability in Flash Loan Callback",
+      "description": "The `onMorphoFlashLoan` function processes flash loan callbacks without implementing replay protection mechanisms. The function decodes parameters from the callback data and executes swaps based on these parameters without validating that the operation hasn't been previously executed. An attacker could replay previously successful rebalance operations to drain the contract's assets.",
+      "severity": "critical",
+      "original_id": "42158440775b2953"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_048",
+      "title": "Insufficient Input Validation in Rebalance Parameters",
+      "description": "The `rebalance` function accepts `directionMask`, `amountIn`, and `amountOut` parameters without proper validation. The function does not verify that `amountIn` is within reasonable bounds or that `amountOut` matches expected values based on market conditions. This allows attackers to specify extreme values that could lead to MEV extraction or protocol insolvency.",
+      "severity": "high",
+      "original_id": "8e1f50ab58b48afd"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_049",
+      "title": "State Inconsistency in Balance Tracking",
+      "description": "The `rebalance` function calculates profit based on WETH balance changes, but this calculation is performed after the flash loan operations. If the flash loan operations fail or are manipulated, the profit calculation may be incorrect, leading to incorrect profit distribution or protocol losses.",
+      "severity": "high",
+      "original_id": "e931205348606721"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_050",
+      "title": "Missing Approval Validation in Execute Buy/Sell Functions",
+      "description": "The `_executeBuy` and `_executeSell` functions perform token approvals and swaps without validating that the approvals were successful. If the approval transactions fail or are manipulated, the subsequent swap operations may fail or execute with incorrect parameters, leading to asset loss.",
+      "severity": "high",
+      "original_id": "fc72b5684df8595d"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_051",
+      "title": "Critical: Missing Access Control on updateFeeRate Allows Fee Manipulation",
+      "description": "The updateFeeRate function lacks access control verification before updating the feeRate state variable, which is used in fee calculations in getBuyQuote and getSellQuote. An attacker can set feeRate to 0 before calling getBuyQuote or getSellQuote to avoid fees.",
+      "severity": "critical",
+      "original_id": "cc66b7ff48ce6cbc"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_052",
+      "title": "High: Representation Mismatch in _sellQuote Returns ETH Amounts Without Deducting ETH Fee",
+      "description": "The _sellQuote function calculates amountOut after deducting ETH fee, but returns the amount after fee deduction, while the caller expects the amount before fee deduction. This causes the user receives less ETH than expected.",
+      "severity": "high",
+      "original_id": "0ecdd6afac626cd7"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_053",
+      "title": "High: Representation Mismatch in _buyQuote Deducts ETH Fee Before Swapping ETH for vETH",
+      "description": "The _buyQuote function deducts ETH fee before swapping ETH for vETH, but the fee is sent to owner() and the remaining ETH is used for swapping. This causes the user receives less vETH than expected.",
+      "severity": "high",
+      "original_id": "a58baf3c4f656ae1"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_054",
+      "title": "High: Data Access Integrity: Loop in _buyQuote Iterates Over vETH Reserves Without Checking for Zero Reserves",
+      "description": "The _buyQuote function calls UniswapV2Library.getAmountOut with reserveIn and reserveOut without checking if reserves are zero, causing division by zero revert.",
+      "severity": "high",
+      "original_id": "1cf4d258a53160e5"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_055",
+      "title": "High: Data Access Integrity: Loop in _sellQuote Iterates Over vETH Reserves Without Checking for Zero Reserves",
+      "description": "The _sellQuote function calls UnisV2Library.getAmountOut with reserveIn and reserveOut without checking if reserves are zero, causing division by zero revert.",
+      "severity": "high",
+      "original_id": "f05e8d45959204e7"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_056",
+      "title": "Double Funding in Buy/Sell Quote Functions",
+      "description": "The buyQuote and sellQuote functions contain a critical double funding vulnerability where users receive both the primary swap output AND compensation for the unused portion of their requested amount. This occurs due to incorrect handling of the fee deduction and amount calculation in the _buyQuote and _sellQuote functions.",
+      "severity": "critical",
+      "original_id": "bf9600c642b06a9e"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_057",
+      "title": "Missing Access Control on `rebalance()` Enables Fee Evasion via Profit Manipulation",
+      "description": "The `rebalance()` function lacks access control and allows arbitrary callers to trigger flash loan rebalancing. This enables attackers to manipulate the timing of profit extraction, avoiding fees or extracting profits at inopportune times. Specifically, the function calculates profit as `balanceAfter - balanceBefore`, but does not ensure the flash loan is repaid before calculating profit. An attacker can call `rebalance()` with a small `amountIn` just before the admin calls `extractProfit()`, causing the profit calculation to include the flash loan amount, and then immediately call `extractProfit()` to extract the loaned amount as 'profit'.",
+      "severity": "high",
+      "original_id": "45df5c6fc5560a69"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_058",
+      "title": "Unit Mismatch in `_executeBuy()` and `_executeSell()` Causes Incorrect Token Transfer Amounts",
+      "description": "The `_executeBuy()` and `_executeSell()` functions receive `amountIn` in WETH units, but call `VirtualToken(veth).cashOut()` and `VirtualToken(veth).cashIn()` with `uniswapV3AmountOut` and `amountIn` respectively. The `VirtualToken` contract likely expects amounts in its internal representation (e.g., normalized or scaled), not raw WETH units. This mismatch causes incorrect token transfers, leading to loss of funds.",
+      "severity": "high",
+      "original_id": "7d44affd8db32ce1"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_059",
+      "title": "Data Access Desynchronization in `_getTokenBalances()` Causes Incorrect Balance Snapshots",
+      "description": "The `_getTokenBalances()` function reads `weth.balanceOf(uniswapPool)` and `veth.balanceOf(unisupool)` to determine token balances. However, these balances are read at the time of the call, not at the time of the rebalance decision. If the pool balances change between the time of the decision and the time of the call, the function returns stale or incorrect balances, leading to incorrect rebalancing decisions.",
+      "severity": "medium",
+      "original_id": "8b15634bf2842617"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_060",
+      "title": "Critical: Missing Reentrancy Protection in Flash Loan Callback",
+      "description": "The onMorphoFlashLoan function lacks reentrancy protection, allowing attackers to reenter the rebalance flow during flash loan execution and potentially drain funds.",
+      "severity": "critical",
+      "original_id": "8f43fc184825ed2c"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_062",
+      "title": "High: Missing Approval for WETH Token in _executeSell",
+      "description": "The _executeSell function calls IWETH(weth).withdraw(amountIn) and then calls IDexRouter(OKXRouter).uniswapV3SwapTo without approving the OKX router to spend the WETH tokens. This can cause the swap to fail if the contract doesn't have sufficient allowance.",
+      "severity": "high",
+      "original_id": "ce7cb3ed7f5010eb"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_063",
+      "title": "Medium: Potential Integer Overflow in Profit Calculation",
+      "description": "The rebalance function calculates profit as balanceAfter - balanceBefore, but does not check for integer overflow. If balanceAfter < balanceBefore due to rounding errors or unexpected behavior, the subtraction can overflow and return a large positive number, causing the require(profit > 0) check to pass incorrectly.",
+      "severity": "medium",
+      "original_id": "d601ea91ee34430d"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_064",
+      "title": "Medium: Missing Input Validation for Token Addresses",
+      "description": "The initialize function requires that _multiSign, _vETH, and _uniswap addresses are not zero addresses, but does not validate that the addresses are valid contract addresses or that the contracts implement the expected interfaces. This can cause unexpected behavior if the addresses are not valid contract addresses or do not implement the expected interfaces.",
+      "severity": "medium",
+      "original_id": "20999d802473437c"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_065",
+      "title": "Reentrancy and Fund Loss via Flash Loan Callback Manipulation",
+      "description": "The contract implements Morpho flash loan callbacks but fails to properly validate the callback context, allowing attackers to manipulate the rebalancing logic to extract funds.",
+      "severity": "critical",
+      "original_id": "7b823b2638eb7b06"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_066",
+      "title": "Missing msg.sender Verification in Flash Loan Callback",
+      "description": "The onMorphoFlashLoan function requires msg.sender == address(morphoVault) but does not verify that the callback is being invoked in the context of a legitimate rebalance operation. An attacker could potentially trigger this callback directly or manipulate the context to execute arbitrary rebalancing logic.",
+      "severity": "high",
+      "original_id": "01c9829f2d2b8acd"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_067",
+      "title": "Profit Extraction Without Profit Verification",
+      "description": "The rebalance function calculates profit as balanceAfter - balanceBefore and requires profit > 0, but this can be manipulated by sending ETH to the contract before the rebalance to create artificial profit, or by using flash loans to extract value without actual rebalancing.",
+      "severity": "high",
+      "original_id": "3dcb5e3b7c1f2ca1"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_068",
+      "title": "ETH Handling in executeBuy Creates Unaccounted Value",
+      "description": "The _executeBuy function calculates newBalance = address(this).balance - initialBalance and deposits to WETH, but this can be manipulated by sending ETH to the contract before the rebalance to create artificial profit, or by using flash loans to extract value without actual rebalancing.",
+      "severity": "high",
+      "original_id": "fc7cddfd2d1f06f5"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_069",
+      "title": "Critical: State Commitment Timing Vulnerability in takeLoan Function",
+      "description": "The takeLoan function commits state (loanedAmountThisBlock) BEFORE verifying external constraints (MAX_LOAN_PER_BLOCK limit), causing wasted state consumption when operations fail.",
+      "severity": "critical",
+      "original_id": "efe73eff2e95ad30"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_070",
+      "title": "High: Missing User Protection in takeLoan Function",
+      "description": "The takeLoan function allows the caller to specify the loan amount without requiring users to specify minimum acceptable outputs, exposing users to unfavorable execution.",
+      "severity": "high",
+      "original_id": "17adc7fb7877d5d1"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_071",
+      "title": "Missing msg.value Validation in cashIn Function",
+      "description": "The cashIn function does not properly validate msg.value when underlyingToken is not the NATIVE_TOKEN, allowing attackers to mint tokens without paying.",
+      "severity": "high",
+      "original_id": "VT-001"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_072",
+      "title": "Debt Accounting Bypass via _update Override",
+      "description": "The _update override only checks balance < debt + value, but doesn't prevent minting tokens that would exceed the debt ceiling, allowing unlimited token minting without proper debt tracking.",
+      "severity": "high",
+      "original_id": "VT-002"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_073",
+      "title": "Loan Limit Bypass via Block Reset",
+      "description": "The takeLoan function resets loanedAmountThisBlock to 0 when block.number > lastLoanBlock, but doesn't check if the current block has already exceeded the limit before resetting, allowing attackers to bypass the per-block loan limit.",
+      "severity": "high",
+      "original_id": "VT-003"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_074",
+      "title": "Missing Reentrancy Protection",
+      "description": "The contract lacks reentrancy protection, allowing attackers to exploit the _update override to mint tokens without proper debt tracking.",
+      "severity": "high",
+      "original_id": "VT-004"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_075",
+      "title": "Insufficient Debt Validation",
+      "description": "The _update override only checks balance < debt + value, but doesn't prevent minting tokens that would exceed the debt ceiling, allowing unlimited token minting without proper debt tracking.",
+      "severity": "high",
+      "original_id": "VT-005"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_076",
+      "title": "Missing Access Control on Loan State Updates Enables Fee Avoidance",
+      "description": "The takeLoan function updates critical economic state variables (lastLoanBlock and loanedAmountThisBlock) without proper access control, allowing any whitelisted user to manipulate the timing of loan operations to avoid fees or gain unfair advantage.",
+      "severity": "high",
+      "original_id": "c7e75b621733ef00"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_078",
+      "title": "Data Access Boundary Issue in cashOut Function",
+      "description": "The cashOut function burns tokens based on the amount parameter but doesn't verify the user has sufficient balance before burning, which could lead to incorrect accounting when users attempt to withdraw more than their balance, and the function doesn't properly handle edge cases where the user's balance is less than the requested amount.",
+      "severity": "high",
+      "original_id": "a936ea336f3509a8"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_079",
+      "title": "Missing User Protection in External Token Transfers",
+      "description": "The LaunchPadUtils library exposes public view functions that return constant values without any user protection mechanisms. While this library itself doesn't contain state-changing functions, it's critical to verify that any contracts using these values have proper user protection. The issue is that this utility library provides constant values that could be used in external token transfers without user-defined minimum output constraints.",
+      "severity": "medium",
+      "original_id": "e42b14780715cde8"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_080",
+      "title": "Missing Access Control on State Variables Used in Economic Calculations",
+      "description": "The contract defines public state variables like `MAX_AMOUNT`, `TOTAL_AMOUNT_OF_QUOTE_TOKEN`, and `WETH` as constants, but does not provide any access control mechanisms for any functions that might update such state. In DeFi protocols, state variables used in economic calculations (e.g., fee computations, reward distributions, liquidity management) must be protected by access control to prevent manipulation of timing or values of updates. If these variables were mutable (e.g., if they were not constants), attackers could manipulate them to avoid fees or gain unfair advantages.",
+      "severity": "high",
+      "original_id": "ccfecd9d6b2643f1"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_081",
+      "title": "Missing User Protection in Rebalance Execution",
+      "description": "The `rebalance` function executes a flash loan, performs swaps, and calculates profit without allowing users to specify minimum acceptable outputs. This exposes users to unfavorable execution when market conditions change between request and execution, or when sandwich attacks occur.",
+      "severity": "high",
+      "original_id": "6fa031c594e2efe1"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_082",
+      "title": "Validation After State Changes in Rebalance",
+      "description": "The `rebalance` function executes the flash loan and swaps before validating that profit was made. The profit check occurs after the state changes from the swaps have already occurred. This allows invalid operations to complete when profit is not made.",
+      "severity": "high",
+      "original_id": "934b3b20f4ab3091"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_083",
+      "title": "State Synchronization Issue in Rebalance",
+      "description": "The `rebalance` function calculates profit using balance changes, but the profit calculation may not account for all state changes that occurred during execution. The balance changes may not reflect the actual execution result if some operations succeeded while others failed.",
+      "severity": "medium",
+      "original_id": "77d3b3186665d683"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_085",
+      "title": "Recipient Selection Logic Issue",
+      "description": "The `rebalance` function sends value to recipients based on conditional logic, but the recipient selection logic may not correctly identify the intended recipient in all cases. The function may send value to the wrong recipient when execution differs from the request.",
+      "severity": "medium",
+      "original_id": "549d986294e9eac0"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_086",
+      "title": "State Commitment Timing Issue",
+      "description": "The `rebalance` function commits state to prevent reuse before operations that can fail. The state commitment occurs before the operations complete, causing the state consumption on failure. The function commits state before verifying that all intended operations succeeded.",
+      "severity": "high",
+      "original_id": "d00f3a9c202fd941"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_087",
+      "title": "External System Assumptions Issue",
+      "description": "The `rebalance` function interacts with external systems (Uniswap, Morpho) without verifying assumptions about their structure or behavior. The function may make fixed assumptions about external contract properties that could vary across contexts.",
+      "severity": "medium",
+      "original_id": "c5129378fd1e5820"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_088",
+      "title": "Signature Execution Context Binding Issue",
+      "description": "The `rebalance` function uses signature-based authorization without binding the signature to the execution context. The function may allow anyone to submit signatures without verifying the intended executor/submitter address.",
+      "severity": "medium",
+      "original_id": "5b52205561a6836a"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_089",
+      "title": "Missing Input Validation in AddressLib Functions Allows Flag/Offset Manipulation",
+      "description": "The AddressLib library functions lack input validation for critical parameters like flag values and offsets. This allows attackers to pass malicious values that can cause unexpected behavior, including division by zero, incorrect bit manipulation, and potential state corruption.",
+      "severity": "high",
+      "original_id": "ae51470379d5e55e"
+    },
+    {
+      "id": "code4rena_lambowin_2025_02_tool_090",
+      "title": "Critical: Missing User Protection in AddressLib Functions",
+      "description": "The AddressLib library provides functions for manipulating address values, but lacks mechanisms for users to specify acceptable execution bounds or minimum outputs. This exposes users to unfavorable execution outcomes when these functions are used in protocols that modify user positions or values.",
+      "severity": "critical",
+      "original_id": "e3f68b20160a5706"
+    }
+  ],
+  "input_tokens": 28794,
+  "output_tokens": 10870,
+  "cached_tokens": 3610
+}

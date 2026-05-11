@@ -1,0 +1,636 @@
+{
+  "project": "code4rena_loopfi_2025_02",
+  "agent": "agent317",
+  "status": "success",
+  "timestamp": "2026-04-09T11:31:43.628912",
+  "elapsed_seconds": 128.5,
+  "total_expected": 2,
+  "total_found": 86,
+  "true_positives": 2,
+  "false_negatives": 0,
+  "false_positives": 84,
+  "detection_rate": 1.0,
+  "precision": 0.023255813953488372,
+  "f1_score": 0.04545454545454545,
+  "matched_findings": [
+    {
+      "id": "code4rena_loopfi_2025_02_expected_000",
+      "expected": "Rewards might be lost due to the error that_updateRewardIndex()might advancelastBalancewithout advancing index for a token",
+      "matched": "Division Rounding to Zero in Reward Index Calculation",
+      "confidence": 0.9,
+      "justification": "Finding 1 describes a division rounding to zero in reward index calculation, which directly matches the expected vulnerability where _updateRewardIndex() might not advance index when accrued.divDown(totalShares) = 0. Both involve the same function and mathematical issue with small accrued values relative to large totalShares.",
+      "severity": "high",
+      "expected_description": "Submitted by\nchaduke\n, also found by\nEvo\n\nThe function\n_updateRewardIndex()\nis used to update the\nlastBalance\nand\nindex\nof each reward token. This function will be called when a user deposits, withdraws collateral or claims rewards.\n\nHowever, the function might not advance\nindex\nwhen\naccrued.divDown(totalShares) = 0\n. This might happen when\ntotalShares\nis too big and\naccrued\nis too small. One case is that the number of decimals for the reward token is too small.\n\nhttps://github.com/code-423n4/2024-10-loopfi/blob/d219f0132005b00a68f505edc22b34f9a8b49766/src/pendle-rewards/RewardManager.sol#L74\n\nFor example, the USDC token only has 6 decimals.\n\nSuppose\naccrued\n=\n$100 = 100*10**6\n, and\ntotalShares\n= 200M = 200 * 10** 6 * 10**18\n; then we have\naccrued.divDown(totalShares) = 0\n.\n\nFurthermore, if function\n_updateRewardIndex()\nis called more frequently, either because a malicious user keeps calling\ngetRewards()\n(the gas fee is low on Arbitrum) or simply because the community is large so there is a high chance that for each block (per 12 seconds on Ethereum), there is someone who calls a\nwithdraw\n/\ndeposit\n/\ngetRewards\nfunction. As a result,\naccrued\ncould be small, leading to\naccrued.divDown(totalShares) = 0\n. Meanwhile,\n_updateRewardIndex()\nalways advances\nlastBalance\nwhen\naccrued !=0\n:\n\nhttps://github.com/code-423n4/2024-10-loopfi/blob/d219f0132005b00a68f505edc22b34f9a8b49766/src/pendle-rewards/RewardManager.sol#L78\n\nThis means the accrued rewards are lost! Nobody will receive the rewards since index has not changed.\n\nMore importantly, due to the rounding down error for\naccrued.divDown(totalShares)\n, there is always a slight loss for the rewards, which is accumulative over time.\n\nThe fix is simple. Calculate\ndeltaIndex = accrued.divDown(totalShares)\nand advance\nlastBalance\nby\ndeltaIndex.mulDown(totalShares)\n. In this way,\nindex\nand\nlastBalance\nwill always advance in the same pace; in particular if index does not advance, then\nlastBalance\nwill not advance either. The rounding down error is eliminated too since the\nlastBalance\nwill not be\naccrued\nbut by\ndeltaIndex.mulDown(totalShares)\n.\n\nMath\n\n0xtj24 (LoopFi) confirmed\n\n0xAlix2 (warden) commented\n:\n\n@Koolex - I agree that this is an issue; however, the audit\ndocs\nstates that the ERC20s that are used by the protocol are WETH and PendleLPs which are both 18 decimals.\nERC20 used by the protocol | WETH, PendleLPs\nBut I\u2019m not sure if that should be considered valid in this context.\n\nKoolex (judge) commented\n:\n\nThere is another issue here.\nmalicious user keeps calling\ngetRewards()",
+      "found_description": "The reward index calculation `index += accrued.divDown(totalShares)` can round down to zero when `accrued` is small relative to `totalShares`, permanently losing reward precision.\n\n**Mathematical Proof:**\n1. totalShares = 1,000,000,000 (1e9)\n2. accrued rewards = 100 (small amount relative to total shares)\n3. Calculation: 100 / 1,000,000,000 = 0.0000001\n4. With divDown (floor division), this rounds to 0\n5. Result: index += 0 (no increase)\n6. All users receive 0 rewards for this accrual period\n7. The 100 tokens remain in the contract but are never distributed\n\n**Exploitation:** Attackers can manipulate reward timing by making small deposits/withdrawals when reward accrual is minimal, causing rounding errors that prevent legitimate reward distribution. Over time, unclaimed rewards accumulate in the contract.\n\n**Financial Impact:** Permanent loss of user rewards - small reward accruals are rounded to zero and never distributed, with funds becoming trapped in the contract.",
+      "found_id": "d863144acbdb3c05",
+      "tool_finding_index": 36
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_expected_001",
+      "expected": "CDPVault.sol#liquidatePositionBadDebt()doesn\u2019t correctly handle profit and loss",
+      "matched": "Insufficient Validation in LiquidatePositionBadDebt Function",
+      "confidence": 0.9,
+      "justification": "Finding 8 correctly identifies the liquidatePositionBadDebt function and highlights the lack of proper validation for repayAmount, which aligns with the expected vulnerability's description of incorrect handling of profit and loss during bad debt liquidation. Both issues involve high severity and improper accounting in the same function.",
+      "severity": "high",
+      "expected_description": "Submitted by\npkqs90\n, also found by\n0xAlix2\n\nhttps://github.com/code-423n4/2024-10-loopfi/blob/main/src/CDPVault.sol#L702\n\nhttps://github.com/code-423n4/2024-10-loopfi/blob/main/src/PoolV3.sol#L593\n\nWhen liquidating bad debt, the profit and loss is not correctly handled. This will cause incorrect accounting to lpETH stakers.\n\nNote: This is based on the 2024-07 Loopfi audit\nH-12\nissue. This protocol team applied a fix, but the fix is incomplete.\n\nThere are two issues that needs to be fixed in the new codebase:\n\nThe\nprofit\nthat is passed in\npool.repayCreditAccount(debtData.debt, profit, loss);\nshould actually use\ndebtData.accruedInterest\n. This is because we should first \u201cassume\u201d full debt and interest is paid off, and calculate the loss part independently.\nThe\nloss\nis correctly calculated in\nPoolV3#repayCreditAccount\n, but the if-else branch is incorrectly implemented. Currently, it can\u2019t handle the case where both profit and loss is non-zero. This would cause a issue that the loss will not be accounted, and will ultimately cause loss to lpETH holders (loss will be implicitly added to the users who hold lpETH) instead of lpETH stakers.\n\nThe second fix was also suggested in the original issue, but it isn\u2019t applied.\n\nCDPVault.sol:\n\ntakeCollateral\n=\nposition\n.\ncollateral\n;\nrepayAmount\n=\nwmul\n(\ntakeCollateral\n,\ndiscountedPrice\n);\nuint256\nloss\n=\ncalcTotalDebt\n(\ndebtData\n) -\nrepayAmount\n;\nuint256\nprofit\n;\nif\n(\nrepayAmount\n>\ndebtData\n.\ndebt\n) {\n@>\nprofit\n=\nrepayAmount\n-\ndebtData\n.\ndebt\n;\n}\n...\n@>\npool\n.\nrepayCreditAccount\n(\ndebtData\n.\ndebt\n,\nprofit\n,\nloss\n);\n// U:[CM-11]\n// transfer the collateral amount from the vault to the liquidator\ntoken\n.\nsafeTransfer\n(\nmsg\n.\nsender\n,\ntakeCollateral\n);\n\nPoolV3.sol:\n\nfunction\nrepayCreditAccount\n(\nuint256\nrepaidAmount\n,\nuint256\nprofit\n,\nuint256\nloss\n)\nexternal\noverride\ncreditManagerOnly\n// U:[LP-2C]\nwhenNotPaused\n// U:[LP-2A]\nnonReentrant\n// U:[LP-2B]\n{\n...\nif\n(\nprofit\n>\n0\n) {\n_mint\n(\ntreasury\n,\n_convertToShares\n(\nprofit\n));\n// U:[LP-14B]\n@>      }\nelse\nif\n(\nloss\n>\n0\n) {\naddress\ntreasury_\n=\ntreasury\n;\nuint256\nsharesInTreasury\n=\nbalanceOf\n(\ntreasury_\n);\nuint256\nsharesToBurn\n=\n_convertToShares\n(\nloss\n);\nif\n(\nsharesToBurn\n>\nsharesInTreasury\n) {\nunchecked\n{\nemit\nIncurUncoveredLoss\n({\ncreditManager:\nmsg\n.\nsender\n,\nloss:\n_convertToAssets\n(\nsharesToBurn\n-\nsharesInTreasury\n)\n});\n// U:[LP-14D]\n}\nsharesToBurn\n=\nsharesInTreasury\n;\n}\n_burn\n(\ntreasury_\n,\nsharesToBurn\n);\n// U:[LP-14C,14D]\n}\n...\n}\n\nIn CDPVault, change to\npool.repayCreditAccount(debtData.debt, debtData.accruedInterest, loss)\n.\n\nIn PoolV3:\n\nif\n(\nprofit\n>\n0\n) {\n_mint\n(\ntreasury\n,\nconvertToShares\n(\nprofit\n));\n// U:[LP-14B]\n+       }\n+\nif\n(\nloss\n>\n0\n)\n-       }\nelse\nif\n(\nloss\n>\n0\n) {\n...\n}\n\n0xtj24 (LoopFi) confirmed\n\nKoolex (judge) commented\n:\n\nWhy Profit should be\ndebtData.accruedInterest\n?\nFor the second part, could you please provide a case where profit and loss are non-zero in PJQA?\n\npkqs90 (warden) commented\n:\n\n@Koolex - Here\u2019s an example scenario:\nUser originally taken out a debt of 100, and interest grows to 50, so\ndebtData.debt = 100, debtData.accruedInterest = 50, calcTotalDebt(debtData) = 150)\n.\nUser collateral is only 100, and after multiplying\ndiscountPrice\n, the\nrepayAmount\nis only 90. Bad debt occurs.\nloss = calcTotalDebt(debtData) - repayAmount\nis equal to\n150 - 90 = 60\n.\nSince\nrepayAmount < debtData.debt\n, we would have\nprofit = 0\n.\nThis means for\nPoolV3#repayCreditAccount\n, 60 shares would be burned from the treasury, while instead it should be 10 (because original debt was 100, repaid is 90,\n100 - 90 = 10\n).\nYou can also see that if\nrepayAmount\nwas 101, we would calculate\nprofit = 1\n, and in\nPoolV3#repayCreditAccount\nwe would mint 1 share instead. This means there is a 61 (\n1 - (-60) = 61\n) gap in treasury shares when the repaid amount diff is only 11 (\n101 - 90 = 11\n), which does not make any sense.\nfunction\ncalcTotalDebt\n(\nDebtData\nmemory\ndebtData\n)\ninternal\npure\nreturns\n(\nuint256\n) {\nreturn\ndebtData\n.\ndebt\n+\ndebtData\n.\naccruedInterest\n;\n//+ debtData.accruedFees;\n}\nfunction\nliquidatePositionBadDebt\n(\naddress\nowner\n,\nuint256\nrepayAmount\n)\nexternal\nwhenNotPaused\n{\n...\ntakeCollateral\n=\nposition\n.\ncollateral\n;\nrepayAmount\n=\nwmul\n(\ntakeCollateral\n,\ndiscountedPrice\n);\n@>\nuint256\nloss\n=\ncalcTotalDebt\n(\ndebtData\n) -\nrepayAmount\n;\nuint256\nprofit\n;\nif\n(\nrepayAmount\n>\ndebtData\n.\ndebt\n) {\n@>\nprofit\n=\nrepayAmount\n-\ndebtData\n.\ndebt\n;\n}\n...\n@>\npool\n.\nrepayCreditAccount\n(\ndebtData\n.\ndebt\n,\nprofit\n,\nloss\n);\n// U:[CM-11]\n// transfer the collateral amount from the vault to the liquidator\ntoken\n.\nsafeTransfer\n(\nmsg\n.\nsender\n,\ntakeCollateral\n);\n}\nPoolV3.sol:\nfunction\nrepayCreditAccount\n(\nuint256\nrepaidAmount\n,\nuint256\nprofit\n,\nuint256\nloss\n)\nexternal\noverride\ncreditManagerOnly\n// U:[LP-2C]\nwhenNotPaused\n// U:[LP-2A]\nnonReentrant\n// U:[LP-2B]\n{\nuint128\nrepaidAmountU128\n=\nrepaidAmount\n.\ntoUint128\n();\nDebtParams\nstorage\ncmDebt\n=\n_creditManagerDebt\n[\nmsg\n.\nsender\n];\nuint128\ncmBorrowed\n=\ncmDebt\n.\nborrowed\n;\nif\n(\ncmBorrowed\n==\n0\n) {\nrevert\nCallerNotCreditManagerException\n();\n// U:[LP-2C,14A]\n}\nif\n(\nprofit\n>\n0\n) {\n_mint\n(\ntreasury\n,\n_convertToShares\n(\nprofit\n));\n// U:[LP-14B]\n}\nelse\nif\n(\nloss\n>\n0\n) {\naddress\ntreasury_\n=\ntreasury\n;\nuint256\nsharesInTreasury\n=\nbalanceOf\n(\ntreasury_\n);\nuint256\nsharesToBurn\n=\n_convertToShares\n(\nloss\n);\nif\n(\nsharesToBurn\n>\nsharesInTreasury\n) {\nunchecked\n{\nemit\nIncurUncoveredLoss\n({\ncreditManager:\nmsg\n.\nsender\n,\nloss:\n_convertToAssets\n(\nsharesToBurn\n-\nsharesInTreasury\n)\n});\n// U:[LP-14D]\n}\nsharesToBurn\n=\nsharesInTreasury\n;\n}\n_burn\n(\ntreasury_\n,\nsharesToBurn\n);\n// U:[LP-14C,14D]\n}...\n}\n\nKoolex (judge) commented\n:\n\n@pkqs90 - Could you please point out the incomplete fix? This is important, since if there is no indication that the sponsor intended to fix it, it would be out of scope (according to this\nannouncement\n).\n\npkqs90 (warden) commented\n:\n\n@Koolex - The 2024-07 code had\npool.repayCreditAccount(debtData.debt, 0, loss);\nhttps://github.com/code-423n4/2024-07-loopfi/blob/main/src/CDPVault.sol#L624\n, and was later fixed to\npool.repayCreditAccount(debtData.debt, profit, loss);\nhttps://github.com/code-423n4/2024-10-loopfi/blob/main/src/CDPVault.sol#L702\n.\nThe suggested fix was also mentioned the original report for\nH-12\n.",
+      "found_description": "The `liquidatePositionBadDebt` function lacks proper validation of the repayAmount parameter, allowing attackers to provide artificially low values that don't cover the bad debt. The function only checks if repayAmount results in takeCollateral >= position.collateral, but doesn't validate that the repayAmount is economically rational. An attacker could liquidate a position with minimal repayment, leaving significant bad debt that should be covered by the protocol. The mathematical proof shows that with collateral value 100, debt 150, discounted price 0.8, an attacker could repay only 80 (instead of the full 120 needed), taking all collateral while leaving 70 of bad debt for the protocol to absorb.",
+      "found_id": "a7f439daf46d8d89",
+      "tool_finding_index": 2
+    }
+  ],
+  "missed_findings": [],
+  "undecided_findings": [],
+  "extra_findings": [
+    {
+      "id": "code4rena_loopfi_2025_02_tool_000",
+      "title": "Incorrect Quota Interest Calculation in Debt Repayment",
+      "description": "The `calcDecrease` function incorrectly handles quota interest repayment by applying the full quota interest amount to profit before checking if the repayment amount is sufficient. This creates a mathematical error where insufficient repayments can lead to incorrect profit accounting and potential loss of funds. Specifically, when `amountToRepay < cumulativeQuotaInterest`, the function subtracts the full quota interest from the debt calculation but only adds the actual repaid amount to profit, creating an inconsistency. The mathematical proof shows that with a debt of 1000, quota interest of 100, and repayment of 50, the function incorrectly calculates new debt as 900 (should be 950) and profit as 50 (should be 50), but the quota interest tracking becomes desynchronized.",
+      "severity": "high",
+      "original_id": "6cfd44ef4a25d8da"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_001",
+      "title": "Missing Access Control on getRewards Function",
+      "description": "The `getRewards` function is publicly accessible without any access control, allowing any user to trigger reward distribution for any position owner. While the function transfers rewards to the position owner's designated address, it could be exploited to spam the reward system or trigger unintended state changes. An attacker could repeatedly call this function for different positions, potentially causing excessive gas consumption or interfering with normal reward distribution patterns. Although the direct financial impact may be limited to gas costs, the lack of access control violates the principle of least privilege and could be combined with other vulnerabilities.",
+      "severity": "medium",
+      "original_id": "534603cbf9add1b5"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_003",
+      "title": "Incorrect Fee Calculation in Credit Flash Loan Repayment",
+      "description": "The creditFlashLoan function incorrectly calculates the repayment amount by subtracting the fee from the total amount before calling pool.repayCreditAccount. This results in repaying only the principal amount (total - fee = amount) instead of the full amount that should be repaid (which should be total). The fee is then minted as profit, but the principal repayment is insufficient by exactly the fee amount. This creates a permanent loss to the protocol equal to the flash loan fee for every credit flash loan.\n\nMathematical Proof:\n- Let amount = 1000, protocolFee = 0.001 (0.1%), fee = wmul(1000, 0.001) = 1\n- total = 1000 + 1 = 1001\n- The function calls: pool.repayCreditAccount(total - fee, 0, 0) = pool.repayCreditAccount(1001 - 1, 0, 0) = pool.repayCreditAccount(1000, 0, 0)\n- But the protocol should receive back the full 1001 (principal + fee)\n- The protocol only receives 1000 for principal repayment, leaving 1 unit permanently lost\n- Then pool.mintProfit(1) is called, but the actual profit isn't available in the pool\n\nExploitation: Any user can call creditFlashLoan and only repay the principal amount while the protocol expects full repayment. The fee amount is effectively stolen from the protocol's reserves.\n\nFinancial Impact: The protocol loses the flash loan fee amount for every credit flash loan executed. With a 0.1% fee, a $1M flash loan would result in $1,000 permanent loss to the protocol.",
+      "severity": "high",
+      "original_id": "56b2553d5b170115"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_004",
+      "title": "Incorrect Max Flash Loan Calculation with Fee Division",
+      "description": "The maxFlashLoan function uses wdiv(pool.creditManagerBorrowable(address(this)), WAD + protocolFee) which incorrectly divides the borrowable amount by (1 + fee) instead of accounting for the fee correctly. This underestimates the maximum flash loan amount that can be safely issued.\n\nMathematical Proof:\n- Let borrowable = 1000, protocolFee = 0.001 (0.1%)\n- Current calculation: max = wdiv(1000, 1.001) \u2248 999.000999... (rounds down to 999)\n- Correct calculation should be: max = borrowable / (1 + fee) = 1000 / 1.001 \u2248 999.000999...\n- However, the actual safe maximum is higher because the fee is paid by the borrower, not deducted from the borrowable amount\n- The protocol can safely lend up to the full borrowable amount since the borrower must repay amount + fee\n\nExploitation: While this doesn't directly lead to loss of funds, it unnecessarily restricts flash loan availability. In scenarios where the protocol is near its borrow limit, legitimate users may be unable to access flash loans they should be able to use.\n\nFinancial Impact: Reduced protocol utility and potential missed revenue from flash loan fees. The protocol could safely support larger flash loans than currently allowed.",
+      "severity": "medium",
+      "original_id": "80fa780c0f5703e2"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_005",
+      "title": "Missing Zero Amount Validation in Flash Loan Functions",
+      "description": "Both flashLoan and creditFlashLoan functions do not validate that the amount parameter is greater than zero. While this doesn't directly lead to fund loss, it allows wasteful transactions that consume gas without meaningful purpose.\n\nMathematical Proof:\n- amount = 0, fee = wmul(0, protocolFee) = 0, total = 0\n- The functions execute all operations with zero values\n- pool.lendCreditAccount(0, address(receiver)) - lends zero tokens\n- Callback functions are called with zero amounts\n- Transfers and repayments of zero occur\n\nExploitation: Attackers could spam the protocol with zero-amount flash loans to waste gas and potentially disrupt protocol operations through transaction spam.\n\nFinancial Impact: While no direct fund loss, this could lead to increased gas costs and potential denial-of-service if exploited at scale.",
+      "severity": "low",
+      "original_id": "bda2ab9fdf1d8554"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_006",
+      "title": "Cooldown State Desynchronization Allows Permanent Fund Loss",
+      "description": "The withdraw() function has a critical state desynchronization vulnerability where the cooldownAmount is subtracted from the total amount, but the cooldownAmount can be larger than the actual deposited amount. This occurs when a user initiates a cooldown for an amount, then deposits more tokens, and finally withdraws. The function subtracts the full cooldownAmount from deposits[msg.sender].amount without verifying that the cooldownAmount doesn't exceed the current balance. This can lead to underflow or incorrect accounting, permanently locking user funds or allowing unauthorized withdrawals.\n\nMathematical Proof:\n1. User deposits 100 tokens: deposits[user].amount = 100\n2. User initiates cooldown for 100 tokens: deposits[user].cooldownAmount = 100\n3. User deposits 50 more tokens: deposits[user].amount = 150\n4. User withdraws: _amount = deposits[user].cooldownAmount = 100\n   deposits[user].amount = 150 - 100 = 50 (correct)\n5. BUT if user instead:\n   - Deposits 100 tokens\n   - Initiates cooldown for 100 tokens  \n   - Withdraws 50 tokens directly (if cooldownPeriod = 0)\n   - deposits[user].amount = 50\n   - deposits[user].cooldownAmount still = 100\n   - Now withdraw() will try: deposits[user].amount = 50 - 100 = underflow error\n\nExploitation: An attacker can manipulate the cooldown mechanism to cause underflow errors that permanently lock legitimate user funds, or in scenarios without underflow checks (older Solidity), steal tokens by withdrawing more than deposited.",
+      "severity": "high",
+      "original_id": "d8825724c85afbb1"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_007",
+      "title": "Cooldown Amount Overwrite Enables Fund Theft",
+      "description": "The initiateCooldown() function allows overwriting an existing cooldown without any validation of the previous cooldown state. This enables an attack where a malicious user can initiate a cooldown, wait for the period to almost complete, then re-initiate with a smaller amount to reset the timer, effectively preventing legitimate withdrawals. More critically, if a user has tokens in cooldown and initiates a new cooldown for a larger amount than their balance, the function updates cooldownAmount without checking against the actual deposited amount.\n\nMathematical Proof:\n1. User deposits 100 tokens\n2. Attacker initiates cooldown for 100 tokens (cooldownAmount = 100)\n3. Attacker waits until cooldown period is almost over\n4. Attacker initiates cooldown for 150 tokens (more than balance)\n   - deposits[user].cooldownAmount = 150 (exceeds actual balance of 100)\n5. After cooldown period, attacker withdraws 150 tokens (stealing 50 tokens)\n\nExploitation: This allows attackers to withdraw more tokens than they deposited by manipulating the cooldown amount. The vulnerability exists because initiateCooldown() doesn't validate that the new cooldownAmount is <= the current deposited amount after accounting for any existing cooldown.",
+      "severity": "high",
+      "original_id": "bfac260146f1513f"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_008",
+      "title": "Missing Zero Cooldown Period Validation in Withdraw Logic",
+      "description": "The withdraw() function has flawed logic when cooldownPeriod is set to zero. The function checks if cooldownPeriod > 0 to determine whether to use cooldown logic, but when cooldownPeriod is 0, it allows immediate withdrawal of the entire deposited amount without any cooldown mechanism. However, if a user previously initiated a cooldown (when cooldownPeriod was > 0) and then the owner sets cooldownPeriod to 0, the function will bypass the cooldown check and withdraw the entire balance, ignoring the cooldownAmount that was set.\n\nMathematical Proof:\n1. cooldownPeriod = 3600 (1 hour)\n2. User deposits 100 tokens and initiates cooldown for 50 tokens\n3. Owner sets cooldownPeriod = 0\n4. User calls withdraw(): \n   - cooldownPeriod > 0? false \u2192 uses else branch\n   - _amount = deposits[user].amount = 100 (entire balance)\n   - Withdraws 100 tokens instead of the intended 50 tokens\n\nExploitation: This allows users to bypass intended cooldown restrictions when the protocol owner changes the cooldown period, potentially withdrawing more funds than should be available during a cooldown period.",
+      "severity": "medium",
+      "original_id": "dac976cf06766211"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_009",
+      "title": "Incorrect Asset Conversion Functions Break ERC-4626 Compliance and Enable Fund Theft",
+      "description": "The _convertToShares and _convertToAssets functions incorrectly return the input value directly instead of performing proper ERC-4626 compliant calculations. This breaks the fundamental share/asset conversion logic and allows attackers to manipulate deposit/withdrawal amounts. The functions should calculate shares = assets * totalSupply() / totalAssets() and assets = shares * totalAssets() / totalSupply(), but instead return the input value unchanged. This enables attackers to deposit minimal assets for maximum shares or withdraw maximum assets for minimal shares.",
+      "severity": "critical",
+      "original_id": "990ae79c2ee5c359"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_010",
+      "title": "Missing Access Control on mintProfit Function Allows Unauthorized Profit Minting",
+      "description": "The mintProfit function is intended to be creditManagerOnly but the modifier is commented out, making it publicly callable. This allows any attacker to mint unlimited shares to the treasury, diluting all existing LP holders. Since the function updates expectedLiquidityDelta with the minted amount, it artificially inflates the pool's total assets without any actual underlying tokens being deposited.",
+      "severity": "critical",
+      "original_id": "3bf1a57c490cfde9"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_011",
+      "title": "Incorrect Fee Calculation Order in Withdraw/Redeem Functions Enables Fee Evasion",
+      "description": "The withdraw and redeem functions apply fees in the wrong order. Withdraw applies withdrawal fee then deposit fee, but should apply deposit fee then withdrawal fee. Redeem applies deposit fee then withdrawal fee, but should apply withdrawal fee then deposit fee. This incorrect ordering allows attackers to manipulate the fee calculations and potentially avoid paying proper fees.",
+      "severity": "high",
+      "original_id": "11c2dcdb7fd8343a"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_012",
+      "title": "State Desynchronization in _updateBaseInterest Function During Quota Revenue Updates",
+      "description": "The _updateBaseInterest function updates _expectedLiquidityLU before calling the interest rate model, but the interest rate model uses expectedLiquidity() which includes accrued interest. This creates a temporary state desynchronization where the model sees different liquidity values than what's stored. During quota revenue updates, this can lead to incorrect interest rate calculations.",
+      "severity": "high",
+      "original_id": "46519b8ba8f36f5a"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_013",
+      "title": "Missing Pool Quota Keeper Check in updateQuotaRevenue Function",
+      "description": "The updateQuotaRevenue function has the poolQuotaKeeperOnly modifier commented out and instead uses creditManagerOnly, allowing any credit manager to modify quota revenue. This breaks the intended access control and allows connected credit managers to manipulate the quota revenue value, potentially affecting interest calculations and protocol revenue distribution.",
+      "severity": "high",
+      "original_id": "64290dd0cddf9330"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_014",
+      "title": "Array Removal Bug Causes Incorrect Vault List State",
+      "description": "The _removeVaultFromList function contains a critical bug where it breaks from the loop after finding and replacing the vault, but continues to update the state variables. This causes the vaultList array to become corrupted when multiple vaults with the same address exist (which shouldn't happen normally, but the bug exists regardless). More importantly, the function doesn't properly handle the case where the vault to remove is the last element in the array. When the last vault is removed, the code will set vaultList[i] = vaultList[vaultLen - 1] (which is the same element) and then pop(), which works correctly. However, the real issue is that the function continues execution after the break, meaning any state changes after the break statement could still execute, though in this specific implementation there are none after the break.\n\nThe mathematical proof shows that if we have vaultList = [A, B, C] and remove B:\n- i=0: vaultList[0] = A \u2260 B, continue\n- i=1: vaultList[1] = B == B, so set vaultList[1] = vaultList[2] (C), then vaultList becomes [A, C, C]\n- Then pop() removes the last element, resulting in [A, C]\n- This is correct behavior\n\nHowever, if we have vaultList = [A, B, B] (which shouldn't happen due to the registeredVaults mapping, but demonstrates the bug):\n- i=0: vaultList[0] = A \u2260 B, continue\n- i=1: vaultList[1] = B == B, so set vaultList[1] = vaultList[2] (B), then vaultList becomes [A, B, B]\n- Pop() removes the last element, resulting in [A, B]\n- The second B remains in the list despite both vaults being the same address\n\nThe vulnerability type is a logic error in state management. While the registeredVaults mapping prevents duplicate vault addresses from being added normally, the array removal logic itself is buggy and could cause issues if the protocol evolves or if edge cases are triggered. The severity is medium because while the bug exists, the registeredVaults mapping prevents the worst-case scenario of duplicate vault addresses.",
+      "severity": "medium",
+      "original_id": "766cf8db9367ec5d"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_015",
+      "title": "PaymentSplitter Inheritance Creates Unreleasable Funds When Treasury Emptied",
+      "description": "The Treasury contract inherits from OpenZeppelin's PaymentSplitter, which tracks released amounts for payees. When moveFunds() transfers all tokens to a new treasury, the PaymentSplitter's internal accounting (released mapping) becomes desynchronized from the actual token balances. This prevents payees from claiming their shares in the future because release() calculations will fail.\n\nMathematical Proof:\n- PaymentSplitter tracks totalReleased[token] and released[payee][token]\n- When moveFunds() transfers token balance (say 1000 tokens) to new treasury\n- totalReleased remains 0 (not updated)\n- released[payee] remains 0 for all payees\n- Later, when payee tries to release() their share:\n  - payment = totalReceived * shares[payee] / totalShares - released[payee]\n  - totalReceived = address(this).balance (now 0) + totalReleased (0) = 0\n  - payment = 0 * shares[payee] / totalShares - 0 = 0\n- Payee receives 0 tokens despite having rightful claim to portion of the 1000 tokens that were moved\n\nExploitation: Funds administrator can move all funds to a malicious treasury, permanently locking payees' shares. Even if funds are moved to a legitimate treasury, payees cannot claim their proportional share of the moved amount.\n\nFinancial Impact: Payees permanently lose access to their share of funds that were moved. If 1000 tokens were moved and a payee had 10% shares, they lose 100 tokens permanently.",
+      "severity": "high",
+      "original_id": "5c00501c60c95e9a"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_016",
+      "title": "Missing Zero Address Validation in moveFunds Allows Fund Loss",
+      "description": "The moveFunds functions do not validate that the treasury parameter is a non-zero address. If funds administrator accidentally or maliciously provides address(0), funds will be permanently burned.\n\nMathematical Proof:\n- Funds administrator calls moveFunds(address(0), token) with token balance of 1000\n- _moveFunds transfers 1000 tokens to address(0)\n- Tokens are permanently lost from circulation\n- No way to recover funds from zero address\n\nExploitation: Malicious funds administrator can intentionally burn funds, or accidental misconfiguration by legitimate administrator causes permanent loss.\n\nFinancial Impact: All funds transferred to address(0) are permanently lost. If contract holds 1000 ETH and 50,000 USDC, both can be burned to address(0).",
+      "severity": "high",
+      "original_id": "982c43b27685c908"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_017",
+      "title": "Inconsistent Event Emission in Batch moveFunds Misrepresents Operation",
+      "description": "The batch moveFunds function emits Treasury__moveFunds(treasury) only once after processing all tokens, but the single-token moveFunds emits the event for each token. This creates inconsistency and misrepresents the actual operations performed. More critically, if the batch operation fails partway through (e.g., one token transfer reverts), the event will not be emitted at all, creating false audit trail.\n\nExploitation: While not directly causing fund loss, this enables:\n- Misleading event logs for monitoring and auditing\n- Incomplete operations without proper event signaling\n- Potential for replay attacks or state confusion\n\nFinancial Impact: Operational risk and audit trail corruption, but no direct fund loss. Medium severity due to impact on protocol monitoring and incident response.",
+      "severity": "medium",
+      "original_id": "153b396b6c38df0d"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_018",
+      "title": "Cooldown State Desynchronization Allows Asset Theft",
+      "description": "The cooldown mechanism has a critical state desynchronization vulnerability where the cooldownEnd and underlyingAmount state variables can become permanently desynchronized. When cooldownDuration is set to 0, the unstake function allows immediate withdrawal without clearing the cooldown state, but the cooldownAssets and cooldownShares functions continue to accumulate underlyingAmount without updating cooldownEnd. This allows attackers to accumulate unlimited underlyingAmount that can be immediately withdrawn when cooldownDuration is 0.\n\nMathematical Proof:\n1. Initial state: cooldownDuration = 30 days, user has 1000 shares worth 1000 assets\n2. Attacker calls cooldownShares(1000): cooldownEnd = now + 30 days, underlyingAmount = 1000\n3. Owner sets cooldownDuration = 0\n4. Attacker calls unstake(): receives 1000 assets, but cooldownEnd remains set to future timestamp\n5. Attacker calls cooldownShares(1000) again: cooldownEnd remains unchanged, underlyingAmount = 1000 + 1000 = 2000\n6. Attacker calls unstake() again: receives 2000 assets (double the actual balance)\n\nThis pattern can be repeated to drain the entire contract balance. The vulnerability occurs because when cooldownDuration is 0, unstake() doesn't properly clear the cooldown state, and subsequent cooldown operations accumulate underlyingAmount without resetting cooldownEnd.",
+      "severity": "critical",
+      "original_id": "d1da2c53278c3077"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_019",
+      "title": "Insufficient Share Validation in Cooldown Functions Allows Donation Attack",
+      "description": "The cooldownAssets and cooldownShares functions lack proper validation of the resulting share amounts, making the contract vulnerable to donation attacks. While the _checkMinShares() function prevents small share amounts from remaining, it doesn't prevent attackers from manipulating share calculations through precision exploitation.\n\nMathematical Proof:\n1. Attacker deposits a minimal amount (0.0001 ETH) to receive shares\n2. Attacker then calls cooldownAssets() with a carefully calculated assets amount that results in shares = 0 due to rounding\n3. Since shares = 0, no shares are burned, but underlyingAmount is increased\n4. The attacker can repeat this to accumulate large underlyingAmount without burning shares\n5. When cooldownDuration is 0, attacker can withdraw the accumulated assets\n\nExample calculation:\n- Total assets: 1000 ETH, total shares: 1000\n- previewWithdraw(0.0000001 ETH) = 0 shares (due to rounding down)\n- cooldownAssets(0.0000001 ETH) increases underlyingAmount by 0.0000001 ETH but burns 0 shares\n- Repeating this 10,000,000 times accumulates 1 ETH without burning any shares\n\nThis allows attackers to steal assets from other users by exploiting rounding errors in the share calculation.",
+      "severity": "high",
+      "original_id": "d8df377be4d78c46"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_020",
+      "title": "Type Casting Overflow in Cooldown State Variables",
+      "description": "The contract uses unsafe type casting for cooldown state variables that can lead to overflows and permanent loss of funds. The cooldownEnd is stored as uint104 and underlyingAmount as uint152, but these can overflow when large values are accumulated.\n\nMathematical Proof:\n1. uint104 maximum value: 2^104 - 1 \u2248 2.028\u00d710^31\n2. uint152 maximum value: 2^152 - 1 \u2248 5.7\u00d710^45\n3. If an attacker accumulates underlyingAmount beyond uint152 maximum, it overflows to 0\n4. When cooldownDuration is set to 0, the attacker can call unstake() but receives 0 assets\n5. The actual accumulated assets are permanently lost\n\nExample:\n- Attacker accumulates underlyingAmount = 2^152 (causing overflow to 0)\n- Contract has 1000 ETH in silo\n- Attacker calls unstake(): receives 0 ETH due to overflow\n- The 1000 ETH remains locked in the contract forever\n\nThis vulnerability allows permanent loss of user funds through integer overflow in state variables.",
+      "severity": "high",
+      "original_id": "a2e8696c8813fdfb"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_021",
+      "title": "Incorrect Price Calculation Formula in Balancer Oracle",
+      "description": "The update() function uses an incorrect mathematical formula to calculate the pool price. The current implementation calculates totalPi as the product of (price_i / weight_i) raised to the power of weight_i, then multiplies by the invariant and divides by total supply. However, this formula doesn't correctly represent the pool's value. The proper calculation should use the actual pool balances and weights to compute the pool's total value, then divide by total supply. The current formula can produce incorrect prices that don't reflect the actual pool composition.",
+      "severity": "high",
+      "original_id": "048ed322bb0a7fa3"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_022",
+      "title": "Missing Validation for Pool Token Count and Weights",
+      "description": "The constructor and update() function don't properly validate that the pool has exactly 3 tokens as expected by the immutable token0, token1, token2 variables. If the pool has fewer than 3 tokens, some tokens will be address(0), and if it has more than 3 tokens, tokens beyond the third will be ignored. Additionally, the weights array length isn't validated to match the actual number of tokens. This can lead to incorrect price calculations when the pool composition differs from expectations.",
+      "severity": "high",
+      "original_id": "25baa904da4895da"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_023",
+      "title": "Stale Price State Desynchronization",
+      "description": "The safePrice is only updated during keeper calls to update(), but currentPrice is updated with new calculations. However, if update() fails or reverts after updating safePrice but before completing the calculation, the state becomes desynchronized. The safePrice is set to currentPrice at the beginning of update(), but if the function reverts during price calculation, safePrice remains updated while currentPrice might not reflect the new calculation. This creates a window where safePrice and currentPrice are inconsistent.",
+      "severity": "medium",
+      "original_id": "563e38023a4e6d09"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_024",
+      "title": "Incorrect Price Calculation Due to Missing Validation",
+      "description": "The spot() function multiplies the Chainlink price by the LP rate without validating that the LP rate is non-zero and within reasonable bounds. If the LP rate returns 0 due to market conditions or manipulation, the resulting price will be 0, causing the oracle to return invalid pricing data. This can be exploited by attackers to manipulate protocol pricing and cause financial losses.",
+      "severity": "high",
+      "original_id": "5d53e7eb49ac71ed"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_025",
+      "title": "Unhandled Edge Case in Pt Oracle Validation",
+      "description": "The _validatePtOracle() function returns false if either increaseCardinalityRequired is true OR oldestObservationSatisfied is false, but the validation logic incorrectly returns true only when both conditions are favorable. This creates a logical error where the oracle status may be incorrectly reported as valid when it should be invalid. Attackers can exploit this during market manipulation to force the oracle to return stale or invalid prices.",
+      "severity": "high",
+      "original_id": "2658ef1d8a27bcb9"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_026",
+      "title": "Potential Division by Zero in Price Scaling",
+      "description": "The _fetchAndValidate() function uses wdiv(uint256(answer), aggregatorScale) where aggregatorScale is calculated as 10 ** uint256(aggregator.decimals()). If the aggregator returns 0 for decimals(), this would cause a division by zero. While unlikely in practice, this edge case could be exploited if a malicious aggregator is used or if the aggregator contract is compromised.",
+      "severity": "medium",
+      "original_id": "add527c98537976b"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_027",
+      "title": "Reward Index Desynchronization Leading to Permanent Reward Loss",
+      "description": "The _distributeRewardsPrivate function uses collateralAmountBefore as userShares for reward calculation, but this value represents the user's collateral balance BEFORE the current operation. When _updateAndDistributeRewards is called with a deltaCollateral, the totalShares is updated but the reward calculation uses the old collateral amount. This creates a desynchronization where rewards are calculated based on outdated share information, leading to permanent loss of rewards for users.\n\nMathematical Proof:\nScenario: User has 100 shares initially, totalShares = 1000\nReward index increases from 1.0 to 1.1 (deltaIndex = 0.1)\nUser adds 100 more shares (deltaCollateral = +100)\n\nCurrent buggy calculation:\n- collateralAmountBefore = 100 (old shares)\n- rewardDelta = 100 * 0.1 = 10 rewards\n- But user should get rewards for 200 shares: 200 * 0.1 = 20 rewards\n- User permanently loses 10 rewards\n\nExploitation: Any user who deposits collateral during reward accrual periods will receive fewer rewards than entitled. The loss is permanent and cannot be recovered.\n\nFinancial Impact: Users lose a portion of their rewards proportional to the timing mismatch between collateral changes and reward distribution. The impact scales with the frequency of collateral operations during reward accrual periods.",
+      "severity": "high",
+      "original_id": "2c0113d160ebf82d"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_028",
+      "title": "Incorrect Reward Index Initialization for New Users",
+      "description": "When a new user (userIndex == 0) is initialized, their index is set to INITIAL_REWARD_INDEX (1), but this doesn't account for the current global reward index. This causes new users to receive rewards from the very beginning of the reward program rather than from their actual entry point.\n\nMathematical Proof:\nScenario: Global reward index is currently 5.0\nNew user deposits 100 shares\nUser's index is initialized to 1.0 instead of 5.0\nNext reward distribution: index increases to 6.0\nUser receives: 100 * (6.0 - 1.0) = 500 rewards\nUser should receive: 100 * (6.0 - 5.0) = 100 rewards\nUser gains 400 extra rewards at the expense of existing users\n\nExploitation: Attackers can create new accounts to receive historical rewards they never earned. This drains the reward pool and reduces rewards for legitimate users.\n\nFinancial Impact: New users receive excessive rewards, diluting the reward pool and reducing rewards for existing users. The impact is proportional to the difference between current index and initial index.",
+      "severity": "high",
+      "original_id": "148722ac69b27b99"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_029",
+      "title": "Missing Access Control on Internal Reward Distribution",
+      "description": "The _distributeRewardsPrivate function has an assert checking user != address(0) && user != address(this), but this function is marked private and should only be called from _updateAndDistributeRewardsForTwo. However, there's no access control preventing other internal functions from calling it with malicious parameters. While the function is private, the contract inheritance structure could allow unintended access paths.\n\nExploitation: If a malicious inherited contract overrides functions to call _distributeRewardsPrivate with arbitrary parameters, it could manipulate reward distributions. For example, setting user to address(this) could allow the contract to accumulate rewards intended for users.\n\nFinancial Impact: Potential reward theft if inherited contracts are compromised or maliciously designed. The impact depends on the specific inheritance structure and override capabilities.",
+      "severity": "medium",
+      "original_id": "665d44ad2dff1a86"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_030",
+      "title": "Uninitialized Oracle Configuration Allows Price Manipulation",
+      "description": "The `setOracles` function allows setting oracle configurations for tokens, but there is no validation that prevents setting an oracle with zero stalePeriod or zero aggregatorScale. An attacker with DEFAULT_ADMIN_ROLE privileges (or if the admin account is compromised) can configure oracles with invalid parameters that would make price validation always fail or always pass, leading to incorrect price feeds.\n\n**Mathematical Proof:**\n- If stalePeriod = 0: `block.timestamp - updatedAt <= 0` will only be true if `block.timestamp == updatedAt`, which is practically impossible, making all prices invalid\n- If aggregatorScale = 0: `wdiv(uint256(answer), 0)` will cause division by zero, reverting the transaction\n- If stalePeriod = type(uint256).max: Prices will never be considered stale, even if they are years old\n\n**Exploitation Scenario:**\n1. Attacker gains DEFAULT_ADMIN_ROLE privileges (either through compromise or malicious admin)\n2. Attacker calls setOracles with stalePeriod = 0 for a critical asset\n3. All spot() calls for that asset will revert with ChainlinkOracle__spot_invalidValue()\n4. Protocol operations relying on price feeds will fail, potentially freezing funds\n\n**Financial Impact:** Protocol becomes unusable for affected tokens, potentially freezing user funds that rely on price calculations for withdrawals or liquidations.",
+      "severity": "high",
+      "original_id": "a6b3c96af5d7e43d"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_031",
+      "title": "Division by Zero in Price Calculation",
+      "description": "The `_fetchAndValidate` function uses `wdiv(uint256(answer), oracle.aggregatorScale)` without checking if aggregatorScale is zero. If an oracle is configured with aggregatorScale = 0, any call to spot() will revert due to division by zero.\n\n**Mathematical Proof:**\n- wdiv(a, b) = (a * 1e18) / b\n- If b = 0: (a * 1e18) / 0 \u2192 division by zero \u2192 transaction reverts\n\n**Exploitation Scenario:**\n1. Admin accidentally or maliciously sets aggregatorScale = 0 for a token\n2. Any protocol operation requiring the token's price will fail\n3. Liquidations, withdrawals, and other price-dependent operations become impossible\n\n**Financial Impact:** Permanent freezing of protocol operations for the affected token, potentially locking user funds.",
+      "severity": "high",
+      "original_id": "7a9f82ce88ac180e"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_032",
+      "title": "Stale Price Validation Integer Underflow",
+      "description": "The stale period validation `block.timestamp - updatedAt <= oracle.stalePeriod` can underflow if updatedAt > block.timestamp, which could happen if the Chainlink feed returns a future timestamp due to misconfiguration or malicious activity.\n\n**Mathematical Proof:**\n- If updatedAt = 2^256 - 1 and block.timestamp = 1000: 1000 - (2^256 - 1) will underflow\n- Underflow results in a very large number that will exceed any reasonable stalePeriod\n- This would incorrectly mark stale prices as valid\n\n**Exploitation Scenario:**\n1. Chainlink feed returns corrupted data with future timestamp\n2. Protocol accepts stale prices as valid due to underflow\n3. Attackers can exploit incorrect pricing for arbitrage or liquidation attacks\n\n**Financial Impact:** Protocol uses incorrect prices, leading to unfair liquidations, incorrect collateral valuations, and potential protocol insolvency.",
+      "severity": "high",
+      "original_id": "b4e53fdc9b726852"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_033",
+      "title": "Missing Oracle Existence Check in Price Fetching",
+      "description": "The `_fetchAndValidate` function does not check if an oracle is configured for the given token before attempting to fetch data. If no oracle is set, the function will call latestRoundData() on address(0), which will revert.\n\n**Mathematical Proof:**\n- oracles[token] returns Oracle memory with default values (address(0), 0, 0)\n- AggregatorV3Interface(address(0)).latestRoundData() will revert\n- The catch block returns (false, 0), making the oracle appear invalid\n\n**Exploitation Scenario:**\n1. Protocol integrates a new token but forgets to configure its oracle\n2. All price queries for that token fail\n3. Users cannot deposit, withdraw, or use the token in the protocol\n\n**Financial Impact:** Protocol functionality breaks for unconfigured tokens, potentially causing loss of functionality and user funds being stuck.",
+      "severity": "medium",
+      "original_id": "57ecea06352de10b"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_034",
+      "title": "Reward State Desynchronization During Same-Block Operations",
+      "description": "The `_updateRewardIndex()` function has a critical state desynchronization vulnerability when multiple operations occur in the same block. The function uses `lastRewardBlock` to prevent duplicate reward updates within the same block, but this causes `rewardState.lastBalance` to become desynchronized from the actual token balance when `handleRewardsOnWithdraw` is called in the same block after `handleRewardsOnDeposit`.\n\n**Mathematical Proof:**\n1. Block 100: User deposits 1000 shares (totalShares = 1000)\n2. `handleRewardsOnDeposit` calls `_updateRewardIndex()`:\n   - lastRewardBlock = 100\n   - Claim rewards: vault balance increases by 100 tokens\n   - accrued = 100 tokens\n   - index increases by 100/1000 = 0.1\n   - rewardState.lastBalance = 100\n3. Same block 100: User withdraws 500 shares\n4. `handleRewardsOnWithdraw` calls `_updateRewardIndex()`:\n   - lastRewardBlock == block.number (100), so skip reward claiming\n   - Use existing rewardState.lastBalance = 100\n   - But actual vault balance is still 100 (no new rewards claimed)\n   - User receives rewards based on index calculation\n5. Now `_doTransferOutRewards` transfers rewards to user:\n   - rewardState.lastBalance -= userRewardAmount\n   - But rewardState.lastBalance (100) no longer matches actual vault balance\n\n**Exploitation:** An attacker can deposit and withdraw in the same block to receive rewards based on outdated rewardState.lastBalance while the actual vault balance remains unchanged, potentially receiving more rewards than available.\n\n**Financial Impact:** Protocol insolvency - users receive rewards that exceed the actual token balance in the vault, leading to underfunded reward claims.",
+      "severity": "high",
+      "original_id": "75921d8b71629f1b"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_035",
+      "title": "Incorrect Reward Balance Accounting During Withdrawals",
+      "description": "The `_doTransferOutRewards()` function incorrectly deducts rewards from `rewardState.lastBalance` without verifying the actual token balance, creating an accounting inconsistency. When rewards are transferred out, `lastBalance` is reduced by the reward amount, but this doesn't correspond to any actual token transfer since the transfer is commented out.\n\n**Mathematical Proof:**\n1. Initial state: rewardState.lastBalance = 100, actual vault balance = 100\n2. User claims 50 tokens in rewards\n3. `_doTransferOutRewards` executes:\n   - rewardAmounts[i] = 50\n   - userReward[...].accrued = 0\n   - rewardState.lastBalance = 100 - 50 = 50\n   - **But no actual token transfer occurs** (line 94 is commented)\n4. Result: rewardState.lastBalance = 50, actual vault balance = 100\n5. Next reward calculation: accrued = actual balance (100) - lastBalance (50) = 50\n   - But 50 tokens were never actually transferred out\n   - Protocol will double-count these 50 tokens as new rewards\n\n**Exploitation:** Attackers can repeatedly claim rewards without actual token transfers, causing the reward accounting to become increasingly inaccurate and allowing them to claim more rewards than available.\n\n**Financial Impact:** Protocol insolvency through reward inflation - users can claim rewards that exceed the actual token supply, leading to permanent loss of funds for legitimate users.",
+      "severity": "high",
+      "original_id": "55f50d0d451661ea"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_037",
+      "title": "Incorrect Asset Index Calculation in Balancer Exit Function",
+      "description": "The _balancerExit function incorrectly calculates the output token index by incrementing tmpOutIndex for each BPT token found in the assets array. This can lead to incorrect balance calculations and potential loss of funds when the BPT token appears multiple times or in unexpected positions in the assets array. The vulnerability occurs because the function assumes BPT tokens will only appear once and uses a linear scan that can miscount the index offset.",
+      "severity": "high",
+      "original_id": "9b998cdfc37c6cfc"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_038",
+      "title": "Missing Recipient Validation in Pendle Exit Function",
+      "description": "The _pendleExit function transfers LP tokens from the recipient to the market without proper validation when poolActionParams.recipient != address(this). This allows arbitrary addresses to be specified as the recipient, potentially enabling unauthorized transfers of LP tokens from user wallets if the contract has insufficient approval checks elsewhere in the system.",
+      "severity": "high",
+      "original_id": "cdf858168fa037db"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_039",
+      "title": "Incorrect Asset Index Handling in updateLeverJoin Function",
+      "description": "The updateLeverJoin function has flawed logic for handling asset indices when processing Balancer pool parameters. The skipIndex mechanism incorrectly handles the case where the pool token (BPT) appears in the assets array, potentially leading to incorrect assignment of maxAmountsIn and assetsIn arrays. This can result in wrong amounts being used for joins, causing financial loss.",
+      "severity": "high",
+      "original_id": "e99b49301503ead8"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_040",
+      "title": "Incorrect Debt Repayment in Decrease Leverage with EXACT_OUT Swap",
+      "description": "In the `onCreditFlashLoan` function, when handling EXACT_OUT swaps during leverage decrease, the contract incorrectly repays debt using the withdrawn collateral amount instead of the actual swap output. The function calculates `residualAmount = withdrawnCollateral - swapAmountIn` and then attempts to repay `residualAmount` as additional debt, but this is mathematically incorrect since `swapAmountIn` represents the collateral input to the swap, not the underlying token output. This can lead to either over-repayment (if swap has poor conversion rate) or under-repayment (if swap has favorable rate) of the flash loan.",
+      "severity": "high",
+      "original_id": "ab2352786f71592c"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_041",
+      "title": "Missing Access Control on Multisend Function",
+      "description": "The `multisend` function allows arbitrary delegate calls to any target address with any data. While protected by `onlyDelegatecall`, this function can be called by any contract that delegates to this implementation. An attacker could use this to execute arbitrary code in the context of the proxy contract, potentially draining funds or manipulating protocol state. The function lacks any validation of the targets or data parameters, making it a powerful backdoor if accessible through the proxy.",
+      "severity": "high",
+      "original_id": "5a4345782aab4c59"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_042",
+      "title": "Insufficient Validation in TransferAndSwap for EXACT_OUT Swaps",
+      "description": "In the `_transferAndSwap` function, when handling EXACT_OUT swaps, the function transfers any remainder of `swapParams.limit - retAmount` back to the sender. However, if the actual amount transferred from the sender exceeds what was needed for the swap, the remainder calculation could be incorrect if the initial transfer was larger than necessary. This could lead to either over-transferring funds back to the sender or leaving funds stuck in the contract.",
+      "severity": "medium",
+      "original_id": "b8ee1dbb0390856f"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_043",
+      "title": "Incorrect Collateral Accounting in _onDecreaseLever",
+      "description": "The _onDecreaseLever function incorrectly handles the tokenOut return value when no auxAction is performed. When leverParams.auxAction.args.length is 0, the function calls _onWithdraw but does not set tokenOut, causing it to return 0 by default. This breaks the expected behavior where tokenOut should equal the amount of collateral withdrawn from the vault. The function also fails to set tokenOut when auxAction is performed but the _onWithdraw call is made with address(0) as the destination, which prevents proper token accounting.",
+      "severity": "high",
+      "original_id": "a2025df342f184bd"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_044",
+      "title": "Missing Return Value Assignment in _onDecreaseLever",
+      "description": "In the _onDecreaseLever function, when leverParams.auxAction.args.length is 0, the function does not assign a value to tokenOut before returning. This means tokenOut will be 0, even though collateral was withdrawn from the vault. This violates the function's specification that it should return the amount of underlying token withdrawn from the CDPVault. The missing assignment creates a discrepancy between the actual collateral movement and the reported amount, which could lead to incorrect accounting in calling functions.",
+      "severity": "high",
+      "original_id": "ddbfcb08e7061b79"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_045",
+      "title": "Incorrect Collateral Accounting in Leverage Operations",
+      "description": "The `_onIncreaseLever` function incorrectly handles collateral accounting when both upfront collateral and swap amounts are provided. The function adds `upFrontCollateral` to the final collateral amount without converting it from the ERC4626 underlying token to shares, leading to inconsistent units and potential loss of funds. When `leverParams.collateralToken == upFrontToken && leverParams.auxSwap.assetIn == address(0)`, the function treats `upFrontAmount` as ERC4626 shares but then adds it directly to the deposited amount without proper conversion, mixing units (underlying vs shares).",
+      "severity": "high",
+      "original_id": "3ba78c85504a8ddf"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_046",
+      "title": "Incorrect Balance Accounting in Decrease Leverage",
+      "description": "The `_onDecreaseLever` function incorrectly uses balanceOf after delegate call instead of tracking the actual redeemed amount. When `leverParams.auxAction.args.length != 0`, the function calls poolAction.exit and then sets `tokenOut = IERC20(underlyingToken).balanceOf(address(this))`, which includes any tokens already in the contract from previous operations. This allows attackers to potentially steal tokens that were already in the contract by front-running or through reentrancy-like behavior.",
+      "severity": "high",
+      "original_id": "8ce9a259461f7d0a"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_047",
+      "title": "Missing Input Validation in ERC4626 Operations",
+      "description": "The contract performs ERC4626 deposit and redeem operations without validating that the received amounts match the expected amounts. Both `_onDeposit` and `_onWithdraw` functions call ERC4626 functions but don't verify that the returned values match the input amounts or expected conversions. An attacker could deploy a malicious ERC4626 vault that returns incorrect amounts, leading to protocol insolvency.",
+      "severity": "medium",
+      "original_id": "a70b73846afcf679"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_048",
+      "title": "Front-Running Attack on Proxy Deployment via Deterministic CREATE2 Salt",
+      "description": "The _deploy function uses a deterministic CREATE2 salt based solely on the owner's address, allowing attackers to front-run proxy deployments by pre-deploying a contract at the predicted address. This can permanently prevent legitimate users from deploying their proxies or allow attackers to control the proxy contract at the predicted address.\n\n**Mathematical Proof:**\n- CREATE2 address = keccak256(0xFF, sender, salt, keccak256(bytecode))\n- Salt = bytes32(abi.encodePacked(owner))\n- For any owner address, the salt is predictable and fixed\n- Attacker can compute proxy address in advance: address = computeAddress(salt=ownerAddress, bytecode=PRBProxy.bytecode)\n\n**Exploitation Scenario:**\n1. Alice attempts to deploy her proxy via deploy()\n2. Attacker monitors mempool and sees Alice's transaction\n3. Attacker computes Alice's proxy address: address = computeAddress(salt=aliceAddress)\n4. Attacker front-runs by deploying a malicious contract to Alice's proxy address\n5. Alice's deployment fails because the address is already occupied\n6. Alice is permanently locked out from having a proxy\n\n**Financial Impact:**\n- Users permanently lose ability to use proxy functionality\n- Protocol becomes unusable for affected users\n- Potential loss of funds if users rely on proxies for critical operations",
+      "severity": "high",
+      "original_id": "6b015fbf727b5168"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_049",
+      "title": "State Desynchronization in Plugin Uninstallation",
+      "description": "The uninstallPlugin function deletes plugin mappings but doesn't verify that the plugin is actually installed for the current proxy owner combination. This can lead to state desynchronization where the _methods mapping is deleted but the _plugins mapping remains, or vice versa.\n\n**Mathematical Proof:**\n- _methods[owner][plugin] tracks methods installed by a plugin\n- _plugins[owner][method] tracks which plugin handles each method\n- uninstallPlugin deletes _methods[owner][plugin] first, then iterates through methods to delete _plugins[owner][method]\n- If the plugin was never installed, length=0 check fails and function reverts\n- However, if _methods was modified externally or through reentrancy, state can desynchronize\n\n**Exploitation Scenario:**\n1. Plugin A is installed with methods [0x12345678, 0x87654321]\n2. Through reentrancy or external modification, _methods[owner][pluginA] is cleared\n3. User calls uninstallPlugin(pluginA)\n4. length=0 check passes because _methods[owner][pluginA].length == 0\n5. Function proceeds but _plugins mappings for methods 0x12345678 and 0x87654321 remain\n6. Plugin appears uninstalled but methods still route to it\n\n**Financial Impact:**\n- Unexpected plugin behavior after \"uninstallation\"\n- Security bypass if malicious plugin methods remain active\n- Potential loss of funds if plugins handle financial operations",
+      "severity": "high",
+      "original_id": "2ee05d5c51744546"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_050",
+      "title": "Missing Access Control on deployFor Function",
+      "description": "The deployFor function allows any user to deploy a proxy for any other user who doesn't currently have a proxy. This can be exploited to grief users by deploying unwanted proxies on their behalf, permanently preventing them from deploying their own preferred proxy configuration.\n\n**Mathematical Proof:**\n- deployFor(address user) has onlyNonProxyOwner(user) modifier\n- Modifier only checks if user already has a proxy: address(_proxies[user]) != address(0)\n- No authorization check that msg.sender has permission to deploy for user\n- Any address can call deployFor(anyUser) as long as anyUser has no proxy\n\n**Exploitation Scenario:**\n1. Alice is a new user without a proxy\n2. Attacker calls deployFor(alice) before Alice can deploy her own proxy\n3. Proxy is deployed with Alice as owner, but attacker controls the deployment transaction\n4. Alice is now permanently associated with this proxy she didn't request\n5. Alice cannot deploy her own preferred proxy configuration\n\n**Financial Impact:**\n- Users lose control over their proxy deployment\n- Permanent griefing attack that cannot be reversed\n- Potential loss if attacker deploys proxy with unfavorable parameters",
+      "severity": "high",
+      "original_id": "7eb6ea9c26635f53"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_051",
+      "title": "Permit2 Signature Construction Vulnerability",
+      "description": "The _transferFrom function incorrectly constructs the signature for Permit2 by concatenating r, s, and v parameters. The Permit2 interface expects a single bytes signature parameter, but the current construction uses bytes.concat(r, s, bytes1(v)) which creates a 65-byte signature. However, the Permit2 contract may expect the signature in a different format or order. Additionally, converting v to bytes1 may truncate it if v is larger than 255, which could happen if v is incorrectly provided. This could lead to signature verification failures or, in worst case, allow signature malleability attacks if the signature format is not properly validated by the Permit2 contract.",
+      "severity": "high",
+      "original_id": "83ef9e96330235b3"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_052",
+      "title": "Inconsistent Approval Amount Usage in Permit Flow",
+      "description": "In the PERMIT approval path, the function uses params.approvalAmount for the permit call but then uses amount for the transferFrom call. This creates a potential inconsistency where the approved amount may not match the transferred amount. If params.approvalAmount is less than amount, the transferFrom will fail. If params.approvalAmount is greater than amount, it leaves excess allowance that could be exploited by other malicious contracts. Attackers could set approvalAmount significantly higher than the actual transfer amount, creating a dangerous allowance that could be used in future attacks.",
+      "severity": "medium",
+      "original_id": "1f369a5f6739af7b"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_053",
+      "title": "Missing Deadline Validation",
+      "description": "The function does not validate the deadline parameter before using it in permit calls. If a user provides an expired deadline (deadline < block.timestamp), the permit call will fail, but the function does not check this condition upfront. This could lead to unnecessary gas consumption and failed transactions. While not directly exploitable for fund loss, it represents a user experience issue and potential gas waste vector.",
+      "severity": "low",
+      "original_id": "b371207d6e6fc56e"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_054",
+      "title": "Incorrect Residual Token Transfer Logic in EXACT_OUT Swaps",
+      "description": "The swap function incorrectly handles residual token transfers for EXACT_OUT swaps. When swapType is EXACT_OUT, the function transfers (swapParams.limit - retAmount) tokens to the residualRecipient or recipient. However, retAmount represents the amount of input tokens actually used, which should be less than or equal to swapParams.limit. The calculation assumes retAmount is the amount of output tokens received, but it's actually the amount of input tokens used. This causes the contract to transfer incorrect amounts and can lead to fund loss.\n\nMathematical Proof:\n- For EXACT_OUT swap: swapParams.amount = desired output amount, swapParams.limit = maximum input amount\n- retAmount = actual input tokens used (should be \u2264 swapParams.limit)\n- Current calculation: transferAmount = swapParams.limit - retAmount\n- But swapParams.limit is the maximum input, and retAmount is actual input used\n- If retAmount = 5 ETH (actual used) and swapParams.limit = 10 ETH (max allowed), transferAmount = 10 - 5 = 5 ETH\n- However, the contract should transfer the unused portion of the input tokens, which is correct mathematically\n- BUT the issue is that retAmount is not consistently defined across different swap protocols\n\nExploitation Scenario:\nAn attacker could exploit this by:\n1. Setting up an EXACT_OUT swap with a high limit\n2. The swap uses less input tokens than the limit\n3. The contract transfers the difference to the wrong recipient\n4. If residualRecipient is set to attacker's address, they receive funds they shouldn't\n\nFinancial Impact: Direct loss of user funds to unauthorized recipients. The amount lost equals (swapParams.limit - actual_input_used).",
+      "severity": "high",
+      "original_id": "07473db4e95c5c55"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_055",
+      "title": "Missing Access Control on Public swap() Function",
+      "description": "The swap() function is public with no access control, allowing any external caller to execute swaps using the contract's token balances. While the function requires the contract to have sufficient token balance, an attacker could front-run legitimate transactions or exploit any temporary token balances in the contract.\n\nAttack Vector:\n1. Contract receives tokens from a legitimate user via transferAndSwap\n2. Before the legitimate swap executes, attacker calls swap() directly with malicious parameters\n3. Attacker drains the contract's token balance to their own address\n\nExploitation Scenario:\n- User calls transferAndSwap() to swap 1000 USDC\n- Contract receives 1000 USDC\n- Attacker front-runs and calls swap() with their own parameters, specifying recipient as attacker address\n- Attacker receives the 1000 USDC\n- User's transaction fails due to insufficient balance\n\nFinancial Impact: Complete loss of any tokens temporarily held by the contract. Attackers can steal funds during the window between token transfer and swap execution.",
+      "severity": "high",
+      "original_id": "0dd604e977d388fa"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_056",
+      "title": "Incorrect Token Approval in pendleExit Function",
+      "description": "The pendleExit function incorrectly transfers LP tokens from the recipient instead of from the contract itself. When recipient != address(this), the function calls IPMarket(market).transferFrom(recipient, market, netLpIn), which requires the recipient to have approved this contract to spend their LP tokens. However, the function doesn't check or request this approval, and the recipient may not have approved the contract.\n\nMathematical Proof:\n- Function attempts: IPMarket(market).transferFrom(recipient, market, netLpIn)\n- This requires: allowance(recipient, this contract) >= netLpIn\n- But the contract never checks or requests this approval\n- Transaction will revert if recipient hasn't approved the contract\n\nExploitation Scenario:\n1. User calls pendleExit with recipient set to their own address\n2. Function tries to transferFrom(user, market, netLpIn)\n3. Transaction reverts because user never approved this contract to spend their LP tokens\n4. User's transaction fails unexpectedly\n\nFinancial Impact: Protocol functionality failure. Users cannot successfully exit Pendle positions through this contract unless they manually approve the contract beforehand, which may not be documented or expected.",
+      "severity": "medium",
+      "original_id": "936cd92087688afa"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_057",
+      "title": "Unchecked External Call in kyberSwap Function",
+      "description": "The kyberSwap function performs an external call to kyberRouter with user-provided payload without adequate validation. While it checks for success and reverts on failure, it doesn't validate that the call actually performed a swap or that the returned amount matches expectations.\n\nAttack Vector:\n1. Attacker provides malicious payload that calls arbitrary functions on kyberRouter\n2. The call succeeds but doesn't actually perform the intended swap\n3. Function returns a fabricated amount without actual token transfer verification\n\nExploitation Scenario:\n- Attacker crafts payload that calls a function returning a high number but doesn't transfer tokens\n- kyberSwap returns success with fabricated return value\n- Contract logic proceeds as if swap was successful\n- Financial accounting becomes incorrect\n\nFinancial Impact: Protocol insolvency through incorrect accounting. The contract may believe it received tokens that were never actually transferred.",
+      "severity": "medium",
+      "original_id": "bf62d71eea9cf620"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_058",
+      "title": "Incorrect Quota Revenue Calculation in poolQuotaRevenue",
+      "description": "The poolQuotaRevenue function incorrectly calculates quota revenue by using creditManagerBorrowed(creditManagers[token]) instead of totalQuoted for each token. This creates a mismatch between the actual quoted amounts and the revenue calculation, potentially leading to incorrect revenue reporting and improper fee distribution. The function should use totalQuoted (which represents the actual quota amounts) rather than borrowed amounts from credit managers.\n\nMathematical Proof:\n- Suppose token A has totalQuoted = 1000 and rate = 100 bps (1%)\n- Credit manager for token A has borrowed = 500\n- Correct revenue: (1000 * 100) / 10000 = 10 units per year\n- Current calculation: (500 * 100) / 10000 = 5 units per year\n- This represents a 50% understatement of actual revenue\n\nExploitation Scenario:\nProtocol operators and governance rely on accurate revenue reporting for fee distribution and protocol health monitoring. The incorrect calculation could lead to:\n1. Underpayment of revenue shares to stakeholders\n2. Incorrect protocol health assessments\n3. Misguided governance decisions based on inaccurate revenue data\n\nFinancial Impact:\nStakeholders (liquidity providers, protocol treasury) receive incorrect revenue distributions. The impact scales with the difference between total quoted amounts and actual borrowed amounts across all credit managers.",
+      "severity": "high",
+      "original_id": "0f8ca9c54602347a"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_059",
+      "title": "Missing Validation in setCreditManager Function",
+      "description": "The setCreditManager function allows setting any address as a credit manager for any token without validation. This could allow malicious configuration that breaks quota calculations and revenue tracking.\n\nAttack Vectors:\n1. Setting a non-credit manager address could cause poolQuotaRevenue() and updateRates() to revert when calling creditManagerBorrowed()\n2. Setting the same credit manager for multiple tokens could cause revenue double-counting\n3. Setting zero address could break revenue calculations\n\nExploitation Scenario:\nA malicious configurator (or compromised configurator account) could:\n1. Set invalid credit manager addresses to disrupt quota revenue calculations\n2. Set the same credit manager for multiple tokens to manipulate revenue reporting\n3. Set addresses that don't implement the expected interface, causing function calls to revert\n\nFinancial Impact:\nProtocol revenue calculations become unreliable, potentially affecting fee distributions and protocol economic stability. The pool's quota revenue tracking would be corrupted.",
+      "severity": "high",
+      "original_id": "3c97814b70eea10a"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_060",
+      "title": "Uninitialized cumulativeIndexLU in addQuotaToken",
+      "description": "The addQuotaToken function sets cumulativeIndexLU to 1 instead of the proper initial value. According to QuotasLogic.cumulativeIndexSince, the cumulative index should start from RAY (1e27) when initializing, not 1. This causes incorrect interest calculations from the beginning.\n\nMathematical Proof:\n- Proper initialization: cumulativeIndexLU = RAY (1e27)\n- Current initialization: cumulativeIndexLU = 1\n- With rate = 1000 bps (10%) and time delta = 1 year:\n  Correct: 1e27 * (1 + 0.1) = 1.1e27\n  Current: 1 * (1 + 0.1) = 1.1 (massive undercalculation)\n\nExploitation Scenario:\nNewly added tokens will have severely undercalculated cumulative indexes, leading to incorrect interest accrual calculations. This affects quota pricing and revenue calculations from the moment tokens are added.\n\nFinancial Impact:\nProtocol undercalculates interest revenue for newly added tokens, resulting in revenue loss for the protocol and incorrect quota pricing for users.",
+      "severity": "high",
+      "original_id": "6f5f4cf8ee478de8"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_061",
+      "title": "Vote Manipulation Through Parameter Injection in Unvote Function",
+      "description": "The unvote function allows users to remove votes for a specific token and side, but it does not validate that the user has sufficient votes on the specified side before attempting to remove them. While there are checks for insufficient votes within the lpSide and caSide branches, an attacker can manipulate the parameters to bypass intended vote removal logic.\n\n**Mathematical Proof:**\n1. User has 100 votes on LP side and 0 votes on CA side for token T\n2. Attacker calls unvote(user, 50, extraData) where extraData encodes (token=T, lpSide=false)\n3. The function checks isTokenAdded(T) \u2192 true\n4. _checkAndUpdateEpoch() executes\n5. Since lpSide=false, it enters the else branch\n6. Checks uv.votesCaSide < votes \u2192 0 < 50 \u2192 reverts with InsufficientVotesException\n\n**However, the vulnerability exists because:**\n- The function doesn't validate that the user actually has votes on the specified side before processing\n- An attacker could repeatedly call this with different parameters to probe user voting patterns\n- If the insufficient vote check were missing or flawed, this could lead to incorrect vote accounting\n\n**Exploitation Scenario:**\nWhile the current implementation has the insufficient vote check, the parameter injection vulnerability exists in the design. If future modifications remove or modify these checks, an attacker could:\n1. Monitor voting patterns of large voters\n2. Use parameter injection to probe their vote distributions\n3. Potentially manipulate vote removal if checks are insufficient\n\n**Financial Impact:**\nDirect impact is limited due to the insufficient vote checks, but the parameter injection vulnerability creates a design flaw that could be exploited if the contract is modified without proper validation.",
+      "severity": "medium",
+      "original_id": "81660f21211a33ee"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_062",
+      "title": "Division Rounding Error in Rate Calculation",
+      "description": "The getRates function calculates quota rates using integer division which can lead to precision loss and rounding errors. The formula used is: rate = (minRate * votesCaSide + maxRate * votesLpSide) / totalVotes.\n\n**Mathematical Proof:**\n1. Let minRate = 100 (1.00%), maxRate = 500 (5.00%)\n2. votesLpSide = 1, votesCaSide = 2, totalVotes = 3\n3. Calculation: (100 * 2 + 500 * 1) / 3 = (200 + 500) / 3 = 700 / 3 = 233.33...\n4. Integer division truncates to 233 (2.33%)\n5. Expected weighted average: (2/3)*100 + (1/3)*500 = 66.67 + 166.67 = 233.34\n6. Precision loss: 0.01% error\n\n**Exploitation Scenario:**\nWhile the rounding error is small in individual cases, attackers could exploit this by:\n1. Manipulating vote distributions to maximize rounding errors\n2. Creating voting patterns that consistently round in their favor\n3. Exploiting the cumulative effect of small rounding errors over time\n\n**Financial Impact:**\nThe financial impact is limited because:\n- Rates are only updated weekly\n- Rounding errors are typically small (fractions of basis points)\n- The error affects all users proportionally\n\nHowever, systematic rounding could theoretically be exploited by sophisticated attackers to gain small advantages in interest rate calculations.",
+      "severity": "low",
+      "original_id": "d9629bfa06a63142"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_063",
+      "title": "Potential State Desynchronization in Quota Rate Updates",
+      "description": "The contract maintains quota rates that are only updated once per epoch, but votes can be added/removed at any time. This creates a potential state desynchronization where the actual vote distribution differs from the rates being used by the quota keeper.\n\n**Mathematical Proof:**\n1. Epoch 1: votesLpSide = 1000, votesCaSide = 1000, rate = 300 (average of min=100, max=500)\n2. User adds 2000 votes to LP side immediately after epoch update\n3. For the entire week, the rate remains at 300 despite new distribution: (1000+2000)/(2000+1000) = 3000/3000 = 100% LP weight\n4. Actual should be: (1000*100 + 3000*500)/4000 = (100000 + 1500000)/4000 = 1600000/4000 = 400\n5. Protocol uses 300 instead of 400 for the entire epoch\n\n**Exploitation Scenario:**\nAttackers can:\n1. Monitor when epoch updates occur\n2. Immediately after update, manipulate votes to their advantage\n3. Benefit from incorrect rates for the entire epoch\n4. Reverse manipulation before next epoch update\n\n**Financial Impact:**\n- LPs may receive incorrect interest rates\n- Borrowers may pay incorrect quota fees\n- The discrepancy can be up to (maxRate - minRate) if votes are heavily skewed\n- Financial impact scales with the size of quotas and the magnitude of rate discrepancy",
+      "severity": "medium",
+      "original_id": "64ac0333ef65fa4a"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_064",
+      "title": "Integer Overflow in Cumulative Index Calculation",
+      "description": "The cumulativeIndexSince function performs arithmetic operations that can overflow when large time deltas or rates are used. The calculation `(RAY_DIVIDED_BY_PERCENTAGE * (block.timestamp - lastQuotaRateUpdate) * rate) / SECONDS_PER_YEAR` multiplies three potentially large values before division, which can exceed uint256 limits even with reasonable parameter values.\n\nMathematical Proof:\n- RAY_DIVIDED_BY_PERCENTAGE = 10^27 / 10^4 = 10^23\n- Maximum time delta: block.timestamp - lastQuotaRateUpdate could be up to ~2^32 seconds (136 years)\n- Maximum rate: 65535 (uint16 max)\n- Calculation: 10^23 * 2^32 * 65535 \u2248 2.8e38 which exceeds uint256 max (~1.15e77) but intermediate multiplication can overflow in realistic scenarios\n\nExploitation: An attacker could manipulate the lastQuotaRateUpdate to be very old, causing overflow that would corrupt the cumulative index calculation, leading to incorrect interest accrual and potential fund loss.\n\nFinancial Impact: Incorrect interest calculations could result in underpayment to lenders or overcharging to borrowers, with losses proportional to the quota amounts.",
+      "severity": "high",
+      "original_id": "6ab51afebbe2e17e"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_065",
+      "title": "Precision Loss in Quota Interest Calculation",
+      "description": "The calcAccruedQuotaInterest function performs division after multiplication, which can lead to precision loss when the interest amount is small relative to the quoted amount. The formula `(quoted * (cumulativeIndexNow - cumulativeIndexLU)) / RAY` can round down to zero for small interest periods or small quota amounts.\n\nMathematical Proof:\n- If quoted = 1000 (small quota)\n- cumulativeIndexNow - cumulativeIndexLU = 10^18 (small interest rate over short period)\n- Calculation: (1000 * 10^18) / 10^27 = 10^-6 which rounds down to 0\n\nExploitation: Attackers could exploit this by making many small quota transactions with short durations, where the accrued interest rounds to zero, effectively borrowing without paying interest.\n\nFinancial Impact: Protocol loses expected interest revenue. For example, if 1000 small loans of 1000 units each accrue 0.001 units of interest that rounds to zero, the protocol loses 1 unit of interest revenue per loan cycle.",
+      "severity": "medium",
+      "original_id": "12afdc7de326e6ca"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_066",
+      "title": "Unsafe Casting in Actual Quota Change Calculation",
+      "description": "The calcActualQuotaChange function contains unsafe casting operations that can lead to incorrect quota calculations. The comment states 'With correct configuration, limit < type(int96).max' but this is not enforced. If limit exceeds int96.max, casting to int96 will produce incorrect negative values.\n\nMathematical Proof:\n- If limit = type(uint96).max = 2^96 - 1 \u2248 7.9e28\n- maxQuotaCapacity = limit - totalQuoted (could be large positive number)\n- Casting to int96: if maxQuotaCapacity > 2^95, it becomes negative due to two's complement\n- This would cause the function to return incorrect quota changes\n\nExploitation: An attacker could manipulate the quota system to accept incorrect quota changes, potentially allowing over-borrowing beyond intended limits.\n\nFinancial Impact: Protocol could allow borrowing beyond safe limits, leading to potential insolvency if borrowers default on over-extended positions.",
+      "severity": "high",
+      "original_id": "2bc04e47dcde76fd"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_067",
+      "title": "Incorrect Reward Calculation in _newRewards Function",
+      "description": "The _newRewards function calculates rewards based on the current block.timestamp minus pool.lastRewardTime, but uses the current rewardsPerSecond value for the entire duration. This is incorrect when rewardsPerSecond has changed during that period due to emission schedule updates. The function should account for variable reward rates over the time period.",
+      "severity": "high",
+      "original_id": "d5e7b97485b6c1ac"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_068",
+      "title": "State Desynchronization in _handleActionAfterForToken",
+      "description": "The _handleActionAfterForToken function updates user balances and reward debt but doesn't properly handle the case where multiple state changes occur between updates. When a user's balance changes multiple times between reward updates, the reward calculation becomes inaccurate because it only considers the most recent balance change, not the cumulative effect of all changes during the period.",
+      "severity": "high",
+      "original_id": "cd45cd80cc58c603"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_069",
+      "title": "Incorrect Ending Time Calculation in endRewardTime",
+      "description": "The endRewardTime function calculates the estimated ending time using a flawed formula that doesn't properly account for all reward distributions. The calculation uses (unclaimedRewards + extra) / rewardsPerSecond + lastAllPoolUpdate, but this doesn't consider that rewards are distributed continuously and the available rewards decrease over time.",
+      "severity": "medium",
+      "original_id": "faccbc49b07489cf"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_070",
+      "title": "Missing Access Control on setEligibilityExempt",
+      "description": "The setEligibilityExempt function can be called by authorizedContracts without proper validation. If an attacker gains control of an authorized contract, they can exempt themselves from eligibility checks, allowing them to continue receiving rewards even when disqualified.",
+      "severity": "medium",
+      "original_id": "d44eaa6793d8182c"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_071",
+      "title": "Incorrect Price Tolerance Application in Eligibility Calculation",
+      "description": "The `isEligibleForRewards` function applies the price tolerance ratio to the required value instead of the locked value, which incorrectly makes eligibility easier to achieve when prices drop. This breaks the intended economic security model where users should maintain sufficient collateral relative to their debt. The function calculates `requiredValue = (requiredUsdValue(_user) * priceToleranceRatio) / RATIO_DIVISOR` instead of applying the tolerance to the locked value, allowing users to remain eligible with insufficient collateral during price declines.\n\n**Mathematical Proof:**\n- Normal scenario: User has $100 debt, required ratio = 50% ($50 required), locked value = $60\n  - Correct calculation: lockedValue ($60) >= requiredValue ($50) \u2192 Eligible \u2713\n- Price drop scenario: LP price drops 20%, locked value becomes $48\n  - Current bug: requiredValue = $50 * 90% = $45, lockedValue = $48 >= $45 \u2192 Still eligible \u2717\n  - Correct logic: lockedValue = $48 should be compared to requiredValue = $50 \u2192 Not eligible \u2713\n\n**Exploitation:** Users can maintain eligibility with insufficient collateral during market downturns, receiving rewards they shouldn't qualify for.\n\n**Financial Impact:** Protocol pays rewards to undercollateralized users, draining reward pools and creating protocol insolvency risk. The impact scales with total debt and reward emissions.",
+      "severity": "high",
+      "original_id": "c14c4bdfd206b104"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_072",
+      "title": "Division Rounding Error in Required Value Calculation",
+      "description": "The `requiredUsdValue` function performs division before price conversion, which can cause rounding errors that make users incorrectly eligible when they have small debt positions. The function calculates `required = (totalNormalDebt * requiredDepositRatio) / RATIO_DIVISOR` and then converts to USD, but small debt amounts can round down to zero required value.\n\n**Mathematical Proof:**\n- User has 100 wei debt (very small), requiredDepositRatio = 500 (5%)\n- required = (100 * 500) / 10000 = 50000 / 10000 = 5 wei (rounded down from 5.0)\n- After USD conversion: 5 wei * price \u2192 negligible value\n- requiredValue != 0 check passes, user becomes eligible with minimal collateral\n\n**Exploitation:** Attackers can create many small debt positions with minimal collateral to farm rewards illegitimately.\n\n**Financial Impact:** Protocol pays rewards to users who should be ineligible, draining reward pools. The attack scales linearly with the number of small positions created.",
+      "severity": "high",
+      "original_id": "d660b98ed76bf8a6"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_073",
+      "title": "Incorrect Locked Value Calculation in lastEligibleTime",
+      "description": "The `lastEligibleTime` function incorrectly accumulates LP amounts from multiple locks without considering that different locks may have different unlock times and values. The function sums all locked amounts and compares the cumulative value, but returns the unlock time of the most recent lock that pushes the total over the threshold, which may not represent the actual eligibility timeline correctly.\n\n**Mathematical Proof:**\n- User has 3 locks: Lock1: $10 (unlocks in 30 days), Lock2: $20 (unlocks in 60 days), Lock3: $30 (unlocks in 90 days)\n- Required value: $50\n- Function processes: Lock3 ($30 < $50) \u2192 Lock2 ($50 >= $50) \u2192 returns 60 days\n- But user actually becomes eligible only after Lock2 unlocks (60 days), not immediately\n- Correct logic should find when cumulative locked value FIRST exceeds required value\n\n**Exploitation:** Incorrect eligibility timing calculations could cause users to lose rewards they should receive or receive rewards they shouldn't.\n\n**Financial Impact:** Users may be incorrectly disqualified from rewards or receive rewards for incorrect periods, leading to unfair reward distribution and potential legal/compliance issues.",
+      "severity": "high",
+      "original_id": "c19e2f757b88b9e0"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_074",
+      "title": "Permission Agent Privilege Escalation via Self-Reference",
+      "description": "The modifyPermission function with three parameters allows an agent to modify permissions for any address, including themselves. This creates a privilege escalation vulnerability where an agent can grant themselves permanent permission to modify the owner's permissions, even after the owner revokes their agent status.\n\n**Mathematical Proof:**\n1. Owner Alice sets Bob as agent: _permittedAgents[Alice][Bob] = true\n2. Bob calls modifyPermission(Alice, Bob, true): _permitted[Alice][Bob] = true\n3. Alice revokes Bob's agent status: _permittedAgents[Alice][Bob] = false\n4. Bob still has permission via _permitted[Alice][Bob] = true\n5. Bob can now call modifyPermission(Alice, Bob, true) again to regain agent status\n\n**Exploitation Scenario:**\nAn agent who is about to be removed can use their temporary agent status to grant themselves permanent permission, then use that permission to regain agent status after being removed. This creates a permanent backdoor.\n\n**Financial Impact:**\nAn attacker with temporary agent access can permanently maintain control over the owner's permissions, allowing them to perform unauthorized actions indefinitely. This could lead to complete loss of funds controlled by the permission system.",
+      "severity": "high",
+      "original_id": "3c37dda21c91c0f1"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_075",
+      "title": "Missing Zero Address Validation in Permission Modification",
+      "description": "The contract does not validate that address parameters are not the zero address. This allows setting permissions for address(0), which can lead to unexpected behavior when the zero address is used in permission checks.\n\n**Mathematical Proof:**\n1. User calls modifyPermission(address(0), true): _permitted[msg.sender][0x0] = true\n2. hasPermission(owner, 0x0) returns true for any owner who granted permission to zero address\n3. Any caller can use address(0) to bypass permission checks if the owner accidentally granted permission to zero\n\n**Exploitation Scenario:**\nIf a user accidentally grants permission to the zero address (common in UI bugs or malformed transactions), then any caller can pass address(0) as the caller parameter to hasPermission() and get permission granted. This could be exploited through front-running or by monitoring mempool for such transactions.\n\n**Financial Impact:**\nAccidental permission grants to zero address could allow unauthorized access to protected functions, potentially leading to fund theft or protocol manipulation.",
+      "severity": "medium",
+      "original_id": "4853dff7ba517702"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_076",
+      "title": "Lack of Reentrancy Protection in Permission Modification",
+      "description": "The permission modification functions do not use reentrancy guards, allowing potential reentrancy attacks if these functions are called during other state-modifying operations that check permissions.\n\n**Mathematical Proof:**\n1. Contract A calls modifyPermission during a complex operation\n2. During the permission modification, a callback is made to Contract A\n3. Contract A reenters and calls hasPermission with modified permissions\n4. The permission check uses the intermediate state before the operation completes\n\n**Exploitation Scenario:**\nIf a contract integrates this permission system and calls modifyPermission during a multi-step operation (like a transfer with callback), an attacker could reenter and exploit the intermediate permission state to bypass security checks.\n\n**Financial Impact:**\nReentrancy could allow attackers to bypass permission checks during critical operations, potentially leading to unauthorized fund transfers or state manipulation.",
+      "severity": "medium",
+      "original_id": "73754a217f0ecb35"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_077",
+      "title": "Incorrect Reward Distribution Due to Missing Reward Token Validation",
+      "description": "The `addReward` function allows minters to add new reward tokens, but it does not validate that the reward token is different from the staking token or RDNT token. If a minter adds the staking token as a reward token, it creates a circular dependency where the reward distribution mechanism would try to distribute the staking token as a reward, but the staking token balance tracking is handled separately from reward token tracking. This could lead to incorrect reward calculations and potential loss of funds.\n\n**Mathematical Proof:**\n- Let stakingToken = address(0x123) and RDNT token = address(0x456)\n- A malicious minter calls addReward(0x123) to add staking token as reward\n- rewardData[0x123] is initialized with lastUpdateTime = block.timestamp\n- When _notifyReward is called for token 0x123, it calculates rewardPerSecond = (reward * 1e12) / rewardsDuration\n- But the contract's staking token balance includes both locked tokens and reward tokens, creating accounting confusion\n- rewardData[0x123].balance tracks reward amounts, but the actual token balance includes staked amounts\n- This discrepancy leads to incorrect reward distribution calculations\n\n**Exploitation Scenario:**\nA compromised or malicious minter adds the staking token as a reward token. When rewards are distributed, the contract will incorrectly calculate available rewards by mixing staked balances with reward balances, potentially allowing attackers to claim more rewards than intended.\n\n**Financial Impact:**\nUsers could receive incorrect reward amounts, with some users potentially receiving more rewards than they deserve at the expense of others. The protocol's reward distribution mechanism would become unreliable.",
+      "severity": "high",
+      "original_id": "1746deeabfad89e4"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_078",
+      "title": "Incorrect Penalty Calculation in Withdraw Function",
+      "description": "The withdraw function contains a logical error in the penalty calculation loop where it continues iterating even when earnedAmount is zero, but the loop counter still increments. This can lead to incorrect penalty calculations and potential undercharging of penalties.\n\n**Mathematical Proof:**\n- User has 3 earnings entries: [100, 0, 200] tokens\n- User tries to withdraw 150 tokens\n- Loop iterates through entries:\n  - i=0: earnedAmount=100, calculates penalty correctly\n  - i=1: earnedAmount=0, but loop continues and i increments to 2\n  - i=2: earnedAmount=200, but the remaining amount calculation is now incorrect because i should be 1\n- The penalty calculation becomes misaligned with the actual earnings structure\n\n**Exploitation Scenario:**\nAn attacker could manipulate their earnings structure by having zero-amount entries strategically placed. When withdrawing, the incorrect loop logic could result in lower penalty charges than deserved, allowing the attacker to withdraw funds with reduced penalties.\n\n**Financial Impact:**\nUsers could avoid paying the full penalty amount they should owe, resulting in financial loss to the protocol's treasury and DAO that should receive penalty funds.",
+      "severity": "high",
+      "original_id": "8869edf0112fa664"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_079",
+      "title": "Incorrect Lock Index Calculation in _stake Function",
+      "description": "The _stake function uses _binarySearch to find the insertion index for new locks, but the logic for determining indexToAggregate has an off-by-one error that can lead to incorrect lock aggregation and reward multiplier application.\n\n**Mathematical Proof:**\n- User has existing locks at indices: [lock1, lock2, lock3]\n- _binarySearch returns lockIndex = 2 (meaning new lock should be inserted at position 2)\n- indexToAggregate = lockIndex == 0 ? 0 : lockIndex - 1 = 1\n- The code checks if lock at index 1 has same unlockTime/AGGREGATION_EPOCH and multiplier\n- But if the new lock should actually aggregate with lock at index 2, this logic fails\n- This can lead to creating unnecessary new lock entries instead of aggregating with existing ones\n\n**Exploitation Scenario:**\nAn attacker could strategically time their stakes to exploit the incorrect aggregation logic, causing their locks to be stored in separate entries rather than aggregated. This could potentially be used to manipulate reward calculations or create edge cases in the locking mechanism.\n\n**Financial Impact:**\nInefficient lock management could lead to increased gas costs and potential issues with reward distribution accuracy. While not directly causing fund loss, it creates system instability.",
+      "severity": "medium",
+      "original_id": "67aaec6b5e3df942"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_080",
+      "title": "Missing Access Control on claimBounty Function",
+      "description": "The claimBounty function is intended to be called only by the bountyManager, but it uses a public modifier instead of a specific access control modifier. While it has a check for msg.sender != address(bountyManager), this is a runtime check rather than a compile-time access control.\n\n**Mathematical Proof:**\n- Function signature: `function claimBounty(address user, bool execute) public whenNotPaused`\n- Only check: `if (msg.sender != address(bountyManager)) revert InsufficientPermission();`\n- Any address can call this function, though it will revert if not bountyManager\n- However, this still allows any contract to interact with this function, potentially causing unexpected behavior in complex DeFi interactions\n\n**Exploitation Scenario:**\nWhile the function reverts for unauthorized callers, the public visibility means it can be called by any contract. In complex DeFi composability scenarios, this could lead to unexpected interactions or be used in flash loan attacks as part of a larger attack vector.\n\n**Financial Impact:**\nWhile direct exploitation is prevented by the revert, the public visibility creates potential attack surface in complex DeFi interactions that could be exploited as part of a multi-contract attack.",
+      "severity": "medium",
+      "original_id": "5cb17cbed4bcb9eb"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_081",
+      "title": "Incorrect Asset Conversion in Reward Calculation",
+      "description": "The _previewReward function incorrectly calculates the amount of assets to be sent to the vault by using the wrong oracle price feed. It uses _chainlinkSpot() which returns the BAL price, but then divides by the asset's price from the feed oracle. This creates a dimensional inconsistency where BAL tokens are being converted using BAL price divided by asset price, resulting in incorrect asset amounts. The mathematical error allows attackers to manipulate reward claims by providing incorrect amounts parameters.",
+      "severity": "high",
+      "original_id": "9700daede27574a7"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_082",
+      "title": "Incorrect Share Conversion Formula",
+      "description": "The _convertToShares and _convertToAssets functions use an incorrect formula that adds 1 to totalAssets() and 10^decimalsOffset to totalSupply(). This breaks the standard ERC4626 conversion logic and can lead to significant rounding errors, especially when totalAssets() is small. The formula should be assets * totalSupply() / totalAssets() without these artificial additions. This can be exploited during deposit/withdraw operations to mint more shares than deserved or redeem fewer assets than entitled.",
+      "severity": "high",
+      "original_id": "692af6ae040b62fd"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_083",
+      "title": "Missing Reward Validation in Claim Function",
+      "description": "The claim function accepts arbitrary amounts parameters without validating they match actual earned rewards. Attackers can provide inflated amounts[] to receive more assets than they should. The function transfers BAL and AURA rewards based on the provided amounts without verifying these match the actual rewards claimed from the reward pool. This allows attackers to steal assets from the vault by claiming rewards they haven't earned.",
+      "severity": "critical",
+      "original_id": "bf14a1ff82c501ad"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_084",
+      "title": "Incorrect AURA Reward Distribution After Protection Time",
+      "description": "After INFLATION_PROTECTION_TIME, the claim function transfers the entire AURA balance to lockerRewards instead of using the provided amounts[1] parameter. However, it still uses amounts[1] in the _previewReward calculation. This creates a mismatch where attackers can provide manipulated amounts[1] values to receive more assets while the actual AURA distribution follows a different logic.",
+      "severity": "high",
+      "original_id": "bba1837b6b8cbfa0"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_085",
+      "title": "Broken AURA Mining Calculation",
+      "description": "The _previewMining function hardcodes minterMinted = 0 and cannot access the actual value from the AURA token contract since it's private. This results in incorrect AURA reward calculations. The emissionsMinted calculation is wrong, leading to inaccurate cliff calculations and ultimately incorrect AURA minting estimates. This affects reward compounding and can be exploited by attackers during specific time periods.",
+      "severity": "high",
+      "original_id": "569c313e2374ea97"
+    }
+  ],
+  "input_tokens": 5784,
+  "output_tokens": 170,
+  "cached_tokens": 12
+}

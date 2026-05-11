@@ -65,14 +65,16 @@ MODELS = [
     # "deepseek-ai/DeepSeek-V3.2-TEE",
     "moonshotai/Kimi-K2.5-TEE",
     # "MiniMaxAI/MiniMax-M2.5-TEE",
+    
 ]
 CHUTES_MODELS = f"{','.join(MODELS)}:throughput"
 
 class ScaBenchScorerV2:
     """Improved scorer with one-by-one matching for consistency."""
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: Optional[Dict[str, Any]] = None, console: Optional[Console] = None):
         """Initialize the scorer with optional configuration."""
+        self.console = console or Console()
         self.config = config or {}
 
         self.confidence_threshold = self.config.get("confidence_threshold", 0.75)
@@ -156,6 +158,7 @@ class ScaBenchScorerV2:
                     f"{self.api_url}/inference",
                     headers=headers,
                     json=payload,
+                    timeout=360,
                 )
                 resp.raise_for_status()
                 break
@@ -169,7 +172,7 @@ class ScaBenchScorerV2:
 
                 if attempt < max_retries - 1:
                     wait = 5 * (attempt + 1)
-                    console.print(
+                    self.console.print(
                         f"[yellow]Scorer retry {attempt + 1}/{max_retries - 1} "
                         f"(wait {wait}s): {e}[/yellow]"
                     )
@@ -177,14 +180,14 @@ class ScaBenchScorerV2:
                     resp = None
                     continue
 
-                console.print(f"[red]Inference failed after {max_retries} attempts: {e}[/red]")
+                self.console.print(f"[red]Inference failed after {max_retries} attempts: {e}[/red]")
                 if self.debug and body:
-                    console.print(f"  Response body: {body}")
+                    self.console.print(f"  Response body: {body}")
                 raise
 
             except requests.exceptions.RequestException as e:
                 # Non-retriable errors (DNS, SSL, etc.) — fail immediately
-                console.print(f"[red]Inference Error (non-retriable): {e}[/red]")
+                self.console.print(f"[red]Inference Error (non-retriable): {e}[/red]")
                 raise
 
         resp_json = resp.json()
@@ -198,7 +201,7 @@ class ScaBenchScorerV2:
         if not content.strip():
             served_model = resp_json.get("model", "unknown")
             finish_reason = resp_json.get("choices", [{}])[0].get("finish_reason", "unknown")
-            console.print(
+            self.console.print(
                 f"[yellow]Warning: empty content from model={served_model}, "
                 f"finish_reason={finish_reason}[/yellow]"
             )
@@ -428,7 +431,7 @@ class ScaBenchScorerV2:
                     decision = str(result.get("decision", "no")).lower()
                     match_idx_local = result.get("matching_index")
                     if self.verbose:
-                        console.print(
+                        self.console.print(
                             f"[yellow]LLM Response:[/yellow] decision={decision}, index={result.get('matching_index')}, "
                             f"chunk=({start}-{start + len(chunk_idx) - 1}), reason={result.get('reason', 'N/A')[:100]}"
                         )
@@ -451,7 +454,7 @@ class ScaBenchScorerV2:
                         continue
                 else:
                     if self.verbose:
-                        console.print(
+                        self.console.print(
                             f"[yellow]LLM Response:[/yellow] found={result.get('found')}, "
                             f"confidence={result.get('confidence', 0):.2f}, index={result.get('matching_index')}, "
                             f"chunk=({start}-{start + len(chunk_idx) - 1}), reason={result.get('reason', 'N/A')[:100]}"
@@ -483,7 +486,7 @@ class ScaBenchScorerV2:
             except Exception as e:
                 # Always log scoring errors (not just in debug mode) so we can
                 # distinguish inference failures from legitimate "not found"
-                console.print(
+                self.console.print(
                     f"[red]Scoring error (chunk {start}-{start + len(chunk_idx) - 1}): "
                     f"{e.__class__.__name__}: {e}[/red]"
                 )
@@ -520,7 +523,7 @@ class ScaBenchScorerV2:
         Score a project by comparing tool findings to expected vulnerabilities.
         Uses one-by-one matching for consistency.
         """
-        console.print(
+        self.console.print(
             Panel.fit(
                 f"[bold cyan]Scoring Project: {project_name}[/bold cyan]\n"
                 f"Expected: {len(expected_findings)} | Found: {len(tool_findings)}",
@@ -546,7 +549,7 @@ class ScaBenchScorerV2:
                 # Check if this expected finding matches any unmatched tool finding
                 if unmatched_findings:
                     if self.verbose:
-                        console.print(f"\n[cyan]Checking:[/cyan] {expected.get('title', 'Unknown')[:80]}...")
+                        self.console.print(f"\n[cyan]Checking:[/cyan] {expected.get('title', 'Unknown')[:80]}...")
 
                     is_match, matched_finding, reason, confidence, decision = self.find_match_in_results(
                         expected, [f for _, f in unmatched_findings]
@@ -579,7 +582,7 @@ class ScaBenchScorerV2:
                             matched_tool_indices.add(tool_idx)
 
                             if self.debug or self.verbose:
-                                console.print(
+                                self.console.print(
                                     f"[green]✓ Matched[/green] (confidence={confidence:.2f}): {expected.get('title', 'Unknown')[:60]}"
                                 )
                         else:
@@ -616,7 +619,7 @@ class ScaBenchScorerV2:
                         target_list.append(undecided_record)
 
                         if self.debug or self.verbose:
-                            console.print(
+                            self.console.print(
                                 f"[red]✗ {label}[/red] (confidence={confidence:.2f}): {expected.get('title', 'Unknown')[:60]}"
                             )
                 else:
@@ -637,7 +640,7 @@ class ScaBenchScorerV2:
                 TextColumn("[progress.description]{task.description}"),
                 BarColumn(),
                 TaskProgressColumn(),
-                console=console,
+                console=self.console,
             ) as progress:
                 task = progress.add_task(
                     f"Matching {len(expected_findings)} expected findings...",
@@ -684,7 +687,7 @@ class ScaBenchScorerV2:
                                 matched_tool_indices.add(tool_idx)
 
                                 if self.debug:
-                                    console.print(
+                                    self.console.print(
                                         f"[green]✓ Matched[/green] (confidence={confidence:.2f}): {expected.get('title', 'Unknown')[:60]}"
                                     )
                             else:
@@ -722,7 +725,7 @@ class ScaBenchScorerV2:
 
                             if self.debug:
                                 tag = "Undecided" if (self.strict_matching and decision == "undecided") else "Missed"
-                                console.print(
+                                self.console.print(
                                     f"[red]✗ {tag}[/red] (confidence={confidence:.2f}): {expected.get('title', 'Unknown')[:60]}"
                                 )
                     else:
@@ -780,7 +783,7 @@ class ScaBenchScorerV2:
         table.add_row("Precision", f"{precision * 100:.1f}%")
         table.add_row("F1 Score", f"{f1_score * 100:.1f}%")
 
-        console.print(table)
+        self.console.print(table)
 
         return ScoringResult(
             project=project_name,

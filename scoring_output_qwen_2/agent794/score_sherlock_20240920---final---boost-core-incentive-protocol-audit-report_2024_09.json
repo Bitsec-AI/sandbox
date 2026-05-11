@@ -1,0 +1,737 @@
+{
+  "project": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09",
+  "agent": "agent794",
+  "status": "success",
+  "timestamp": "2026-04-09T13:10:08.149557",
+  "elapsed_seconds": 243.2,
+  "total_expected": 2,
+  "total_found": 100,
+  "true_positives": 1,
+  "false_negatives": 1,
+  "false_positives": 99,
+  "detection_rate": 0.5,
+  "precision": 0.01,
+  "f1_score": 0.0196078431372549,
+  "matched_findings": [
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_expected_000",
+      "expected": "Unable to call some functions in",
+      "matched": "Strategy and Limit State Variables Are Mutable Without Access Control, Enabling Reward Redistribution Attacks",
+      "confidence": 0.8,
+      "justification": "Finding 2 describes the issue where 'strategy' and 'limit' state variables are publicly mutable without access control, allowing an attacker to change reward distribution logic. This aligns with the expected vulnerability where functions using 'onlyOwner' modifiers in incentive contracts must be called by Boost Core, and there is no way to call functions like 'drawRaffle' or 'clawback' from Boost Core. The root cause is that the owner of the incentive contracts is set to Boost Core, and if variables like 'strategy' and 'limit' are mutable without proper access control, it enables unauthorized changes to the reward distribution logic.",
+      "severity": "high",
+      "expected_description": "Source: https://github.com/sherlock-audit/2024-06-boost-aa-wallet-judging/issues/43\n\n**Summary:**\nBoost Core.sol willalwaysbesetastheownerof Boostprovidedincentivecontracts becausetheinitializeriscalledherewithin _make Incentives. Thereforeanyfunction usingtheonly Ownermodifierwithintheincentivecontractsmustbecalledby Boost Core . Forexample, thereisnowaytocall draw Raffleorclawbackfromthe Boost Corecontract. Root Cause create Boostiscalledtocreateanewboost. Eachincentiveisinitializedbythecallto _make Incentives. Within _make Incentives theinitializeriscalledforeachincentive. The initializerfunctionwithineachincentivecontractsetstheownerasmsg.senderwhich wouldbethe Boost Core contract. Internal pre-conditions 1. Boostiscreatedusingtheoutoftheboxincentivecontractasoneofthe incentivesincluding: ERC 20 Incentive, CGDAIncentive, ERC 20 Variable Incentive, and ERC 1155 Incentive External pre-conditions No response 3 Attack Path 1. Usercalls create Boost tocreateanew Boost 2. Theychoosetouseanoutoftheboxincentivecontractlistedabove 3. Theyareinitializedwith Boost Core astheowner\n\n**Impact:**\n\u2022Nowinnercanbedrawnforraffleconteststhrough ERC 20 Incentivecontract \u2022Anyfundsinthecontractthatneedtoberescuedcannotberetrievedthrough clawback Po C No response Mitigation Ownershouldbespecifiedintheinitpayloadbytheusersimilarlytohowitsdoneforthe budgetcontracts here",
+      "found_description": "The `strategy` and `limit` state variables are publicly mutable without any access control (e.g., onlyOwner or admin modifier). These variables directly control the economic logic: `strategy` determines whether rewards are distributed equally (POOL) or to a single winner (RAFFLE), and `limit` caps the number of claims or entries. An attacker can call `setStrategy(Strategy.RAFFLE)` after users have already claimed under POOL mode, or change `limit` to 0 after users have deposited, effectively freezing the incentive. For example: 100 users each claim 100 tokens under POOL mode with limit=100 (total reward = 10,000 tokens). An attacker then calls `setLimit(0)` and `setStrategy(Strategy.RAFFLE)`. Now, no new claims are allowed, and the remaining reward (if any) is locked in raffle mode with no entries. Alternatively, if the attacker sets `limit=1` and `strategy=RAFFLE` after 99 users have claimed, they can add one entry and draw the entire remaining pool. The economic impact is direct theft or freezing of user funds. Mathematical proof: if total reward = 10,000 tokens, 99 users claimed 9,900 tokens, leaving 100 tokens. Attacker sets limit=1, adds one entry, calls drawRaffle(), and claims 100 tokens \u2014 stealing funds that should have been distributed to the 100th user. This violates the protocol\u2019s economic invariant: 'reward is distributed according to declared strategy and limit'.",
+      "found_id": "7bd17b859a5610ca",
+      "tool_finding_index": 73
+    }
+  ],
+  "missed_findings": [
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_expected_001",
+      "title": "Incentive Bits.set Or Throw () will re-",
+      "description": "Source: https://github.com/sherlock-audit/2024-06-boost-aa-wallet-judging/issues/263\n\n**Summary:**\nIncentive Bits.set Or Throw () willrevert, leadingtoa Do S.\n\n**Vulnerability Detail:**\nset Or Throw () expectseachincentivefrom 0 to 7 tobeusedonceperhash, revertingin casethatforagivenhash, analreadyusedincentiveisusedagain. Howeverthe mechanismthatchecksalreadyusedincentivesdoesnotworkasexpected: already Set: =xor (1, shr (incentive, updated Storage Value)) , revertingifincentive Idsarenotusedin increasingorder. Theexternalcallwillcomefrom Boost Core.claim Incentive For (), whichcalls Signed Validator.validate () andthereforeset Or Throw (). Thevalueoftheincentive Id parameterusedisarbitraryandvalidaslongas uint 256 (validator Data.incentive Quanti ty)<=incentive Id isnotfulfilled, whichdoesnotguaranteethatcallswillnecessarilybe inincreasingorder. Example: Imagineset Or Throw () functionisusedwithincentive Id=5, inthatcase updated Storage Valuewillbesetto XOR (00000000,00100000)=00100000. Therefore, theresultingvalueforalready Setis: already Set=XOR (1, shr (5,00100000))=XOR (00000001,00000001)=0=>Does NOTrevert. Nowset Or Throw () functioniscalledagainforincentive Id=2, sothat updated Storage Valuewillbe: XOR (00100000,00000100)=00100100. Therefore, thenew resultingvalueforalready Setis: already Set=XOR (1, shr (2,00100100))=XOR (00000001, 00001001)=00001000=>Revertsasalready Set!=0\n\n**Impact:**\nClaimingincentiveforagivenhashwillbenolongerpossible, orfewerclaimswillbe alloweddependingonthelastincentive Idused. Thiscouldbeperformedbyaccidentby anormaluseroronpurposebyamaliciousattackerto Do Sandpreventotherusersfrom claimingfromthishash. 5\n\n**Code Snippet:**\nhttps://github.com/sherlock-audit/2024-06-boost-aa-wallet/blob/main/boost-protoc\nol/packages/evm/contracts/validators/Signer Validator.sol#L 126-L 154\nTool used\nManual Review\n\n**Recommendation:**\nForcorrectlycomparingiftheincentive Idindexhasbeenused, thatbitmustbetotally isolatedand XORitwith 1. Forthis, firstshiftleftuntilweget 10000000 andthenshift 7 timestorighttoget 1. function set Or Throw (Incentive Map storage bitmap , bytes 32 hash , uint 256 incentive ) internal { ,\u2192 bytes 4 invalid Selector = Boost Error . Incentive To Big .selector ; bytes 4 claimed Selector = Boost Error . Incentive Claimed .selector ; /// @solidity memory-safe-assembly assembly { if gt (incentive , 7){ // if the incentive is larger the 7 (the highest bit index) // we revert mstore (0, invalid Selector ) mstore (4, incentive ) revert (0 x 00 , 0 x 24 ) } mstore (0 x 20 , bitmap .slot ) mstore (0 x 00 , hash ) let storage Slot :=keccak 256 (0 x 00 ,0 x 40 ) // toggle the value that was stored inline on stack with xor let updated Storage Value :=xor (sload (storage Slot ), shl (incentive , 1)) // isolate the toggled bit and see if it's been unset back to zero - let already Set := xor (1, shr (incentive , updated Storage Value )) + let already Set := xor (1, shr (7, shl (incentive - 1, updated Storage Value ))) . . .",
+      "severity": "high",
+      "reason": "Not found"
+    }
+  ],
+  "undecided_findings": [],
+  "extra_findings": [
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_000",
+      "title": "Claim Fee Routing Logic Allows Protocol Fee Receiver to Steal All ETH in Contract",
+      "description": "The _routeClaimFee function incorrectly transfers the entire contract balance to the protocolFeeReceiver after transferring the owner's share, instead of transferring only the remaining net fee. This allows an attacker to drain all ETH from the contract by triggering claimIncentiveFor with a zero referrer and a claimFee of 0, causing netFee to be 0, then the protocolFeeReceiver receives the full contract balance. This is a critical accounting error where the protocol fee receiver is paid the entire contract balance instead of half of the claim fee.",
+      "severity": "critical",
+      "original_id": "36a1aa7e6ae1237c"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_001",
+      "title": "Automatic Processing of Withdrawal Funds via payable claimIncentiveFor",
+      "description": "The claimIncentiveFor function is payable and processes incoming ETH as a claim fee, but the _routeClaimFee function incorrectly transfers the entire remaining contract balance to the protocol fee receiver after deducting the referrer and owner shares. This allows an attacker to send ETH directly to the contract (e.g., via withdrawal returns or accidental transfers), which then gets entirely stolen by the protocol fee receiver during any legitimate claim, effectively converting any deposited ETH into protocol revenue without user consent.",
+      "severity": "critical",
+      "original_id": "d5a0346aea15b127"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_002",
+      "title": "Insufficient Access Control on _routeClaimFee Allows Fee Manipulation",
+      "description": "The _routeClaimFee function is called during claimIncentiveFor and calculates fee distribution based on boost.referralFee and boost.owner. However, boost.referralFee and boost.owner are set during boost creation and never updated afterward. The critical flaw is that boost.owner is set to the caller of createBoost, but the function _routeClaimFee transfers ETH to boost.owner and protocolFeeReceiver using address(this).balance after transferring the referral share. This means the contract's ETH balance at the time of _routeClaimFee determines the protocol fee payout. Since the contract receives msg.value (claimFee) and may receive other ETH via fallback, an attacker can send additional ETH to the contract before calling claimIncentiveFor, inflating address(this).balance and causing the protocolFeeReceiver to receive more than intended. This is an access control boundary violation because the state variables used in economic calculations (boost.owner and the contract balance) are not protected from manipulation via external ETH transfers. The attacker can force the protocol to pay more than the 50% of netFee intended to the protocol fee receiver, effectively stealing from the protocol fee receiver's expected allocation.",
+      "severity": "high",
+      "original_id": "ef1ba276cf115012"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_003",
+      "title": "Unit Mismatch in Claim Fee Distribution Causes Protocol Fee Theft",
+      "description": "In _routeClaimFee, the protocol fee is calculated as address(this).balance after transferring the referral share and half of netFee to the boost owner. However, address(this).balance returns the contract's total ETH balance, which includes any prior ETH deposits (e.g., from other users, MEV, or malicious deposits). The function assumes that after transferring netFee / 2 to the owner, the remaining balance equals netFee / 2, but this is only true if no other ETH was sent to the contract. The representation boundary is violated: _routeClaimFee expects to distribute exactly netFee (claimFee) as: referralShare + (netFee / 2) to owner + (netFee / 2) to protocol. But it uses address(this).balance, which is in raw ETH units, while the logic expects normalized netFee units. Callers of _routeClaimFee (claimIncentiveFor) pass msg.value == claimFee, expecting exactly claimFee to be distributed. But if the contract has prior ETH, say 1 ETH, and claimFee is 0.000075 ETH, then after transferring referralShare and netFee/2 to owner, address(this).balance is ~1 ETH, not 0.0000375 ETH. Thus, protocolFeeReceiver receives ~1 ETH instead of 0.0000375 ETH. This is a unit mismatch: the function returns raw balance (ETH) but the logic expects normalized fee portion (netFee/2). The call chain is: claimIncentiveFor -> _routeClaimFee -> address(this).balance. The failure propagates: every claimIncentiveFor call can be exploited to drain the contract's entire ETH balance to protocolFeeReceiver, which is not the intended recipient of those funds.",
+      "severity": "critical",
+      "original_id": "5147d9cae1c3c16d"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_004",
+      "title": "Data Structure Boundary Violation: _makeIncentives Assumes Contiguous Incentive IDs",
+      "description": "The _makeIncentives function iterates over a fixed-length array of targets and creates AIncentive clones in order. However, the incentiveId_ passed to claimIncentiveFor is used as an index into boost.incentives. There is no validation that incentiveId_ is less than boost.incentives.length. If a user creates a boost with 3 incentives, then calls claimIncentiveFor with incentiveId_ = 5, the contract will revert due to array bounds. But more critically, if incentives are removed or invalidated (e.g., via a malicious AIncentive that self-destructs or reverts on initialize), the boost.incentives array still holds the (now invalid) addresses. The data structure assumes that the array length equals the number of valid incentives and that indices are contiguous and stable. However, if an attacker deploys a malicious AIncentive that reverts during initialize(), the _makeIncentives loop will revert and the boost will not be created. But if the attacker creates a boost with 10 incentives, then later, through some external mechanism (e.g., a bug in AIncentive), one of the incentive contracts is destroyed, the boost.incentives array still contains the destroyed address. When claimIncentiveFor is called with that incentiveId_, the call to incentives[incentiveId_].claim(...) will revert due to calling a destroyed contract. This is a data access integrity issue: the array length is not synchronized with the actual validity of the incentive contracts. The attack scenario: attacker creates a boost with 10 valid incentives. Then, using a separate exploit, one incentive contract is destroyed. Now, any claim to that incentiveId_ fails, locking the remaining 9 incentives from being claimed by legitimate users. This is a denial-of-service on the boost's incentive mechanism. The financial impact: users cannot claim their incentives, and the budgeted funds remain locked in the boost's budget contract, effectively freezing assets.",
+      "severity": "high",
+      "original_id": "dcf72eaa6563020b"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_005",
+      "title": "Protocol Fee Receiver Can Be Drained via External ETH Deposits",
+      "description": "The _routeClaimFee function has a critical flaw: after transferring the referral share and half of netFee to the boost owner, it transfers address(this).balance to protocolFeeReceiver. This is a representation boundary violation because address(this).balance is the total ETH balance of the contract, not the intended portion of the claim fee. For example: if the contract already holds 10 ETH from previous deposits, and a user claims an incentive with claimFee = 0.000075 ETH, then netFee = 0.000075 ETH (assuming no referrer). The function transfers 0.0000375 ETH to the boost owner, and then transfers address(this).balance = 10.0000375 ETH to protocolFeeReceiver. This means the protocol fee receiver gains 10.0000375 ETH instead of 0.0000375 ETH. The attacker can send 10 ETH to the contract address at any time (e.g., via a flash loan or other transaction), then trigger a claimIncentiveFor call. The result is that the protocol fee receiver receives the entire contract balance, not just the intended 50% of claimFee. This is a direct theft of funds from the contract's balance. The mathematical proof: Let B = contract balance before claim, C = claimFee = 0.000075 ETH. After transfer to owner: B + C - C/2 = B + C/2 remains. Then protocolFeeReceiver receives B + C/2. The intended amount was C/2. The attacker gains B. If B = 10 ETH, attacker gains 10 ETH. The financial impact: any ETH deposited into the contract (intentionally or unintentionally) can be stolen by triggering a claimIncentiveFor call. The protocol fee receiver is not the intended recipient of these funds \u2014 they are stolen from the contract's own balance. This is a critical vulnerability because it allows complete draining of the contract's ETH holdings.",
+      "severity": "critical",
+      "original_id": "340cfa728f83c566"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_006",
+      "title": "State Inconsistency in ERC1155 Distribution Accounting",
+      "description": "The _transferERC1155 function increments _distributedERC1155[asset_][tokenId_] before performing the actual token transfer. However, if the safeTransferFrom call reverts due to insufficient balance on the recipient side (e.g., recipient's onERC1155Received reverts), the distributed amount is permanently incremented while the tokens are not transferred. This creates a permanent accounting mismatch where the budget reports more tokens distributed than actually sent, leading to incorrect available/total calculations and potential denial of future disbursements. The issue is not present in _transferFungible because ERC20 transfers are less likely to revert after approval, but ERC1155 transfers can revert on recipient side (e.g., if recipient is not a valid receiver or rejects the transfer). This breaks the invariant that distributed == actual transfers made.",
+      "severity": "high",
+      "original_id": "4debe9bac3611e96"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_007",
+      "title": "State Commitment Timing Vulnerability in claimIncentiveFor Allows Fee Theft via Reentrancy",
+      "description": "The claimIncentiveFor function commits the claim fee to the owner and protocol receiver before validating the incentive claim. If the incentive claim reverts due to a malicious AIncentive contract, the fee has already been distributed and cannot be recovered, resulting in permanent loss of the claim fee to the attacker-controlled contract.",
+      "severity": "critical",
+      "original_id": "c678bce82ba517d2"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_008",
+      "title": "Insecure Fee Distribution in _routeClaimFee Allows Protocol Fee Theft via Balance Manipulation",
+      "description": "The _routeClaimFee function transfers the remaining fee to the protocol fee receiver using address(this).balance, which includes any ETH sent with the transaction. An attacker can send ETH alongside a claim transaction, causing the protocol fee receiver to receive more than intended, while the owner receives less. This is a direct theft of protocol fees.",
+      "severity": "high",
+      "original_id": "5acc59a31025effb"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_009",
+      "title": "Precision Loss in Fee Calculations Due to Integer Division Truncation",
+      "description": "The referral fee and protocol fee splits use integer division (e.g., claimFee * boost.referralFee / FEE_DENOMINATOR). This causes truncation of fractional wei values. For example, a 10000 wei claim fee with 10% referral fee should yield 1000 wei, but if claimFee is 1 wei, the result is 0 wei. This results in silent loss of small fee amounts over time.",
+      "severity": "medium",
+      "original_id": "ecdb85d1a5ab6219"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_010",
+      "title": "Incentive Initialization Bypass via Non-Base Target Allows Reuse of Deployed Clones",
+      "description": "The _makeIncentives function checks if targets are base implementations, but does not verify that the target instance is not already a clone. An attacker can deploy an AIncentive clone, then pass its address as a 'base' target with empty parameters. The clone is re-initialized, potentially resetting state and allowing double-spending of incentives.",
+      "severity": "high",
+      "original_id": "6cc1dff02b889d4d"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_011",
+      "title": "Validator Address Resolution Bypass Allows Unauthorized Claiming",
+      "description": "The validator address is resolved using boost.action.supportsInterface(type(AValidator).interfaceId) if payload.validator.instance == address(0). However, if the action contract is a proxy that does not implement AValidator directly but delegates to a contract that does, the check may pass incorrectly. This allows an attacker to use a malicious action contract that falsely reports AValidator support, bypassing validation entirely.",
+      "severity": "high",
+      "original_id": "2ea462bd0d9072e4"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_012",
+      "title": "State Commitment Before External Call in _routeClaimFee Leads to Fund Loss on Revert",
+      "description": "The _routeClaimFee function commits state changes (ETH transfers) before verifying the success of the final transfer to protocolFeeReceiver. If the protocolFeeReceiver is a contract that reverts on ETH reception (e.g., a malicious or non-receiving contract), the entire transaction reverts, but the ETH already sent to the owner and referrer is lost because transfers are irreversible. This violates Pattern 7 (State Commitment Timing) and Pattern 3 (Execution Boundaries Consistency), as state changes (fund movements) occur before the final operation's success is guaranteed.",
+      "severity": "critical",
+      "original_id": "9940ed02cb0b458c"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_013",
+      "title": "Inconsistent Fee Accounting in _routeClaimFee Causes Protocol Fee Theft",
+      "description": "In _routeClaimFee, after deducting the referral share, the remaining fee (netFee) is split: half goes to the boost owner, and the other half is sent as 'address(this).balance'. However, address(this).balance includes the entire contract balance, not just the remaining netFee. This means if the contract already held ETH (e.g., from previous failed claims or other sources), the protocol fee receiver receives more than the intended half of the claim fee. This violates Pattern 3 (Execution Boundaries Consistency) and Pattern 5 (Recipient Selection Logic), as the recipient calculation is based on the wrong value (total balance vs. netFee).",
+      "severity": "high",
+      "original_id": "c477d5134fc543c6"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_014",
+      "title": "Incentive Initialization Can Be Re-Entrant via preflight() Despite nonReentrant Guard",
+      "description": "The _makeIncentives function calls incentives[i].preflight() and incentives[i].initialize() in sequence. The preflight() function is an external call to an untrusted incentive contract. Although claimIncentiveFor is marked nonReentrant, the reentrancy guard only protects the top-level function. If preflight() calls back into BoostCore (e.g., via a malicious incentive contract calling claimIncentiveFor), it can trigger a second claim for the same boostId and incentiveId, potentially draining the budget multiple times. This violates Pattern 6 (State Synchronization in Function Chains) and Pattern 1 (User Control Over Execution Outcomes), as the budget state is modified during preflight() and not protected against reentrancy.",
+      "severity": "high",
+      "original_id": "03dbad678f60ab41"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_015",
+      "title": "Claim Fee Validation Occurs After State Change in _routeClaimFee",
+      "description": "In claimIncentiveFor, the function first validates msg.value >= claimFee, then calls _routeClaimFee. However, _routeClaimFee performs ETH transfers before any further validation. If the claimFee is zero (set by owner), the validation passes, but _routeClaimFee still attempts transfers. More critically, if the claimFee is non-zero but the sender sends exactly claimFee, and the first transfer (to referrer or owner) reverts due to a malicious recipient, the entire transaction reverts \u2014 but the claimFee was already validated and consumed. This violates Pattern 2 (Validation Timing), as the validation is performed before the operation, but the operation itself is not atomic and can fail after partial state changes. The user loses their claimFee without receiving any incentive.",
+      "severity": "high",
+      "original_id": "9e738fe990cf28b7"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_016",
+      "title": "Incentive preflight() Can Drain Budget Without Guaranteeing Claim Success",
+      "description": "In _makeIncentives, budget.disburse(preflight) is called before initialize(). If disburse() succeeds but initialize() reverts (e.g., due to invalid parameters), the incentive is left in a partially initialized state, and the budget has already been drained. This violates Pattern 3 (Execution Boundaries Consistency) and Pattern 1 (User Control Over Execution Outcomes), as the budget is consumed before the incentive is guaranteed to be functional. Users who later attempt to claim this broken incentive will fail, but the budget funds are permanently lost. This creates a denial-of-service and fund loss vector for the budget provider.",
+      "severity": "high",
+      "original_id": "ffa63d3367534b2a"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_017",
+      "title": "Automatic ETH Receipt Triggers Unintended State Updates Without Caller Verification",
+      "description": "The ManagedBudget contract has no fallback or receive function, but it accepts ETH via the allocate() function which requires msg.value to match the requested amount. However, if an external system (e.g., a withdrawal refund from another contract) sends ETH directly to the budget contract without going through allocate(), the ETH is accepted and increases the contract's balance, but _distributedFungible is not updated. This causes a state desynchronization where 'total' and 'available' become inconsistent. An attacker can exploit this by sending ETH directly to the contract, then triggering a clawback or disbursement that transfers more ETH than was legitimately allocated, effectively stealing funds from legitimate users.",
+      "severity": "high",
+      "original_id": "a301a37ce30dc94b"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_018",
+      "title": "State Update Before Validation in _transferFungible and _transferERC1155",
+      "description": "The functions _transferFungible and _transferERC1155 increment the _distributedFungible and _distributedERC1155 state variables before performing the actual asset transfer. If the external transfer reverts (e.g., due to recipient rejection, insufficient allowance, or malicious contract), the distributed amount is permanently incremented, but the asset is not transferred. This creates an accounting inconsistency where the budget reports more assets distributed than actually sent, leading to incorrect total and available balances. Subsequent disbursements may be incorrectly blocked due to false insufficient funds errors, or funds may be over-distributed if the accounting is used for budgeting logic elsewhere.",
+      "severity": "critical",
+      "original_id": "41a94a0823cc439c"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_019",
+      "title": "Inconsistent Accounting Between available() and total() Due to State Update Order",
+      "description": "The available() function returns the current balance, while total() = available() + distributed(). Because _distributedFungible and _distributedERC1155 are incremented before the transfer succeeds, if a transfer reverts, the distributed value remains incremented but the balance does not. This causes total() to overstate the actual asset holdings. For example, if a user attempts to disburse 100 ETH but the recipient contract reverts, _distributedFungible[ETH] increases by 100, but the contract's ETH balance does not decrease. total(ETH) = (original_balance) + (distributed + 100), which is 100 ETH higher than reality. This can cause external systems relying on total() to make incorrect decisions, such as over-allocating incentives or rejecting valid disbursements.",
+      "severity": "high",
+      "original_id": "19ad9e667942a6fb"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_020",
+      "title": "Clawback Allows Full Balance Transfer When Amount=0, But No Validation Against Distributed Amount",
+      "description": "In clawback(), when payload.amount == 0, the entire balance of the asset is transferred. However, the available() function returns balance + distributed(), meaning if 100 ETH was distributed (but not actually sent due to failed transfers), available() returns 100 ETH more than the real balance. If a clawback is called with amount=0, it will attempt to transfer this inflated amount, which may exceed the actual balance and cause the transfer to revert. Worse, if the distributed amount is artificially inflated by an attacker (via a reentrancy or external manipulation), clawback could be used to drain the contract by triggering a revert on transfer, locking funds. This creates a denial-of-service vector and potential fund locking.",
+      "severity": "high",
+      "original_id": "96b20f2141dbd873"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_021",
+      "title": "DisburseBatch Allows Partial Failure with No Rollback of Distributed State",
+      "description": "The disburseBatch() function iterates over multiple disbursements and returns false on any failure. However, if the first disbursement succeeds and the second fails, the distributed state for the first transfer is already incremented. There is no rollback mechanism. This means the budget's accounting is permanently corrupted even though the batch operation as a whole failed. For example, if a batch of 3 disbursements of 100 ETH each is called, and the second fails due to recipient rejection, 100 ETH is permanently marked as distributed, but only 100 ETH was actually sent. The remaining 100 ETH intended for the third recipient is never sent, and the budget now reports 100 ETH distributed incorrectly. This leads to permanent accounting drift and potential insolvency if the budget is used for incentive distribution.",
+      "severity": "high",
+      "original_id": "3ae8bc7edef7dc1f"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_022",
+      "title": "Missing User Protection in Disburse and DisburseBatch \u2014 No Minimum Output Guarantee",
+      "description": "The disburse() and disburseBatch() functions allow any authorized user to transfer assets out of the budget without requiring the recipient to specify a minimum acceptable amount. If an attacker manipulates the price of an asset (e.g., via flash loan) to temporarily reduce liquidity, a disbursement could be executed at a fraction of the intended value. For example, if a user intends to disburse 1000 DAI to a liquidity pool, but the DAI/ETH price is manipulated to make the budget's DAI balance appear inflated, the disbursement may succeed but deliver less value than expected. Since there is no slippage tolerance or minimum output parameter, users have no protection against adversarial execution. This is a classic Pattern 1 vulnerability: user asset value is reduced without consent or bounds.",
+      "severity": "high",
+      "original_id": "08ed78c0f03ad21e"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_023",
+      "title": "Return Value Unit Mismatch in available() for ERC1155 vs Fungible",
+      "description": "The available(address) function returns the balance of fungible assets (ERC20/ETH), while available(address, uint256) returns the balance of ERC1155 tokens. However, the ABudget interface (which this contract implements) declares both functions with the same return type (uint256) and expects consistent semantics. The issue arises when external systems (e.g., a reward distributor) call available(asset) expecting the fungible balance, but the contract internally uses different accounting logic for ERC1155. While not a direct arithmetic error, this creates a semantic inconsistency: the same interface function name returns values with different underlying meanings (fungible balance vs. token ID balance). If a caller assumes available(asset) always represents the same unit (e.g., 'total spendable units'), it may incorrectly calculate allocations. For example, if a system uses available(asset) to compute a per-token reward and passes an ERC1155 asset, it may treat the token ID balance as if it were a fungible supply, leading to incorrect reward distribution.",
+      "severity": "medium",
+      "original_id": "6e8580a6ff171865"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_024",
+      "title": "State Commitment Before Transfer in _transferFungible and _transferERC1155",
+      "description": "The budget increments the _distributedFungible and _distributedERC1155 counters before executing the actual token transfer. If the external transfer reverts (due to recipient contract logic, insufficient gas, or malicious behavior), the distribution counter is permanently incremented while the asset is not transferred. This creates an accounting mismatch where the budget reports more assets distributed than actually sent, leading to incorrect total/available balances and potential denial of future disbursements.",
+      "severity": "critical",
+      "original_id": "cbf5b0477860cc7c"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_025",
+      "title": "Insufficient Validation in clawback for Zero Amount with ERC1155",
+      "description": "In clawback(), when payload.amount == 0, the function retrieves the current balance of the ERC1155 token and transfers it all. However, it does not validate that the token ID exists or that the contract holds any balance for that ID. If an attacker calls clawback with a non-existent tokenId (e.g., tokenId = 123456789), the IERC1155.balanceOf call returns 0, and the function transfers 0 tokens \u2014 silently succeeding without error. This allows attackers to consume gas and trigger events without effect, and more critically, it masks legitimate clawback attempts on valid token IDs if the balance is zero due to prior mismanagement.",
+      "severity": "high",
+      "original_id": "f08590628f9aef65"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_026",
+      "title": "Missing Authorization Context Binding in disburse and clawback",
+      "description": "The disburse and clawback functions accept arbitrary Transfer structs via calldata, but do not bind the authorization to the specific recipient, amount, or asset. An attacker who obtains a valid authorization (e.g., as a manager) can front-run or replay a legitimate disbursement request by submitting the same data with a different target address. For example, if a legitimate disbursement to address A for 1000 DAI is signed or authorized, an attacker can submit the same calldata with target = attackerAddress, and since the function only checks role permissions and not context, the transfer will succeed to the attacker\u2019s address. This is a classic authorization context binding flaw.",
+      "severity": "high",
+      "original_id": "e5dfd45e79522c89"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_027",
+      "title": "Inconsistent Total Balance Calculation for ETH vs ERC20",
+      "description": "The total() function for fungible assets adds _distributedFungible[asset_] to available(asset_). For ERC20, available() calls asset_.balanceOf(address(this)), which is correct. But for ETH (asset_ == address(0)), available() returns address(this).balance. However, _distributedFungible[address(0)] is incremented on every ETH disbursement, but ETH sent to the contract via allocate() is not tracked in any separate accounting \u2014 it is simply added to the contract\u2019s ether balance. This means that if ETH is sent directly to the contract (e.g., via a fallback function or another contract), it increases address(this).balance but does NOT increment _distributedFungible[address(0)]. Therefore, total(address(0)) = balance + distributed, where distributed is only the amount disbursed, not the total ETH ever received. This leads to undercounting of total ETH allocated to the budget, potentially causing legitimate disbursements to fail due to false InsufficientFunds errors.",
+      "severity": "high",
+      "original_id": "1887ba73d8b4ecc3"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_028",
+      "title": "Reentrancy Risk in _transferFungible Despite nonReentrant Modifier",
+      "description": "The _transferFungible function uses the nonReentrant modifier, but the order of operations is: (1) increment _distributedFungible, (2) call safeTransferETH or safeTransfer. The safeTransfer call to an ERC20 token may invoke arbitrary code (e.g., in a malicious token contract that calls back into the budget). Although the nonReentrant modifier prevents reentrancy into _transferFungible, it does not prevent reentrancy into other functions like disburse() or clawback(). An attacker could exploit this by creating a malicious ERC20 token that, on transfer, calls disburse() to drain other assets from the budget before the original transfer completes. The nonReentrant guard only protects the specific function, not the entire state machine.",
+      "severity": "high",
+      "original_id": "5a2bfab52a5f0be9"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_029",
+      "title": "State Inconsistency in ERC1155 Distribution Tracking During Clawback",
+      "description": "The SimpleBudget contract tracks distributed amounts for ERC1155 tokens via _distributedERC1155, but this state is never updated during clawback operations. This creates a critical accounting inconsistency: when the owner calls clawback to reclaim ERC1155 tokens, the distributed amount is not decremented, causing total() and available() to become mathematically inconsistent. An attacker can exploit this by repeatedly clawing back the same ERC1155 tokens, effectively double-spending them in accounting while the actual balance remains correct. This breaks the invariant that total(asset, tokenId) = available(asset, tokenId) + distributed(asset, tokenId), leading to incorrect balance reporting and potential denial-of-service for legitimate disbursements.",
+      "severity": "high",
+      "original_id": "99f8a9908e25c158"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_030",
+      "title": "Access Control Bypass in _distributedFungible and _distributedERC1155 Updates",
+      "description": "The state variables _distributedFungible and _distributedERC1155, which track the total amount of assets distributed from the budget, are updated in _transferFungible and _transferERC1155 without access control. These variables are used in the public view function 'total()' to compute the total allocated assets (available + distributed). Since 'total()' is used by external systems (e.g., incentive calculators, gauges, or oracles) to determine budget capacity, an attacker can call 'disburse' or 'clawback' to trigger a distribution update, then call 'clawback' again to reclaim the same assets, effectively resetting the distributed counter while keeping the balance. This allows the attacker to repeatedly claim the same assets as 'newly allocated' in external systems that rely on 'total()' for accounting, leading to double-spending of budgeted funds. The vulnerability exists because _distributedFungible and _distributedERC1155 are updated in internal functions called by both 'disburse' (onlyAuthorized) and 'clawback' (onlyOwner), but the update logic itself is not guarded \u2014 allowing the same asset to be counted as distributed multiple times if reclaimed and redistributed.",
+      "severity": "critical",
+      "original_id": "0b63a756e755d4a8"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_031",
+      "title": "Representation Boundary Violation in 'total()' Function for ERC1155 Assets",
+      "description": "The 'total(address asset_, uint256 tokenId_)' function returns the sum of the current balance and _distributedERC1155[asset_][tokenId_]. However, 'available(address asset_, uint256 tokenId_)' returns the raw ERC1155 balance via IERC1155(asset_).balanceOf(address(this), tokenId_), which is correct. The issue arises because _distributedERC1155 is incremented in _transferERC1155 during disbursement or clawback, but the 'total()' function assumes that the distributed amount is additive to the current balance. This is mathematically correct, but the representation boundary is violated because external systems (e.g., incentive distributors or gauges) that call 'total()' expect the returned value to represent the total supply of assets ever allocated to the budget \u2014 including those that have been reclaimed. However, when assets are clawed back, the balance increases but the distributed counter is not decremented. Thus, 'total()' overstates the true allocated amount. For example: if 100 tokens are allocated, 50 are disbursed (distributed=50, balance=50, total=100), then 50 are clawed back (balance=100, distributed=50, total=150). The system now reports 150 total allocated, but only 100 were ever deposited. This misrepresentation causes external systems to overallocate incentives or fees based on inflated totals, leading to budget overruns and potential insolvency.",
+      "severity": "high",
+      "original_id": "77dba3c4754418af"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_032",
+      "title": "Data Access Integrity Violation in disburseBatch with Dynamic State Changes",
+      "description": "The disburseBatch function iterates over an array of transfer requests and calls disburse() for each. However, disburse() modifies the internal state (via _transferFungible/_transferERC1155), which changes the available balance. If an attacker submits a batch where the first disbursement drains the budget of an asset, subsequent disbursements in the same batch will fail due to InsufficientFunds. But the function returns false only after the first failure \u2014 meaning partial execution is allowed. More critically, if a malicious actor calls disburseBatch with a large array of requests targeting the same asset, and the budget has just enough to cover the first N requests, the function will execute N transfers and then revert. This creates a front-running opportunity: an attacker can submit a batch with many small transfers, and if the budget is low, only the first few succeed. The rest are lost, but the attacker can observe which ones succeeded and replay them later. This is not a direct fund loss, but it enables denial-of-service and manipulation of disbursement order. The data structure (array of requests) is accessed sequentially, but the underlying state (available balance) is mutated during iteration, violating the assumption that all requests are independent and atomic. This desynchronization between iteration bound and state changes can lead to unpredictable behavior and partial execution.",
+      "severity": "high",
+      "original_id": "9420a150c64b75bd"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_033",
+      "title": "Missing Reentrancy Guard on Clawback Leading to Potential Double-Spend via ERC1155",
+      "description": "The clawback function is marked onlyOwner but lacks the nonReentrant modifier. The _transferERC1155 function, which is called by clawback, uses safeTransferFrom and then updates _distributedERC1155. If the recipient is a malicious contract that implements onERC1155Received and calls back into clawback (e.g., to reclaim the same asset again), it could trigger a reentrant call. Since _distributedERC1155 is updated after the transfer, the reentrant call would see the same balance and distribute again, effectively allowing the attacker to drain the budget multiple times. For example: budget holds 100 ERC1155 tokens. Attacker calls clawback to transfer 100 tokens to malicious contract. Malicious contract receives tokens, then calls clawback again (reentrancy), claiming another 100 tokens (even though balance is now 0). The distributed counter is incremented twice, but the actual balance only had 100. This results in 200 distributed but only 100 allocated \u2014 a 100-token theft. The vulnerability is exacerbated because _transferERC1155 is nonReentrant, but clawback is not \u2014 so reentrancy can occur at the higher level.",
+      "severity": "critical",
+      "original_id": "1944797852055339"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_034",
+      "title": "Automatic ETH Reception Triggers Unintended State Updates Without Caller Verification",
+      "description": "The SimpleBudget contract has no fallback or receive function, but it accepts ETH via the allocate() function. However, the contract's total() and distributed() functions track distributed amounts separately from current balances. An attacker can send ETH directly to the contract (bypassing allocate()), which increases the contract's ETH balance but does not update _distributedFungible[address(0)]. This causes a desynchronization between the reported total assets and actual available funds. When the owner performs a clawback, they can withdraw the full balance including attacker funds, but the protocol's accounting (total = balance + distributed) becomes corrupted, allowing the attacker to effectively 'inject' funds that are never accounted for in distribution metrics, leading to potential over-distribution by authorized users.",
+      "severity": "high",
+      "original_id": "8b96b79fd398abdd"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_035",
+      "title": "Access Control Bypass in _distributedFungible and _distributedERC1155 Updates",
+      "description": "The state variables _distributedFungible and _distributedERC1155, which track the total amount of assets distributed from the budget, are updated in _transferFungible and _transferERC1155 without access control. These variables are used in the public view functions total() and distributed() to compute economic state (total allocated = available + distributed). Since these functions are called by external systems (e.g., incentive distributors, reward calculators) to determine budget availability, an attacker can call _transferFungible or _transferERC1155 via a reentrant or indirect call (e.g., through a malicious ERC20/ERC1155 token) to artificially inflate distributed amounts. This causes total() to overstate budget capacity, leading to over-disbursement or misallocation of funds. The attacker can trigger this by sending a token that calls back into disburse() during its transfer, bypassing the onlyOwnerOrRoles checks that protect disburse() and clawback().",
+      "severity": "critical",
+      "original_id": "94913d003ab7229c"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_036",
+      "title": "Representation Boundary Violation in available() for ERC1155 Tokens",
+      "description": "The function available(address asset_, uint256 tokenId_) returns the raw ERC1155 balance of the budget for a specific tokenId. However, in disburse() and clawback(), this value is used directly to validate transfers without accounting for the distributed amount tracked in _distributedERC1155. The economic invariant is: total = available + distributed. But disburse() only checks available(asset_, tokenId_) against payload.amount, ignoring that distributed amounts are part of the total allocation. This means the budget can disburse more than its actual held balance if distributed amounts are non-zero. For example, if 100 tokens were distributed and 50 remain in the budget, total = 150. But disburse() allows transferring up to 50, even though the budget has only 50 available \u2014 this is correct. However, if an attacker calls clawback() to reclaim 100 tokens (when only 50 are held), the clawback() function correctly uses IERC1155.balanceOf to get 50 and transfers 50. But the real issue is in the total() function: it reports 150 as total, but the budget only holds 50. External systems relying on total() to allocate rewards or set caps will overcommit. The representation boundary violation is that available() returns raw balance, but total() combines it with distributed \u2014 yet disburse() does not use total() to validate. This creates a mismatch: disburse() assumes available() is the only constraint, but the protocol's economic model requires disburse() to respect total() as the hard cap. Since disburse() does not check against total(), it allows disbursement up to available(), which is correct only if distributed == 0. If distributed > 0, the budget has less than total() available, but disburse() doesn't know that. This is a representation boundary failure: the function available() returns a raw balance, but the system expects it to represent 'usable balance' under the total = available + distributed model. The caller (disburse()) expects available() to be the maximum that can be disbursed, but under the protocol's own logic, the maximum that can be disbursed is total() - distributed() = available(). So it's actually consistent. Wait \u2014 let's reevaluate. The real issue is: _distributedERC1155 is incremented BEFORE the transfer. So if a malicious token calls back into disburse() during safeTransferFrom, it can read _distributedERC1155 as inflated, and then disburse() will use available() which is still the pre-transfer balance. This creates a double-spend: the distributed counter is incremented, but the actual transfer hasn't completed yet. The attacker can call disburse() again in the reentrant call, and since _distributedERC1155 is already increased, available() is unchanged, so the budget appears to have more than it does. Example: Budget holds 100 ERC1155 tokens. Attacker calls disburse() to send 100 tokens to themselves. During the safeTransferFrom, the token contract reenters disburse() and sends another 100 tokens. The first disburse() increments _distributedERC1155 to 100. The reentrant disburse() sees available() = 100 (still true), and _distributedERC1155 = 100, but doesn't check total() \u2014 it only checks available(). So it allows another 100 transfer. Now _distributedERC1155 = 200, but budget only held 100. The attacker gains 200 tokens, budget is drained. This is a classic reentrancy + representation boundary issue: the distributed counter is updated before the transfer, and available() is not adjusted until after. The representation boundary is violated because the system uses two different representations: 'available' (raw balance) and 'distributed' (tracked counter), and the update order creates a window where the distributed counter is ahead of the actual balance. The function available() returns raw balance, but the system's logic requires that the sum of available + distributed be the total allocation. When distributed is updated before the transfer, the available() value becomes misleading during reentrancy. This is a HIGH severity vulnerability because it allows double-spending via reentrancy.",
+      "severity": "critical",
+      "original_id": "ff1446fdd6da2c2a"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_037",
+      "title": "Reentrancy in _transferFungible and _transferERC1155 Leading to Double Spending",
+      "description": "The functions _transferFungible and _transferERC1155 update the distributed state variables (_distributedFungible and _distributedERC1155) BEFORE executing the external transfer. This creates a reentrancy vulnerability: if the recipient is a malicious contract, it can reenter disburse() or clawback() during the external call (safeTransfer or safeTransferFrom). Since the distributed counter has already been incremented, the budget appears to have less available balance than it actually does, but the available() function still returns the pre-transfer balance. An attacker can exploit this to withdraw more than the budget holds. Example: Budget holds 100 ETH. Attacker calls disburse() to send 100 ETH. During SafeTransferLib.safeTransferETH, the recipient contract reenters disburse() and requests another 100 ETH. The first disburse() has already incremented _distributedFungible[ETH] to 100. The reentrant disburse() calls available(ETH) \u2014 which still returns 100 (since transfer hasn't completed). It sees 100 available, and transfers another 100 ETH. Now _distributedFungible[ETH] = 200, but budget only had 100. Attacker gains 200 ETH. The same applies to ERC20 and ERC1155. The nonReentrant modifier is applied, but it only protects against direct reentrancy into the same function. It does not prevent reentrancy into other functions (e.g., disburse() calling _transferFungible, then reentrant call to disburse() again). The ReentrancyGuard only guards against reentrancy into the same function, not cross-function reentrancy. This is a well-known limitation of ReentrancyGuard. The fix requires either using checks-effects-interactions pattern or a mutex lock across all budget-modifying functions. This vulnerability allows an attacker to steal up to 100% of the budget's assets in a single transaction.",
+      "severity": "critical",
+      "original_id": "13d1eded82c0c7bf"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_038",
+      "title": "Inconsistent Data Access in disburseBatch() Leading to Partial Failure and Fund Locking",
+      "description": "The disburseBatch() function iterates over an array of transfer requests and calls disburse() for each. If any disburse() call fails (e.g., due to insufficient funds), the entire batch reverts. However, if a prior disburse() call in the batch succeeds and transfers assets, and a later one fails, the entire transaction reverts \u2014 but the state changes from the successful transfers are not rolled back because Solidity does not revert state changes within a transaction on partial failure. Wait \u2014 this is incorrect. In Solidity, if any call in a transaction reverts, the entire transaction reverts, including all prior state changes. So this is not a vulnerability. But there is a different issue: the available() check in disburse() is performed before the transfer, but if the budget's balance changes between the check and the transfer (e.g., due to another transaction or reentrancy), the check becomes invalid. However, this is already covered by the reentrancy issue. Another issue: the function disburseBatch() does not validate that the input array is non-empty or that the requests are well-formed. But this is not a financial vulnerability. The real data access issue is in the total() and distributed() functions: they rely on _distributedFungible and _distributedERC1155, which are updated in _transfer functions. But if a token transfer fails (e.g., due to insufficient allowance or token revert), the distributed counter is still incremented. Example: Attacker calls disburse() to send 100 ERC20 tokens to a malicious contract that reverts in its onTransfer hook. The _transferFungible function increments _distributedFungible[asset] by 100, then calls asset.safeTransfer(), which reverts. The transaction reverts, but the state change to _distributedFungible is not reverted because it occurred before the external call. This is a critical state inconsistency: the distributed counter is incremented even if the transfer fails. This causes total() to overstate the budget's total allocation, leading to future disbursements being incorrectly denied (because total() = available + distributed, and distributed is too high). For example: Budget holds 100 USDC. Attacker calls disburse() to send 100 USDC to a malicious contract that reverts. _distributedFungible[USDC] becomes 100. Transaction reverts. Budget still holds 100 USDC. But total(USDC) = 100 (available) + 100 (distributed) = 200. Now, a legitimate user calls disburse() to send 50 USDC. available() returns 100, which is > 50, so it proceeds. But the budget's total allocation is now 200, and it has only 100, so it should not be able to disburse 50 if the distributed counter is to be trusted. But the protocol allows it because disburse() only checks available(). The problem is that distributed is now wrong \u2014 it reflects a failed transfer. This breaks the invariant: total = available + distributed. The distributed counter should only be incremented after a successful transfer. This is a data access integrity violation: the state variable is updated before the external call, and if the call reverts, the state change persists, creating a permanent inconsistency. This can lead to the budget being permanently unable to disburse funds if distributed > available, because total() becomes misleading and external systems may refuse to interact with the budget.",
+      "severity": "high",
+      "original_id": "6c5faf9075170da5"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_039",
+      "title": "Missing Claim Function and Critical State Management Invariants",
+      "description": "The contract APointsIncentive is designed as a points-based incentive system that should allow users to claim soulbound tokens, but it lacks any implementation of a claim() function or any mechanism to track claimed status, enforce claim limits, or interact with the points contract (venue). The state variables 'venue', 'limit', and 'selector' are declared but never used or updated by any function. This renders the entire incentive mechanism non-functional. An attacker or user cannot claim any points, and the protocol cannot enforce the claim limit or authorize issuance. The contract is effectively a state machine with no operations, leading to permanent loss of incentive functionality and user funds intended to be distributed via this mechanism.",
+      "severity": "critical",
+      "original_id": "6a1571ddd2f3cdd7"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_040",
+      "title": "Missing Access Control on Critical Incentive Parameters",
+      "description": "The APointsIncentive contract allows any external actor to modify critical parameters (venue, limit, selector) without any access control. These parameters determine which token contract is used for issuance, the maximum number of claims allowed, and the function selector for claiming. Since these values are immutable after deployment and the contract is designed to be cloned, an attacker who gains control of the deployment proxy or admin can permanently alter incentive logic, redirecting all future claims to a malicious contract or setting limit=0 to lock all funds.",
+      "severity": "critical",
+      "original_id": "814098a0510f6e36"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_041",
+      "title": "Missing Access Control on Critical State Variables in APointsIncentive",
+      "description": "The contract APointsIncentive defines three critical state variables \u2014 venue, limit, and selector \u2014 that govern the core economic behavior of the incentive system. These variables determine who can claim incentives, how many claims are allowed, and which external function is called to mint points. However, none of these variables have any access control restrictions. Any external actor can call the public setters (implicitly generated by Solidity) to reassign these values at any time. This enables an attacker to manipulate the incentive system by changing the venue to a malicious contract, setting limit to 0 to block all claims, or changing the selector to a non-functional or malicious function selector. This breaks the invariant that only authorized administrators should control incentive parameters, leading to denial of service, fund misdirection, or permanent loss of incentive distribution logic.",
+      "severity": "critical",
+      "original_id": "4882132ed4c3d4cd"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_042",
+      "title": "No Fund Handling Logic - Incomplete Incentive Contract Implementation",
+      "description": "The APointsIncentive contract is an abstract contract that defines metadata for a points-based incentive system (venue, limit, selector) but contains no logic for receiving, holding, processing, or distributing funds. It does not implement any receive(), fallback(), deposit(), or claim() functions that handle native currency or token transfers. This renders the contract non-functional as an incentive mechanism, as users cannot deposit funds, claim rewards, or interact with the system in any meaningful way. The contract is effectively a stub with no operational logic, creating a critical failure in the protocol's incentive layer.",
+      "severity": "critical",
+      "original_id": "a65564dfbb56f8b4"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_043",
+      "title": "State Update Before Transfer in _transferFungible and _transferERC1155 Allows Reentrancy and Accounting Inconsistency",
+      "description": "The functions _transferFungible and _transferERC1155 increment the _distributedFungible and _distributedERC1155 state variables BEFORE executing the external token transfer. This creates a critical vulnerability: if the recipient is a malicious contract that reenters the budget via a callback (e.g., by calling disburse or clawback), it can drain additional funds because the distributed amount has already been recorded, making the budget appear to have less available than it actually does. This violates Pattern 2 (validation after state change) and Pattern 6 (state synchronization in function chains). The reentrancy guard only protects against direct reentrancy into the same function, but not reentrancy into other public functions like disburse or clawback.",
+      "severity": "critical",
+      "original_id": "747302814614d469"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_044",
+      "title": "DisburseBatch Allows Partial Success with Incomplete Accounting, Enabling Fund Theft via Reentrancy",
+      "description": "The disburseBatch function iterates over multiple transfers and returns false on the first failure, but does not revert the entire transaction. This means if one disbursement fails (e.g., due to insufficient funds), prior successful disbursements are committed, but the distributed state is not rolled back. An attacker can exploit this by calling disburseBatch with a malicious recipient first (triggering reentrancy) followed by a legitimate recipient. The malicious recipient reenters and drains funds via disburse, and because _distributedFungible was already incremented during the first disburse, the budget incorrectly believes those funds were already distributed, allowing the attacker to withdraw them again. This violates Pattern 3 (execution boundaries consistency) and Pattern 7 (state commitment timing).",
+      "severity": "high",
+      "original_id": "cbfbc81ce3c2927b"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_045",
+      "title": "available() Returns Incorrect Balance for ERC1155 in Clawback When Amount=0",
+      "description": "In clawback, when payload.amount == 0, the function uses available(asset_) for ERC20/ETH, but for ERC1155 it uses IERC1155(asset_).balanceOf(address(this), tokenId_) directly \u2014 which is correct \u2014 but the available(asset_, tokenId_) function is not used. This is inconsistent. However, the real issue is deeper: available(asset_, tokenId_) is not used in clawback, but it is used in disburse. This creates a logic inconsistency. More critically, in clawback, when amount=0, the entire balance is transferred, but the _distributedERC1155 is NOT subtracted from the total. This means the budget's total() function becomes inaccurate: total() = balance + distributed, but clawback transfers the full balance without reducing distributed. This causes total() to overstate available funds by the amount clawed back, leading to potential double-spending in disburse if the attacker clawbacks and then disburse the same tokens again. This violates Pattern 3 (execution consistency) and Pattern 12 (conditional state updates).",
+      "severity": "high",
+      "original_id": "738f2a57afbab639"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_046",
+      "title": "allocate() Function Does Not Validate Asset Type Before Decoding, Leading to Potential Revert or Data Corruption",
+      "description": "The allocate function decodes request.data into FungiblePayload or ERC1155Payload based on request.assetType, but does not validate that the data length or structure matches the expected payload type. If an attacker passes a malformed data_ field (e.g., encoding a FungiblePayload when assetType is ERC1155), the abi.decode will revert, causing the entire allocate call to fail. While this is a revert, it is not a financial loss \u2014 however, it enables a denial-of-service vector where an attacker can spam invalid allocations to block legitimate users. More critically, if the ABI encoding is misaligned (e.g., due to a forked ERC1155 with different struct layout), the decode may succeed but corrupt the payload values, leading to incorrect transfers. This violates Pattern 9 (external system assumptions) and Pattern 10 (input validation).",
+      "severity": "medium",
+      "original_id": "0e063cff930e7166"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_047",
+      "title": "isAuthorized() Grants Owner Access Without Explicit Authorization, Enabling Unauthorized Clawback via Owner Override",
+      "description": "The isAuthorized function returns true if the caller is the owner OR if they are in the _isAuthorized mapping. This means the owner can bypass the onlyAuthorized modifier on disburse() by calling it directly \u2014 but disburse() is marked onlyAuthorized, and onlyOwner is not used. However, the owner can call clawback() directly (which is onlyOwner) and reclaim funds. The issue is that disburse() is intended for authorized users, but the owner can also call disburse() because isAuthorized(owner) returns true. This is not a vulnerability per se \u2014 it is by design. However, the interface ABudget declares disburse() as public and does not restrict it to onlyOwner, but the implementation allows owner to use it. This is acceptable. However, the real issue is that the owner can use disburse() to send funds to any address, bypassing any intended governance or delegation logic. This is not a vulnerability but a design choice. No financial loss possible. This is not a vulnerability.",
+      "severity": "low",
+      "original_id": "5aaf55eafd2a3c3f"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_048",
+      "title": "Clawback Allows Arbitrary Token Drain by Bypassing Claim Limits",
+      "description": "The clawback function allows the owner to withdraw any amount of tokens from the incentive contract without enforcing the per-user claim limit or total limit constraints properly. Although the function checks if the clawback amount exceeds the total limit (limit), it does not verify that the amount being clawed back corresponds to actual unclaimed tokens. This allows the owner to claw back more tokens than were ever available for claiming, effectively draining the contract's entire balance regardless of how many claims have been made. The state variable 'claims' tracks the number of successful claims, but 'limit' is only decremented during clawback, not during normal claim operations. This creates a critical accounting inconsistency where the contract's available balance is not properly tracked, enabling the owner to withdraw tokens beyond the originally allocated incentive pool.",
+      "severity": "critical",
+      "original_id": "23bab28953bd2828"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_049",
+      "title": "State Commitment Before Transfer in _transferFungible and _transferERC1155",
+      "description": "The budget increments the _distributedFungible and _distributedERC1155 counters before performing the actual asset transfer. If the external transfer reverts (due to recipient contract failure, insufficient gas, or malicious recipient), the distributed amount is permanently incremented but the asset is not transferred. This creates an accounting mismatch where the budget reports more assets distributed than actually sent, leading to incorrect available balance calculations and potential denial of future disbursements.",
+      "severity": "critical",
+      "original_id": "b198ce3dec587746"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_050",
+      "title": "Insufficient Validation of Zero Address in _transferFungible",
+      "description": "The _transferFungible function checks if the recipient is address(0) and reverts, but this check occurs after incrementing _distributedFungible. If a malicious actor calls _transferFungible with address(0) as recipient, the distributed counter is incremented but the transfer reverts. This permanently corrupts the accounting state by falsely recording distribution to a non-existent address, reducing the available balance for legitimate users.",
+      "severity": "high",
+      "original_id": "0355fc3529ae2aef"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_051",
+      "title": "Missing ERC1155 Balance Validation in Clawback",
+      "description": "In the clawback function, when payload.amount == 0, the code uses IERC1155(request.asset).balanceOf(address(this), payload.tokenId) to determine the amount to transfer. However, this balance is read before the transfer, and if a malicious actor drains the balance between the read and the transfer (e.g., via flash loan or reentrancy), the transfer may fail. The function does not re-check the balance after the transfer, leading to potential under-distribution or silent failure without reverting, which breaks the contract's guarantee that clawback reverts on transfer failure.",
+      "severity": "high",
+      "original_id": "7fcf70b457cb9970"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_052",
+      "title": "Inconsistent Available Balance Calculation for ETH",
+      "description": "The available(address) function returns address(this).balance for ETH, but the allocate function for ETH requires msg.value == payload.amount. However, if ETH is sent directly to the contract (e.g., via self-destruct or other contract) without going through allocate(), the balance increases but _distributedFungible is not updated. This causes total(asset) = available(asset) + _distributedFungible to undercount the true total, since direct ETH deposits are not tracked in _distributedFungible. This breaks the invariant that total = distributed + available.",
+      "severity": "high",
+      "original_id": "fe3f45401c1ba2ac"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_053",
+      "title": "Authorization Bypass via Owner Override in isAuthorized",
+      "description": "The isAuthorized function returns true if the caller is the owner, regardless of whether the owner is explicitly in the _isAuthorized mapping. This means that even if the owner is removed from the authorized list via setAuthorized, they retain full access. While this may be intentional, it creates a hidden, undocumented backdoor that violates the principle of least privilege. An attacker who gains control of the owner can always bypass authorization checks, even if the contract is meant to restrict access to a specific set of authorized parties.",
+      "severity": "medium",
+      "original_id": "2c944a24106cde11"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_054",
+      "title": "Missing Claim Validation and State Commitment Timing Vulnerability",
+      "description": "The APointsIncentive contract lacks any claim logic or state mutation, making it impossible to claim incentives. However, the contract inherits from AIncentive and defines critical state variables (venue, limit, selector) without implementing the core claim functionality. This creates a false sense of functionality, and if a derived contract implements claim() without proper state commitment ordering, it could commit state (e.g., claim flag) before verifying external calls or limits, leading to irreversible loss of claim opportunities.",
+      "severity": "high",
+      "original_id": "060b42ad59cecc7a"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_055",
+      "title": "Unvalidated External Function Selector Enables Arbitrary Execution",
+      "description": "The contract stores a bytes4 selector (selector) to call an external points contract's issuance function, but never validates that this selector corresponds to a legitimate, intended function (e.g., one that emits events, has access control, or matches expected signature). An attacker can set selector to any 4-byte value, including those of destructive functions (e.g., transferOwnership, pause, or even selfdestruct). When claim() is eventually implemented (in a child contract), it will call this selector on the venue address with unverified parameters, enabling arbitrary code execution on the venue contract.",
+      "severity": "critical",
+      "original_id": "ffab223a7c473b45"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_056",
+      "title": "Missing Input Validation for Mathematical Domain in Potential Derived Claim Logic",
+      "description": "Although no explicit math function is present, the contract defines 'limit' as a uint256 that will likely be used in derived claim logic to enforce claim caps. If a derived contract uses 'limit' in division (e.g., distributing points per claim = totalPoints / limit) without validating limit != 0, it will cause a division-by-zero revert. More dangerously, if the derived contract uses logarithmic or exponential scaling (e.g., ln(limit)) without validating limit > 0, it will produce undefined behavior. Since limit is set by admin and not validated in constructor, it can be set to 0, leading to math domain violations in downstream logic.",
+      "severity": "high",
+      "original_id": "65c8142185db339a"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_057",
+      "title": "Interface ID Mismatch Risk in Cloneable Implementation",
+      "description": "The contract overrides supportsInterface to return true only for type(APointsIncentive).interfaceId. However, if the AIncentive interface or ACloneable interface changes its expected interface ID in a future version, or if a clone factory expects a different interface ID for compatibility, clones of this contract may be rejected by external systems (e.g., governance, aggregators, or proxy factories). This is a compatibility risk, not a direct exploit, but may cause integration failures.",
+      "severity": "medium",
+      "original_id": "d97064ce690c158f"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_058",
+      "title": "ERC1155Incentive Accepts Arbitrary ERC1155 Transfers Without Validation, Enabling Fund Mixing and Reward Inflation",
+      "description": "The contract implements onERC1155Received and onERC1155BatchReceived handlers that unconditionally accept all incoming ERC1155 token transfers without validating the token ID, sender, or context. This allows any external entity to send ERC1155 tokens (including those intended for other purposes, such as withdrawal returns or system rewards) directly to the contract. These funds are then indistinguishable from the incentive pool funds, enabling attackers to artificially inflate the available reward balance and bypass the configured limit. This leads to unauthorized claimability and potential complete depletion of the incentive pool by malicious actors.",
+      "severity": "critical",
+      "original_id": "463d7ca8af29d31c"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_059",
+      "title": "Access Control Bypass in Claim Function Allows Unlimited Token Drain",
+      "description": "The claim() function is restricted to onlyOwner, but the clawback() function allows the owner to reduce the limit and transfer arbitrary amounts of tokens without validating that the total claimed tokens do not exceed the original limit. An attacker can repeatedly call clawback() to reduce the limit to zero while transferring all remaining tokens to themselves, effectively draining the contract's entire balance. This bypasses the intended claim limit and exploits the lack of cumulative tracking of total claimed tokens.",
+      "severity": "critical",
+      "original_id": "ad0095b79501181c"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_060",
+      "title": "Clawback Allows Arbitrary Token Transfer Without Claim Validation",
+      "description": "The clawback() function decrements the limit variable but does not validate that the amount being clawed back has not already been claimed by other users. This creates a representation boundary violation: the limit variable is used both as a cap on total claims and as a remaining balance indicator, but it is not synchronized with the claimed[] mapping. An attacker can call clawback() with a large amount (e.g., limit) even after users have already claimed tokens, causing the contract to transfer more tokens than were originally allocated, leading to underfunding of legitimate claims.",
+      "severity": "high",
+      "original_id": "edd25a7724e3ec28"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_061",
+      "title": "Desynchronized Claim Tracking Causes Token Underdistribution",
+      "description": "The contract uses two independent state variables to track claim state: 'claims' (count of claim events) and 'claimed[address]' (per-user claim status). However, clawback() reduces 'limit' without adjusting 'claims'. This creates a data access integrity violation: if users claim tokens (incrementing claims), then the owner calls clawback() to reduce limit below claims, the contract will incorrectly reject future valid claims (because claims >= limit) even though tokens remain in the contract. This desynchronization causes legitimate users to be unable to claim their allocated tokens, locking funds in the contract.",
+      "severity": "high",
+      "original_id": "1d6abb602fecf93b"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_062",
+      "title": "Clawback Payload Decoding Assumes Single uint256, But Data Is Arbitrary",
+      "description": "The clawback() function decodes the input data as (uint256 amount), but the ClawbackPayload struct defines data as bytes. This creates a representation boundary mismatch: the caller may encode arbitrary data (e.g., multiple values, structs, or padding), causing the abi.decode to revert or return garbage values. This breaks the interface contract between the caller and clawback(), leading to unpredictable behavior or denial of service. The function assumes a specific encoding but does not validate or enforce it.",
+      "severity": "high",
+      "original_id": "89631089f0650bb6"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_063",
+      "title": "State Commitment Before External Call in Claim Function Allows Reentrancy and Fund Theft",
+      "description": "The claim() function increments the claims counter and marks the recipient as claimed before executing the external safeTransferFrom call. If the recipient is a malicious contract that reenters claim(), it can claim multiple times before the state is finalized, draining the incentive pool. This violates Pattern 7 (State Commitment Timing) and Pattern 6 (State Synchronization in Function Chains).",
+      "severity": "critical",
+      "original_id": "8534346706fc828e"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_064",
+      "title": "Clawback Function Allows Arbitrary Token Drain by Overriding Limit with Malicious Input",
+      "description": "The clawback() function decrements the limit by an arbitrary amount provided in the input data, but does not validate that the amount being reclaimed is actually available in the contract's balance. An attacker can call clawback with a large amount (e.g., 10^18) even if only 1 token exists, causing limit to underflow or allowing transfer of non-existent tokens. This violates Pattern 3 (Execution Boundaries) and Pattern 2 (Validation Timing).",
+      "severity": "critical",
+      "original_id": "dc1646ea203ea3d4"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_065",
+      "title": "Claimable State Validation Bypassed via Direct Transfer to Contract",
+      "description": "The contract accepts any ERC1155 tokens via onERC1155Received and onERC1155BatchReceived without validating token ID or amount. An attacker can send tokens directly to the contract (bypassing initialization) and then call clawback to reclaim them, even if the contract was never properly initialized. This violates Pattern 8 (External System Assumptions) and Pattern 5 (Recipient Selection Logic).",
+      "severity": "high",
+      "original_id": "be9d4da8feeda2f0"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_066",
+      "title": "Clawback Function Allows Owner to Drain All Tokens by Setting Amount > Limit",
+      "description": "The clawback() function checks if amount > limit and reverts, but does not check if the contract has sufficient balance of the token. An attacker who is the owner can call clawback with amount = limit (e.g., 1000) even if only 1 token is in the contract. The transfer will succeed for 1 token, but limit is decremented by 1000, causing future claims to fail. This violates Pattern 3 (Execution Boundaries) and Pattern 5 (Recipient Selection Logic).",
+      "severity": "high",
+      "original_id": "42f7cb7c9bbff230"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_067",
+      "title": "Initialize Function Allows Reinitialization via Cloning and Repeated Calls",
+      "description": "The initialize() function calls _initializeOwner(msg.sender) twice and does not check if the contract is already initialized. An attacker can clone the contract, initialize it, then call initialize() again with a new payload, resetting the asset, limit, and claimed state. This allows the attacker to reclaim tokens already claimed by users. This violates Pattern 7 (State Commitment Timing) and Pattern 6 (State Synchronization).",
+      "severity": "high",
+      "original_id": "a267e33fc1ec80c4"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_068",
+      "title": "Critical Missing Access Control on drawRaffle() Allows Arbitrary Winner Selection",
+      "description": "The drawRaffle() function is declared external and virtual but lacks any access control modifier. This allows any external actor to call drawRaffle() at any time, even before any entries are added or after the raffle has already been drawn. Since the function is responsible for selecting a single winner from the entries array and presumably distributing the entire reward pool to that winner, an attacker can front-run or manipulate the winner selection by calling drawRaffle() when the entries array contains a low-value or controlled address. This breaks the fairness invariant of the raffle and enables theft of the entire incentive pool. The function is critical to the economic model of the RAFFLE strategy and must be restricted to authorized entities (e.g., only the incentive owner or a designated authority).",
+      "severity": "critical",
+      "original_id": "ae30cb4ad1ae03b6"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_069",
+      "title": "Critical Missing Access Control on drawRaffle() Allows Anyone to Drain Reward Pool",
+      "description": "The drawRaffle() function is declared as external and virtual but has no access control restrictions. It is intended to be called only by authorized entities (e.g., admin or guardian) to randomly select a winner in RAFFLE mode and transfer the entire reward pool to the winner. However, because it is publicly callable by any user, an attacker can call it multiple times to repeatedly drain the reward pool. Each call to drawRaffle() selects a winner and transfers the full asset amount, even if the raffle has already been drawn. This results in the reward being distributed multiple times, effectively allowing an attacker to steal the entire incentive pool by calling drawRaffle() once after entries are registered.",
+      "severity": "critical",
+      "original_id": "432b74dd6f4a1e59"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_070",
+      "title": "No Withdrawal or Claim Mechanism Implemented - Funds Are Permanently Locked",
+      "description": "The AERC20Incentive contract defines abstract methods for raffle drawing and inherits from AIncentive, but implements no mechanism for users to claim rewards. The contract accepts ERC20 tokens as rewards (via the 'asset' variable) but provides no function for users to withdraw or claim those tokens. Even if tokens are deposited into the contract by a system operator, users cannot access them. This results in permanent fund locking. The contract is designed to distribute rewards but lacks the core functionality to do so, rendering it non-functional and dangerous for any deployed incentive program.",
+      "severity": "critical",
+      "original_id": "28ed85d375d93ca1"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_071",
+      "title": "Missing Access Control on Raffle Entry and Draw Functions Enables Reward Theft",
+      "description": "The AERC20Incentive contract allows any user to add themselves to the raffle entries array via the public `entries` array, but lacks any access control on the `drawRaffle()` function. This creates a critical boundary violation where an attacker can manipulate the timing of the raffle draw to claim the entire reward pool by controlling the number of entries. Since the raffle randomly selects one winner from all entries, an attacker can flood the raffle with many entries just before the draw, increasing their probability of winning. The `drawRaffle()` function is virtual and unimplemented, but even if implemented naively (e.g., using `entries[LibPRNG.PRNG().nextUint256() % entries.length]`), the lack of access control on both entry addition and draw enables a timing-based manipulation attack. The state variable `entries` is directly used in economic calculation (winner selection), and its size directly affects the probability distribution. Without access control, users can add entries at will, and the draw can be called by anyone, enabling an attacker to monopolize the reward.",
+      "severity": "critical",
+      "original_id": "a9514dd30a125fcd"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_072",
+      "title": "Unbounded Array Growth in Raffle Entries Causes Gas Exhaustion and Denial of Service",
+      "description": "The `entries` array is an unbounded, publicly writable storage array that grows with every user call to add an entry (via direct array manipulation or future implementation). There is no mechanism to cap or limit the number of entries beyond the `limit` variable, which is not enforced in the entry addition logic. This creates a data structure boundary violation: the array can grow indefinitely, causing any function that iterates over it (e.g., `drawRaffle()`, or future claim functions) to consume excessive gas. For example, if 100,000 users each add one entry, the `drawRaffle()` function will need to compute `LibPRNG.PRNG().nextUint256() % 100000`, which is computationally expensive, and if the function attempts to iterate over all entries to validate or clean them, it will exceed the block gas limit. This leads to denial of service: legitimate users cannot claim rewards because the draw function reverts due to out-of-gas. The `limit` variable is declared but never used, creating a false assumption of safety. Attackers can exploit this by creating 50,000+ entries at negligible cost (each entry costs ~20k gas), making the raffle permanently unusable. The financial impact is that the entire incentive pool becomes locked \u2014 no one can claim it, and the protocol loses its incentive function.",
+      "severity": "high",
+      "original_id": "4ea3fd44f76cecdd"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_074",
+      "title": "Reentrancy and State Inconsistency in Claim Function Due to External Call Before State Commitment",
+      "description": "The claim() function performs an external call to the venue contract before finalizing state updates (claims++ and claimed[claimTarget] = true). This creates a reentrancy vulnerability where an attacker can recursively call claim() within the external call, bypassing the claim limit and claiming multiple times. Additionally, if the external call reverts, the state changes (claims increment and claimed flag) are still committed, leading to permanent loss of claim capacity without reward distribution. This breaks the invariant that claims must be atomic: either both state and reward are updated, or neither is.",
+      "severity": "critical",
+      "original_id": "6114af37546231d3"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_075",
+      "title": "Clawback Allows Over-Clawback by Reusing Same Token ID with Larger Amount",
+      "description": "The clawback function reduces the global limit but does not validate that the amount being clawed back does not exceed the remaining available balance of the ERC1155 token at the contract. This allows an attacker to call clawback with an amount greater than the actual token balance, causing the limit to be reduced below zero and potentially locking funds if the contract is later used for other purposes. The mathematical domain of available balance is not validated against the requested clawback amount.",
+      "severity": "critical",
+      "original_id": "27ce9ee1696af04f"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_076",
+      "title": "Clawback State Change Precedes Token Transfer, Enabling Reentrancy and Fund Loss",
+      "description": "The clawback function decrements the global limit (state change) before calling safeTransferFrom. If the recipient is a malicious contract that reenters clawback, it can drain the entire incentive pool by repeatedly reducing the limit and withdrawing tokens, even if the actual balance is exhausted. This violates operation lifecycle integrity by committing state before external call safety is guaranteed.",
+      "severity": "critical",
+      "original_id": "5685c4fa8316318a"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_077",
+      "title": "Claim and Clawback Use Same Token ID Without Tracking Per-Recipient Balance, Enabling Double-Spend",
+      "description": "The contract uses a single global limit and a boolean claimed[address] map, but does not track how many tokens each recipient has claimed. If a user claims 1 token, then clawback is called to reclaim 2 tokens, the limit is reduced by 2 but the user's claim flag remains true. A second claim by the same user will fail due to claimed[recipient], but a different user can claim the remaining 1 token. However, if clawback is called with amount=limit, the entire pool is drained and the claimed map is never reset, preventing legitimate future claims. This creates an inconsistent state where the limit and claimed flags are decoupled.",
+      "severity": "high",
+      "original_id": "7a1e40038b1e51b2"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_078",
+      "title": "Clawback Payload Decoding Assumes Single uint256, But Data Field Is Arbitrary Bytes",
+      "description": "The clawback function decodes claim_.data as a single uint256 (amount), but the payload is defined as ClawbackPayload{target: address, data: bytes}. The data field is arbitrary and may contain any data. If the data field is not exactly 32 bytes of a uint256, abi.decode will revert. This is not a vulnerability per se, but a design flaw: the interface does not enforce or document that data must be a uint256, leading to unpredictable reverts for legitimate users who pass other data. This is a type system integrity issue because the encoding contract assumes a specific format without validation.",
+      "severity": "high",
+      "original_id": "2ffc55ca4042aea7"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_079",
+      "title": "Initialize Reinitializes Owner, Leading to Potential Owner Override",
+      "description": "The initialize function calls _initializeOwner(msg.sender) twice: once at the start and again at the end. While this is redundant, the real issue is that if initialize is called multiple times (e.g., via a proxy upgrade or reentrancy), the owner can be overwritten. Although the contract uses OpenZeppelin's initializer modifier, the modifier only prevents multiple calls to initialize, but if the contract is cloned and initialized twice via different proxies, the owner can be changed. This is a lifecycle issue where state commitment (owner) is not bound to the contract's unique identity.",
+      "severity": "medium",
+      "original_id": "e1bdc3d1b114c4c5"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_080",
+      "title": "Unchecked Claim Counter Overflow Enables Unlimited Claiming",
+      "description": "The claims counter is incremented without overflow protection in the claim() function, allowing an attacker to wrap the counter to 0 and bypass the claim limit. This enables unlimited claiming of rewards despite the configured limit, resulting in complete depletion of the incentive pool. The vulnerability exists because Solidity's default behavior allows unchecked arithmetic, and no require() or safe math operation is used to validate that claims < type(uint256).max before incrementing.",
+      "severity": "critical",
+      "original_id": "1c4878224eea4411"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_081",
+      "title": "Reward Amount Passed to External Call Not Verified for Unit Consistency",
+      "description": "The reward value is passed directly to an external contract via dynamic call without verifying that the external contract expects the same unit representation. The PointsIncentive contract treats reward as a raw token amount, but the target contract (venue) may expect a scaled representation (e.g., 18-decimal ERC20 vs. 6-decimal stablecoin) or a different semantic meaning (e.g., points vs. tokens). If the venue contract expects a normalized or scaled value (e.g., reward * 1e18) but receives raw units, the recipient receives a drastically incorrect amount. For example, if reward = 1000 and the venue contract expects 18 decimals, the recipient receives 1000 wei instead of 1000 tokens (1e21 wei), resulting in a 1e18x underpayment. This breaks the incentive promise and causes users to receive negligible or zero rewards, while the protocol appears to have fulfilled its obligation.",
+      "severity": "high",
+      "original_id": "4a5ea5df833a47c0"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_082",
+      "title": "Claim Status Mapping Allows Reclaiming via Address Manipulation (Griefing)",
+      "description": "The claimed mapping uses address as a key, but does not validate that claimTarget is a non-zero, non-contract, or non-malicious address. An attacker can repeatedly call claim() with different addresses that are not EOA (e.g., contract addresses, zero address, or randomly generated addresses) to fill the claimed mapping with invalid entries. Since the mapping is unbounded and each entry consumes ~200 gas and 32 bytes of storage, an attacker can exhaust the contract's storage capacity by making 10,000+ claims with non-user addresses. Once storage is saturated, legitimate users cannot claim because the contract cannot store new claimed flags, even if claims < limit. This is a denial-of-service attack that effectively locks out real users. For example, with 10,000 invalid claims, the contract uses 320 KB of storage \u2014 exceeding reasonable gas limits for future claims and making the incentive unusable.",
+      "severity": "high",
+      "original_id": "997487f86a741c30"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_083",
+      "title": "Venue Ownership Check Is Incomplete and Allows Unauthorized Reward Issuance",
+      "description": "The ownership check assumes that the venue contract uses a role-based system where role 1 (bit 1) grants issuance rights. However, the contract does not validate that the venue contract actually implements the expected role system or that role 1 corresponds to issuance. An attacker can deploy a malicious venue contract that returns true for hasAnyRole() for any address, or returns false for owner() but true for hasAnyRole() with an arbitrary role ID. This allows the attacker to impersonate an authorized caller and trigger reward issuance to themselves. For example, if reward = 10,000 tokens, the attacker calls claim() with their own address and a malicious venue contract, and receives 10,000 tokens without authorization. The economic impact is direct theft of the incentive pool funds.",
+      "severity": "high",
+      "original_id": "198c454d8caede2d"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_084",
+      "title": "Arbitrary Fund Transfer via External Call Without Caller Verification",
+      "description": "The claim() function executes an arbitrary external call to a user-specified contract (venue) with user-controlled selector and reward value, without verifying that the external call's destination or function is intended for legitimate reward issuance. This allows an attacker to trick the contract into sending funds to any arbitrary address via any function, effectively enabling unauthorized fund transfers. The contract assumes the venue contract is trusted and will only execute legitimate reward issuance, but no validation is performed on the selector or the target contract's behavior.",
+      "severity": "critical",
+      "original_id": "444bf00b2056cb9c"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_085",
+      "title": "Incomplete Operation Lifecycle: drawRaffle() Can Be Called Multiple Times Without Resetting State",
+      "description": "The drawRaffle() function is declared but not implemented. This creates a critical lifecycle flaw: the raffle entries array is populated by users, but there is no mechanism to clear it after drawing a winner. This allows the same raffle to be drawn repeatedly, enabling an attacker to claim the reward multiple times if the reward is not properly consumed or if the contract allows re-entrancy or multiple draws.",
+      "severity": "critical",
+      "original_id": "56a61e89c8f13326"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_086",
+      "title": "Missing State Restoration in Raffle Lifecycle: Entries Array Never Cleared After Draw",
+      "description": "When drawRaffle() is called (even if implemented), the entries[] array \u2014 which tracks all participants \u2014 is never cleared or reset. This means that after a winner is drawn, the same set of addresses remains in the array. If the incentive is reactivated or the contract is reused, subsequent calls to drawRaffle() will draw from the same pool, potentially re-awarding the same winner or allowing front-runners to predict outcomes. This violates the expectation that a raffle is a one-time event per incentive period.",
+      "severity": "high",
+      "original_id": "4de553e4d7da55c6"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_087",
+      "title": "Unimplemented Critical Function: drawRaffle() Leaves Raffle Logic Incomplete",
+      "description": "The drawRaffle() function is declared as external and virtual but has no implementation. This means that for any instance using Strategy.RAFFLE, the incentive cannot be resolved. Users contribute to the raffle (via unspecified claim mechanism), but no winner can ever be selected. This renders the RAFFLE strategy completely non-functional, trapping the reward token in the contract indefinitely unless manually withdrawn by an admin \u2014 which is not part of the design.",
+      "severity": "critical",
+      "original_id": "56a3622a0adb251c"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_088",
+      "title": "Strategy Mismatch Risk: RAFFLE Strategy Has No Claim Mechanism Defined",
+      "description": "The contract defines Strategy.RAFFLE but does not implement any function for users to enter the raffle (e.g., claim() or enterRaffle()). Without an entry mechanism, users cannot participate in the raffle, making the RAFFLE strategy unusable. This creates a logical inconsistency: the enum exists, the state variable is settable, but the lifecycle to populate entries[] is missing. This is a type system integrity failure in the contract\u2019s design \u2014 the type system allows a state (RAFFLE) that cannot be meaningfully reached.",
+      "severity": "high",
+      "original_id": "632b86e25f157280"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_089",
+      "title": "No Validation of Strategy State Before drawRaffle() Execution",
+      "description": "The drawRaffle() function does not validate that strategy == Strategy.RAFFLE before attempting to draw. If an attacker or admin mistakenly sets strategy to POOL and calls drawRaffle(), the function will still execute (if implemented) and attempt to draw from entries[], which may be empty or improperly populated. This creates undefined behavior and potential reverts or incorrect winner selection. The function assumes the state is valid without checking, violating domain validation principles.",
+      "severity": "high",
+      "original_id": "18cc3bf7a8cc2da3"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_090",
+      "title": "Reward Calculation Mismatch Between Claim and Clawback Leads to Fund Theft",
+      "description": "The claim() function calculates the current reward using currentReward() and then updates state (lastClaimTime and currentReward) before transferring the reward. However, the clawback() function allows the owner to arbitrarily transfer any amount back to a target without validating it against the protocol's reward state. This enables the owner to clawback an amount greater than the current reward, effectively stealing funds from the incentive budget. The clawback function does not verify that the amount being returned matches the reward that was claimed, nor does it check against the currentReward() value or totalBudget. This creates a direct path for the owner to drain the contract's remaining balance by claiming a small reward, then clawing back the entire remaining balance as if it were a 'refund'.",
+      "severity": "critical",
+      "original_id": "99df55918da04d0d"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_091",
+      "title": "State Commitment Before External Call Creates Replayable Claim Vulnerability",
+      "description": "The claim() function increments the claims counter and marks the recipient as claimed before executing the external call to the points contract. If the external call fails (e.g., due to insufficient balance, reentrancy, or malicious behavior in the venue contract), the state changes are already committed, preventing the same user from claiming again even though they received no reward. This allows an attacker to exhaust the claim limit by triggering failed claims, denying legitimate users their rewards.",
+      "severity": "critical",
+      "original_id": "a7d48f253cea0d8f"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_092",
+      "title": "Missing User Protection Against Partial Execution and Reward Loss",
+      "description": "The claim() function performs an external call to an untrusted venue contract to distribute rewards, but provides no mechanism for the user to specify a minimum acceptable reward or to validate the outcome before committing state. If the venue contract reverts, executes incorrectly, or is malicious, the user loses their claim eligibility without receiving any reward. Users have no control over execution bounds, violating Pattern 1.",
+      "severity": "high",
+      "original_id": "669409712f1964aa"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_093",
+      "title": "Validation Timing Violation: State Updated Before External Call Validation",
+      "description": "The function updates state (claims++, claimed[claimTarget] = true) before validating the success of the external call to venue. This violates Pattern 2: validation (success of reward transfer) occurs after state change. If the external call fails, the user is permanently barred from claiming again, even though they received no reward. The validation of reward delivery happens too late.",
+      "severity": "high",
+      "original_id": "b499a6f28890ea85"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_094",
+      "title": "External Contract Interface Assumption Without Verification",
+      "description": "The contract assumes the venue contract implements a function with selector selector(address,uint256) that successfully transfers reward to claimTarget. However, no verification is performed that the venue contract actually executes the intended logic (e.g., it could be a dummy contract that accepts the call but does nothing). This violates Pattern 8: external system assumptions are not verified. An attacker could deploy a malicious venue contract that accepts the call but does not mint tokens, causing users to lose claims without reward.",
+      "severity": "high",
+      "original_id": "8d4d3ca44fdd8387"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_095",
+      "title": "Insecure Owner Authorization Check for Venue Contract",
+      "description": "The authorization check for the venue contract only verifies if address(this) is the owner or has role 1<<1. However, role 1<<1 is not defined or documented, and the contract assumes a specific role structure in the venue contract without verifying its actual implementation. This creates a risk that the venue contract uses a different role system (e.g., from a forked protocol), making the authorization check ineffective. An attacker could exploit this to claim rewards from unauthorized venues.",
+      "severity": "medium",
+      "original_id": "c6de24dfe57f2706"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_096",
+      "title": "Access Control Bypass on Reward Decay and Boost State Updates",
+      "description": "The claim() function updates critical economic state variables (cgdaParams.lastClaimTime and cgdaParams.currentReward) without validating that the claimed reward amount is actually available in the contract's balance. An attacker can call claim() multiple times in rapid succession, causing the reward to decay below the actual available balance, leading to underpayment of legitimate claimants and potential insolvency. The state variables are updated unconditionally before the transfer, enabling a timing attack where the attacker manipulates the decay logic to reduce future rewards while still extracting the full current reward.",
+      "severity": "high",
+      "original_id": "5631fce9b93ded6a"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_097",
+      "title": "Unit Mismatch in Reward Calculation: Time-Based Boost Uses Seconds, Not Hours",
+      "description": "The currentReward() function calculates reward boost using (timeSinceLastClaim * rewardBoost) / 3600, implying hourly increments. However, block.timestamp is in seconds, and the division by 3600 is mathematically correct for converting seconds to hours. The issue is not in the unit conversion itself, but in the representation boundary violation between the documented intent and the actual behavior: the contract's documentation states 'each hour adding rewardBoost', but the state variable cgdaParams.rewardBoost is defined as a per-hour boost amount. The problem arises because the rewardBoost value is set during initialization as a per-hour amount, but the calculation is applied continuously per second. This is not a unit error per se, but a representation boundary issue: the function returns a value that is mathematically correct for the given parameters, but the parameter interpretation is inconsistent with the documentation. However, a deeper issue exists: the rewardBoost is applied linearly over time, but the decay is applied discretely per claim. This creates a non-linear, unpredictable reward curve that can be exploited by attackers to front-run claims and manipulate the reward distribution. The real representation boundary violation is in the assumption that rewardBoost is a per-hour additive constant, but the calculation is continuous and the decay is discrete, leading to inconsistent economic behavior across time intervals.",
+      "severity": "high",
+      "original_id": "2f9cc290fce4d55e"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_098",
+      "title": "Data Collection Integrity Violation: Claimed Status Not Reset on Clawback",
+      "description": "The _isClaimable() function checks the claimed[recipient_] mapping to prevent double claims. However, the clawback() function transfers tokens back to a recipient without resetting the claimed[recipient_] flag. This means that if a clawback is performed (e.g., to correct an erroneous claim), the recipient is permanently marked as claimed and can never claim again, even if additional budget becomes available. This creates a data structure integrity violation where the claimed[] mapping becomes desynchronized with the actual claim eligibility. The claimed[] mapping is intended to prevent double claims, but it is not designed to be a permanent ban. This leads to permanent locking of user eligibility and loss of incentive utility.",
+      "severity": "high",
+      "original_id": "b75c0ff927f068af"
+    },
+    {
+      "id": "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09_tool_099",
+      "title": "State Commitment Before External Call Success Verification",
+      "description": "The contract increments the claim counter and marks the recipient as claimed before verifying the success of the external call to the points contract. If the external call reverts (e.g., due to insufficient balance, reentrancy, or forked behavior), the claim state is permanently committed, but the reward is not delivered. This results in a permanent loss of claimability for the recipient and potential loss of reward tokens if the external contract fails to distribute them.",
+      "severity": "critical",
+      "original_id": "6a2728db9dc5376a"
+    }
+  ],
+  "input_tokens": 28882,
+  "output_tokens": 1039,
+  "cached_tokens": 303
+}

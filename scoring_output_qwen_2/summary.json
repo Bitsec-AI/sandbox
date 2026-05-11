@@ -1,0 +1,522 @@
+{
+  "agent317": {
+    "projects_scored": 31,
+    "avg_detection_rate": 0.44916794674859184,
+    "avg_precision": 0.04009166841019476,
+    "avg_f1": 0.06612545806670364,
+    "total_true_positives": 39,
+    "total_expected": 113,
+    "total_found": 1465,
+    "total_false_positives": 1426,
+    "per_project": {
+      "code4rena_blackhole_2025_07": {
+        "detection_rate": 1.0,
+        "precision": 0.02,
+        "f1_score": 0.0392156862745098,
+        "true_positives": 2,
+        "total_expected": 2,
+        "total_found": 100
+      },
+      "cantina_minimal-delegation_2025_04": {
+        "detection_rate": 0.0,
+        "precision": 0.0,
+        "f1_score": 0.0,
+        "true_positives": 0,
+        "total_expected": 2,
+        "total_found": 15
+      },
+      "code4rena_forte-float128-solidity-library_2025_04": {
+        "detection_rate": 0.2,
+        "precision": 0.14285714285714285,
+        "f1_score": 0.16666666666666666,
+        "true_positives": 1,
+        "total_expected": 5,
+        "total_found": 7
+      },
+      "cantina_smart-contract-audit-of-tn-contracts_2025_08": {
+        "detection_rate": 0.3333333333333333,
+        "precision": 0.03225806451612903,
+        "f1_score": 0.0588235294117647,
+        "true_positives": 1,
+        "total_expected": 3,
+        "total_found": 31
+      },
+      "code4rena_iq-ai_2025_03": {
+        "detection_rate": 0.0,
+        "precision": 0.0,
+        "f1_score": 0.0,
+        "true_positives": 0,
+        "total_expected": 1,
+        "total_found": 23
+      },
+      "code4rena_cabal-liquid-staking-token_2025_05": {
+        "detection_rate": 0.0,
+        "precision": 0.0,
+        "f1_score": 0.0,
+        "true_positives": 0,
+        "total_expected": 1,
+        "total_found": 63
+      },
+      "code4rena_fenix-finance-invitational_2024_10": {
+        "detection_rate": 1.0,
+        "precision": 0.01,
+        "f1_score": 0.019801980198019802,
+        "true_positives": 1,
+        "total_expected": 1,
+        "total_found": 100
+      },
+      "code4rena_liquid-ron_2025_03": {
+        "detection_rate": 0.0,
+        "precision": 0.0,
+        "f1_score": 0.0,
+        "true_positives": 0,
+        "total_expected": 1,
+        "total_found": 14
+      },
+      "code4rena_next-generation_2025_05": {
+        "detection_rate": 1.0,
+        "precision": 0.047619047619047616,
+        "f1_score": 0.0909090909090909,
+        "true_positives": 1,
+        "total_expected": 1,
+        "total_found": 21
+      },
+      "code4rena_kinetiq_2025_07": {
+        "detection_rate": 0.0,
+        "precision": 0.0,
+        "f1_score": 0.0,
+        "true_positives": 0,
+        "total_expected": 3,
+        "total_found": 20
+      },
+      "code4rena_initia-move_2025_04": {
+        "detection_rate": 0.5,
+        "precision": 0.05263157894736842,
+        "f1_score": 0.09523809523809525,
+        "true_positives": 2,
+        "total_expected": 4,
+        "total_found": 38
+      },
+      "code4rena_lambowin_2025_02": {
+        "detection_rate": 0.5,
+        "precision": 0.13333333333333333,
+        "f1_score": 0.2105263157894737,
+        "true_positives": 2,
+        "total_expected": 4,
+        "total_found": 15
+      },
+      "code4rena_starknet-perpetual_2025_06": {
+        "detection_rate": 0.5,
+        "precision": 0.02631578947368421,
+        "f1_score": 0.05,
+        "true_positives": 1,
+        "total_expected": 2,
+        "total_found": 38
+      },
+      "code4rena_pump-science_2025_02": {
+        "detection_rate": 0.5,
+        "precision": 0.02857142857142857,
+        "f1_score": 0.05405405405405405,
+        "true_positives": 1,
+        "total_expected": 2,
+        "total_found": 35
+      },
+      "code4rena_coded-estate-invitational_2024_12": {
+        "detection_rate": 0.1111111111111111,
+        "precision": 0.07692307692307693,
+        "f1_score": 0.09090909090909093,
+        "true_positives": 1,
+        "total_expected": 9,
+        "total_found": 13
+      },
+      "code4rena_loopfi_2025_02": {
+        "detection_rate": 0.5,
+        "precision": 0.011627906976744186,
+        "f1_score": 0.022727272727272724,
+        "true_positives": 1,
+        "total_expected": 2,
+        "total_found": 86
+      },
+      "code4rena_secondswap_2025_02": {
+        "detection_rate": 0.6666666666666666,
+        "precision": 0.07407407407407407,
+        "f1_score": 0.13333333333333333,
+        "true_positives": 2,
+        "total_expected": 3,
+        "total_found": 27
+      },
+      "sherlock_crestal-network_2025_03": {
+        "detection_rate": 1.0,
+        "precision": 0.047619047619047616,
+        "f1_score": 0.0909090909090909,
+        "true_positives": 1,
+        "total_expected": 1,
+        "total_found": 21
+      },
+      "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09": {
+        "detection_rate": 1.0,
+        "precision": 0.03278688524590164,
+        "f1_score": 0.06349206349206349,
+        "true_positives": 2,
+        "total_expected": 2,
+        "total_found": 61
+      },
+      "sherlock_axion_2025_01": {
+        "detection_rate": 0.5,
+        "precision": 0.15384615384615385,
+        "f1_score": 0.23529411764705882,
+        "true_positives": 2,
+        "total_expected": 4,
+        "total_found": 13
+      },
+      "code4rena_superposition_2025_01": {
+        "detection_rate": 0.5,
+        "precision": 0.014084507042253521,
+        "f1_score": 0.027397260273972605,
+        "true_positives": 1,
+        "total_expected": 2,
+        "total_found": 71
+      },
+      "sherlock_idle-finance_2024_12": {
+        "detection_rate": 0.5,
+        "precision": 0.01,
+        "f1_score": 0.0196078431372549,
+        "true_positives": 1,
+        "total_expected": 2,
+        "total_found": 100
+      },
+      "sherlock_symmio_2025_03": {
+        "detection_rate": 1.0,
+        "precision": 0.058823529411764705,
+        "f1_score": 0.1111111111111111,
+        "true_positives": 1,
+        "total_expected": 1,
+        "total_found": 17
+      },
+      "sherlock_morph-l-2_2024_09": {
+        "detection_rate": 0.5,
+        "precision": 0.01,
+        "f1_score": 0.0196078431372549,
+        "true_positives": 1,
+        "total_expected": 2,
+        "total_found": 100
+      },
+      "sherlock_tally_2024_12": {
+        "detection_rate": 0.5,
+        "precision": 0.08333333333333333,
+        "f1_score": 0.14285714285714285,
+        "true_positives": 1,
+        "total_expected": 2,
+        "total_found": 12
+      },
+      "code4rena_bakerfi-invitational_2025_02": {
+        "detection_rate": 0.42857142857142855,
+        "precision": 0.03,
+        "f1_score": 0.056074766355140186,
+        "true_positives": 3,
+        "total_expected": 7,
+        "total_found": 100
+      },
+      "sherlock_oku_2024_12": {
+        "detection_rate": 0.125,
+        "precision": 0.03571428571428571,
+        "f1_score": 0.05555555555555556,
+        "true_positives": 1,
+        "total_expected": 8,
+        "total_found": 28
+      },
+      "code4rena_virtuals-protocol_2025_08": {
+        "detection_rate": 0.5,
+        "precision": 0.03,
+        "f1_score": 0.056603773584905655,
+        "true_positives": 3,
+        "total_expected": 6,
+        "total_found": 100
+      },
+      "sherlock_cork-protocol_2025_01": {
+        "detection_rate": 0.0,
+        "precision": 0.0,
+        "f1_score": 0.0,
+        "true_positives": 0,
+        "total_expected": 11,
+        "total_found": 25
+      },
+      "code4rena_mantra-dex_2025_03": {
+        "detection_rate": 0.4166666666666667,
+        "precision": 0.07042253521126761,
+        "f1_score": 0.12048192771084339,
+        "true_positives": 5,
+        "total_expected": 12,
+        "total_found": 71
+      },
+      "sherlock_perennial_v2_update_3_2024_08": {
+        "detection_rate": 0.14285714285714285,
+        "precision": 0.01,
+        "f1_score": 0.018691588785046728,
+        "true_positives": 1,
+        "total_expected": 7,
+        "total_found": 100
+      }
+    }
+  },
+  "agent794": {
+    "projects_scored": 31,
+    "avg_detection_rate": 0.44311781408555595,
+    "avg_precision": 0.015618484101704678,
+    "avg_f1": 0.029456792272270427,
+    "total_true_positives": 43,
+    "total_expected": 113,
+    "total_found": 2867,
+    "total_false_positives": 2824,
+    "per_project": {
+      "cantina_smart-contract-audit-of-tn-contracts_2025_08": {
+        "detection_rate": 0.6666666666666666,
+        "precision": 0.02,
+        "f1_score": 0.038834951456310676,
+        "true_positives": 2,
+        "total_expected": 3,
+        "total_found": 100
+      },
+      "cantina_minimal-delegation_2025_04": {
+        "detection_rate": 0.0,
+        "precision": 0.0,
+        "f1_score": 0.0,
+        "true_positives": 0,
+        "total_expected": 2,
+        "total_found": 100
+      },
+      "code4rena_fenix-finance-invitational_2024_10": {
+        "detection_rate": 1.0,
+        "precision": 0.014084507042253521,
+        "f1_score": 0.02777777777777778,
+        "true_positives": 1,
+        "total_expected": 1,
+        "total_found": 71
+      },
+      "code4rena_cabal-liquid-staking-token_2025_05": {
+        "detection_rate": 0.0,
+        "precision": 0.0,
+        "f1_score": 0.0,
+        "true_positives": 0,
+        "total_expected": 1,
+        "total_found": 100
+      },
+      "code4rena_forte-float128-solidity-library_2025_04": {
+        "detection_rate": 1.0,
+        "precision": 0.08928571428571429,
+        "f1_score": 0.1639344262295082,
+        "true_positives": 5,
+        "total_expected": 5,
+        "total_found": 56
+      },
+      "code4rena_iq-ai_2025_03": {
+        "detection_rate": 0.0,
+        "precision": 0.0,
+        "f1_score": 0.0,
+        "true_positives": 0,
+        "total_expected": 1,
+        "total_found": 100
+      },
+      "code4rena_blackhole_2025_07": {
+        "detection_rate": 0.0,
+        "precision": 0.0,
+        "f1_score": 0.0,
+        "true_positives": 0,
+        "total_expected": 2,
+        "total_found": 100
+      },
+      "code4rena_liquid-ron_2025_03": {
+        "detection_rate": 1.0,
+        "precision": 0.011904761904761904,
+        "f1_score": 0.023529411764705882,
+        "true_positives": 1,
+        "total_expected": 1,
+        "total_found": 84
+      },
+      "code4rena_lambowin_2025_02": {
+        "detection_rate": 0.75,
+        "precision": 0.03296703296703297,
+        "f1_score": 0.06315789473684211,
+        "true_positives": 3,
+        "total_expected": 4,
+        "total_found": 91
+      },
+      "code4rena_next-generation_2025_05": {
+        "detection_rate": 1.0,
+        "precision": 0.01,
+        "f1_score": 0.019801980198019802,
+        "true_positives": 1,
+        "total_expected": 1,
+        "total_found": 100
+      },
+      "code4rena_pump-science_2025_02": {
+        "detection_rate": 0.0,
+        "precision": 0.0,
+        "f1_score": 0.0,
+        "true_positives": 0,
+        "total_expected": 2,
+        "total_found": 9
+      },
+      "code4rena_loopfi_2025_02": {
+        "detection_rate": 0.0,
+        "precision": 0.0,
+        "f1_score": 0.0,
+        "true_positives": 0,
+        "total_expected": 2,
+        "total_found": 91
+      },
+      "code4rena_starknet-perpetual_2025_06": {
+        "detection_rate": 1.0,
+        "precision": 0.02,
+        "f1_score": 0.0392156862745098,
+        "true_positives": 2,
+        "total_expected": 2,
+        "total_found": 100
+      },
+      "code4rena_kinetiq_2025_07": {
+        "detection_rate": 0.0,
+        "precision": 0.0,
+        "f1_score": 0.0,
+        "true_positives": 0,
+        "total_expected": 3,
+        "total_found": 100
+      },
+      "code4rena_bakerfi-invitational_2025_02": {
+        "detection_rate": 0.2857142857142857,
+        "precision": 0.02,
+        "f1_score": 0.037383177570093455,
+        "true_positives": 2,
+        "total_expected": 7,
+        "total_found": 100
+      },
+      "code4rena_secondswap_2025_02": {
+        "detection_rate": 0.6666666666666666,
+        "precision": 0.02040816326530612,
+        "f1_score": 0.0396039603960396,
+        "true_positives": 2,
+        "total_expected": 3,
+        "total_found": 98
+      },
+      "code4rena_initia-move_2025_04": {
+        "detection_rate": 0.0,
+        "precision": 0.0,
+        "f1_score": 0.0,
+        "true_positives": 0,
+        "total_expected": 4,
+        "total_found": 100
+      },
+      "sherlock_crestal-network_2025_03": {
+        "detection_rate": 1.0,
+        "precision": 0.01,
+        "f1_score": 0.019801980198019802,
+        "true_positives": 1,
+        "total_expected": 1,
+        "total_found": 100
+      },
+      "sherlock_20240920---final---boost-core-incentive-protocol-audit-report_2024_09": {
+        "detection_rate": 0.5,
+        "precision": 0.01,
+        "f1_score": 0.0196078431372549,
+        "true_positives": 1,
+        "total_expected": 2,
+        "total_found": 100
+      },
+      "code4rena_superposition_2025_01": {
+        "detection_rate": 0.5,
+        "precision": 0.01,
+        "f1_score": 0.0196078431372549,
+        "true_positives": 1,
+        "total_expected": 2,
+        "total_found": 100
+      },
+      "code4rena_coded-estate-invitational_2024_12": {
+        "detection_rate": 0.4444444444444444,
+        "precision": 0.041237113402061855,
+        "f1_score": 0.07547169811320753,
+        "true_positives": 4,
+        "total_expected": 9,
+        "total_found": 97
+      },
+      "sherlock_idle-finance_2024_12": {
+        "detection_rate": 0.5,
+        "precision": 0.01,
+        "f1_score": 0.0196078431372549,
+        "true_positives": 1,
+        "total_expected": 2,
+        "total_found": 100
+      },
+      "sherlock_axion_2025_01": {
+        "detection_rate": 0.75,
+        "precision": 0.03,
+        "f1_score": 0.05769230769230769,
+        "true_positives": 3,
+        "total_expected": 4,
+        "total_found": 100
+      },
+      "sherlock_symmio_2025_03": {
+        "detection_rate": 1.0,
+        "precision": 0.01,
+        "f1_score": 0.019801980198019802,
+        "true_positives": 1,
+        "total_expected": 1,
+        "total_found": 100
+      },
+      "sherlock_morph-l-2_2024_09": {
+        "detection_rate": 0.0,
+        "precision": 0.0,
+        "f1_score": 0.0,
+        "true_positives": 0,
+        "total_expected": 2,
+        "total_found": 100
+      },
+      "sherlock_tally_2024_12": {
+        "detection_rate": 0.5,
+        "precision": 0.014285714285714285,
+        "f1_score": 0.02777777777777778,
+        "true_positives": 1,
+        "total_expected": 2,
+        "total_found": 70
+      },
+      "sherlock_oku_2024_12": {
+        "detection_rate": 0.5,
+        "precision": 0.04,
+        "f1_score": 0.07407407407407407,
+        "true_positives": 4,
+        "total_expected": 8,
+        "total_found": 100
+      },
+      "code4rena_virtuals-protocol_2025_08": {
+        "detection_rate": 0.0,
+        "precision": 0.0,
+        "f1_score": 0.0,
+        "true_positives": 0,
+        "total_expected": 6,
+        "total_found": 100
+      },
+      "code4rena_mantra-dex_2025_03": {
+        "detection_rate": 0.16666666666666666,
+        "precision": 0.02,
+        "f1_score": 0.03571428571428571,
+        "true_positives": 2,
+        "total_expected": 12,
+        "total_found": 100
+      },
+      "sherlock_perennial_v2_update_3_2024_08": {
+        "detection_rate": 0.14285714285714285,
+        "precision": 0.01,
+        "f1_score": 0.018691588785046728,
+        "true_positives": 1,
+        "total_expected": 7,
+        "total_found": 100
+      },
+      "sherlock_cork-protocol_2025_01": {
+        "detection_rate": 0.36363636363636365,
+        "precision": 0.04,
+        "f1_score": 0.07207207207207207,
+        "true_positives": 4,
+        "total_expected": 11,
+        "total_found": 100
+      }
+    }
+  }
+}

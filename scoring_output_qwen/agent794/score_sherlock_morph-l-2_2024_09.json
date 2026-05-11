@@ -1,0 +1,738 @@
+{
+  "project": "sherlock_morph-l-2_2024_09",
+  "agent": "agent794",
+  "status": "success",
+  "timestamp": "2026-04-09T11:47:19.266523",
+  "elapsed_seconds": 124.1,
+  "total_expected": 2,
+  "total_found": 100,
+  "true_positives": 0,
+  "false_negatives": 2,
+  "false_positives": 100,
+  "detection_rate": 0.0,
+  "precision": 0.0,
+  "f1_score": 0.0,
+  "matched_findings": [],
+  "missed_findings": [
+    {
+      "id": "sherlock_morph-l-2_2024_09_expected_000",
+      "title": "Incorrect implementation",
+      "description": "Source: https://github.com/sherlock-audit/2024-08-morphl\n\n**Vulnerability Detail:**\nInthe L 1 Reverse Custom Gateway, tokensareburnedduringdepositandmintedduring thefinalize Withdraw ERC 20 process. Forfaileddeposits, wehavetheon Drop Messagefunctiontoallowtheusertoretrieve theirtokens. function on Drop Message (bytescalldata _message ) external payable virtual only In Drop Context non Reentrant { ,\u2192 // _message should start with 0 x 8431 f 5 c 1 => finalize Deposit ERC 20 (address, address, address, address, uint 256, bytes) ,\u2192 require (bytes 4 (_message [0:4])==IL 2 ERC 20 Gateway .finalize Deposit ERC 20 .selector , \"invalid selector\" ); ,\u2192 // decode (token, receiver, amount) (address _token,, address _receiver ,, uint 256 _amount,)=abi.decode ( _message [4:], (address, address, address, address, uint 256, bytes) ); // do dome check for each custom gateway _before Drop Message (_token,_receiver ,_amount); IERC 20 Upgradeable (_token).safe Transfer (_receiver ,_amount); emit Refund ERC 20 (_token,_receiver ,_amount); } Itwillnotworknowbecauseinsteadofusingsafe Transferweshouldmintthetokensto _receiver. 3\n\n**Impact:**\nTheimpactishighbecausethedrop Messagefunctionalitywillneverwork, preventing theuserfromrecoveringtheirtokens. Tool used Manual Review\n\n**Recommendation:**\nMyrecommendationistouse IMorph ERC 20 Upgradeable (_token).mint (_receiver,_amount ) insteadoftransferringthetokens. References https://github.com/sherlock-audit/2024-08-morphl 2/blob/main/morph/contracts/con tracts/l 1/gateways/L 1 Reverse Custom Gateway.sol https://github.com/sherlock-audit/2024-08-morphl 2/blob/main/morph/contracts/con tracts/l 1/gateways/L 1 ERC 20 Gateway.sol#L 74-L 90",
+      "severity": "high",
+      "reason": "Not found"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_expected_001",
+      "title": "Attacker can freeze chain and",
+      "description": "Source: https://github.com/sherlock-audit/2024-08-morphl\n\n**Summary:**\nBecausethe prev State Root isnotvalidateduntilabatchisfinalized, acommittedbatch withamalicious prev State Root canbeusedtoboth (a) winchallengesagainsthonest challengersand (b) haltthechainsinceitwillbeapprovedbutbeunabletobefinalized. Root Cause In Rollup.sol , ifamaliciousbatchisproposed, theassumptionisthatthesequencerwho proposeditwilllosethechallenge, getslashed, andthechainwillbereset. These economicincentivespreventthechainfrombeingregularlyhalted. Thisisbasedontheassumptionthatasequencercanonlywinchallengesifthebatch theyproposedisvalid. However, thecheckthat prev State Root isactuallythe post State Root oftheprevious batchonlyhappensin finalize Batch () . Thischeckissufficienttopreventbatcheswith fakeprev State Root sfrombeingfinalized, butitdoesnotstopthesebatchesfrombeing committed. Thisallowsamalicioussequencertoproposeanybatchthatperformsavalidstate transactiononafake prev State Root . Inmostcases, achallengerwillattackthisinvalidbatch. However, itispossibleforthe sequencertoprovideavalidproofofthisstatetransitiontostealthehonestchallenger's depositandwinthechallenge. Inthecasethatthishappens, orthatnochallengeisperformed, thecommittedbatch willnotbeabletofinalizeddueto thefollowingcheck: require ( finalized State Roots [_batch Index -1]== Batch Header Codec V 0 .get Prev State Hash (mem Ptr), ,\u2192 5 \"incorrect previous state root\" ); Thiswillfreezethechainandnotallowanynewbatchestobefinalized, sincebatches arecommittedsequentiallyandmustbefinalizedsequentially. Internal Preconditions None External Preconditions None Attack Path 1. Attackerproposesabatchthatcontainsavalidstatetransitionfromafake prev St ate Root. 2. Ifanhonestchallengerchallengesthebatch, theattackerprovidesavalidproofof thestatetransitiontowinthechallengeandstealthechallenger'sdeposit. 3. Whetherornottheabovehappens, thechainisnowhalted, astheattacker'sbatch cannotbefinalized, andnootherbatchescanbefinalizedwithoutitbeing finalizedfirst. 4. Theattackerwillnotbeslashed, duetothefactthattheywonthechallenge.\n\n**Impact:**\n\u2022Anhonestchallengewilllosetheirdepositwhenadishonestsequencerbeatsthem inachallenge. \u2022Nonewbatcheswillbeabletobefinalized, sothechainwillhaltandhavetobe manuallyrolledbackbytheadmins. Po C N/A Mitigation Checkin commit Batch () thatprev State Root isequaltothe parent Batch Header.post State Root. 6",
+      "severity": "high",
+      "reason": "Not found"
+    }
+  ],
+  "undecided_findings": [],
+  "extra_findings": [
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_000",
+      "title": "Incorrect Unit Handling in `verify` Function Leads to Invalid Pairing Verification",
+      "description": "The `verify` function incorrectly interprets the `target_circuit_final_pair` array as containing 136-bit field elements, but then directly uses the raw values as G1 points in the second pairing check without any modular reduction or validation. This causes the second pairing check to operate on values that are not valid curve points, leading to a false positive verification. The first pairing check uses correctly computed points from `get_wx_wg`, but the second pairing check uses raw inputs from `target_circuit_final_pair` that may exceed the prime modulus p_mod = 21888242871839275222246405745257275088696311157297823662689037894645226208583, making them invalid elliptic curve points. Since the pairing function `pairing` only checks the algebraic validity of the pairing equation and does not validate point membership in the curve, an attacker can craft inputs that satisfy the pairing equation by accident, even when the proof is invalid. This breaks the core security invariant of the zk-SNARK: that only valid computations produce valid proofs.",
+      "severity": "critical",
+      "original_id": "8ef071cda62f5293"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_001",
+      "title": "Missing Access Control on verify() Allows Bypass of Validity Checks",
+      "description": "The verify() function is publicly callable and performs critical cryptographic validation of rollup proofs, but lacks any access control. This allows any user to call verify() with arbitrary inputs, potentially triggering expensive pairing operations without authorization. While the function itself does not directly manipulate economic state, it is the final gatekeeper for accepting rollup batches. If this function is called maliciously or repeatedly, it can drain gas from the system or be used in denial-of-service attacks. More critically, if this function is intended to be called only by a rollup sequencer or admin contract, its public accessibility breaks the access control boundary, allowing unauthorized parties to submit invalid or malformed proofs that could corrupt the state of the entire rollup system if integrated improperly. The function reads target_circuit_final_pair and proof, which are inputs to the cryptographic verification, but since it is public, any actor can trigger the expensive pairing checks without being authorized to propose a rollup batch.",
+      "severity": "high",
+      "original_id": "9560bab0882770e7"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_002",
+      "title": "Unit Mismatch in get_wx_wg() Return Values Used in Pairing",
+      "description": "The function get_wx_wg() returns four uint256 values (x0, y0, x1, y1) representing G1 points on the BN254 curve. These values are directly assigned to G1Point structs and passed to the pairing() function. However, the internal calculations in get_wx_wg() involve modular arithmetic over q_mod (the scalar field of the BN254 curve), but the pairing() function expects coordinates to be elements of the base field (p_mod), not the scalar field. The BN254 curve's G1 group is defined over the prime field of order p_mod = 21888242871839275222246405745257275088696311157297823662689037894645226208583, while q_mod is the order of the scalar field (used for exponents and scalars). The values computed in get_wx_wg() are scalar field elements (mod q_mod), but the pairing function expects base field elements (mod p_mod). This is a critical representation boundary violation: scalar field values are being misinterpreted as base field coordinates. This will cause the pairing() function to receive invalid curve points (outside the curve or not in the correct group), leading to either a revert (if the point is invalid) or a false positive (if by chance the point lies on the curve). In either case, the cryptographic soundness of the entire verification is broken. For example, if a valid proof produces x0 = q_mod - 1 (a valid scalar), this value is greater than p_mod (since q_mod > p_mod), and when interpreted as a base field coordinate, it is invalid and will cause the pairing precompile to revert, falsely rejecting valid proofs. Conversely, if a malicious actor crafts a proof such that the scalar field result happens to be less than p_mod, it may pass verification even if the proof is invalid, leading to a security breach.",
+      "severity": "critical",
+      "original_id": "f1c90a050a2cc934"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_003",
+      "title": "Desynchronized Loop Bounds in ecc_mul_add_pm() and fr_mul_add_pm()",
+      "description": "The functions ecc_mul_add_pm() and fr_mul_add_pm() iterate over 32 possible opcode bytes using a for loop with i += 2 (or i += 1), but the opcode is processed by shifting 8 bits at a time and checking for 0xff. However, the loop bounds are fixed at 32 iterations, while the actual number of valid operations depends on the opcode content. If the opcode contains 0xff early, the loop breaks, but the remaining iterations still process stale data from previous iterations. More critically, the functions use the same input array (input[0..4]) for accumulating results, and if the loop breaks early, the remaining iterations use the same input values from the previous iteration, leading to incorrect accumulation. For example, if opcode = 0xff000000, the loop breaks on the first iteration (i=0), but the function still processes i=1 to 31, each time using the same (a,b) values from the first byte (which was 0xff and should have broken). This causes the function to perform 31 additional, unintended ECC or field operations using garbage data. This is a data access integrity violation: the loop bound (32) is not synchronized with the actual data structure (opcode bytes). The result is that the final output (t0,t1) is corrupted, leading to incorrect G1 point accumulation. This causes the final pairing() check to fail even for valid proofs, or worse, to pass for invalid proofs if the garbage operations accidentally cancel out. For example, if a valid proof should result in a final point P, but due to 31 extra operations, the result becomes P + Q (where Q is a random point from garbage), the pairing will fail. This breaks the entire verification system.",
+      "severity": "critical",
+      "original_id": "d158c42d5e6077dc"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_004",
+      "title": "Incorrect Use of q_mod in ecc_mul_add() and ecc_add() for Curve Arithmetic",
+      "description": "The functions ecc_add() and ecc_mul() are implemented using precompiles (EIP-196/197) that expect coordinates to be in the base field (mod p_mod). However, the code uses q_mod (the scalar field modulus) in all modular arithmetic operations (fr_mul_add, fr_div, etc.) to compute intermediate values. For example, in get_wx_wg(), the function computes m[2] = squeeze_challenge(...) which returns a scalar field value mod q_mod, then uses this value as a scalar multiplier in ecc_mul() and ecc_mul_add(). This is correct. But later, when computing m[22] = addmod(proof[67], m[4], q_mod), the result is used as a G1 point coordinate in ecc_mul_add(). This is incorrect: m[4] is a scalar field element (from squeeze_challenge), but it is being used as a curve coordinate. The precompile expects coordinates to be in [0, p_mod), but m[4] is in [0, q_mod), and since q_mod > p_mod, many values of m[4] will be >= p_mod, making them invalid curve points. When passed to ecc_mul_add(), the precompile will either revert (if the point is invalid) or interpret the value modulo p_mod, which is a different value than intended. This causes the entire chain of ECC operations to be corrupted. For example, if m[4] = p_mod + 1, it becomes 1 in the base field, but the intended value was p_mod + 1 in the scalar field. This is a representation boundary violation: scalar field values are being used as base field coordinates. The result is that the final G1 points (x0,y0,x1,y1) are incorrect, causing the pairing() check to fail for valid proofs or pass for invalid ones.",
+      "severity": "critical",
+      "original_id": "f3ca7166c8dae292"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_005",
+      "title": "Inflation Rate Selection Logic Bug Causes Underpayment of Inflation Rewards",
+      "description": "The inflation rate selection in mintInflations() incorrectly uses the first rate in the array when no rate is found with effectiveEpochIndex <= current epoch, leading to inflation amounts being calculated at rate 0 instead of the correct rate. This results in permanent underpayment of inflation rewards to the DISTRIBUTE_CONTRACT, causing protocol insolvency over time as staking rewards are underfunded. The bug occurs because the rate lookup loop skips the first element (index 0) in the array and only updates rate if j > 0, but if no rate satisfies the condition, rate remains initialized to _epochInflationRates[0].rate, which may be outdated or zero if the array was initialized incorrectly. This is a critical accounting error that systematically underpays inflation over epochs.",
+      "severity": "critical",
+      "original_id": "c4bbcb4473c46392"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_006",
+      "title": "Inflation Minting Uses Stale Total Supply for Calculations",
+      "description": "The mintInflations function calculates inflation based on _totalSupply at the start of the loop, but _totalSupply increases during the loop as new tokens are minted. This causes each subsequent epoch's inflation to be calculated on an inflated supply, leading to exponential over-minting. The inflation rate is applied to a growing total supply within the same loop, violating the intended linear inflation model and creating a severe financial distortion.",
+      "severity": "critical",
+      "original_id": "8adcdaa44a03af61"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_007",
+      "title": "Missing User Protection in Verification Function Allows Forced Invalid Proofs to Pass",
+      "description": "The `verify` function in RollupVerifier performs cryptographic verification of zk-SNARK proofs but provides no mechanism for users to specify minimum acceptable verification bounds or reject partial/invalid execution. The function executes two pairing checks sequentially and requires both to pass. However, if an attacker can manipulate the input to cause one pairing to pass while the other fails, the function reverts only on the second failure, potentially allowing partial state commitment or front-running. Crucially, there is no user-controlled parameter to enforce that both checks must succeed atomically or to set a minimum confidence threshold. This violates Pattern 1 (User Control Over Execution Outcomes) because users cannot express acceptable execution bounds for critical verification operations.",
+      "severity": "high",
+      "original_id": "f96e505a09eddf10"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_008",
+      "title": "Validation Occurs After State Changes in Pairing Function",
+      "description": "The `pairing` function performs a staticcall to an external zk-SNARK verification contract (address 8) and only validates the result with `require(ret)` after the external call has already executed. This violates Pattern 2 (Validation Timing). If the external call reverts due to invalid input, gas exhaustion, or malicious behavior, the state change (the call itself) has already occurred, consuming gas and potentially triggering side effects. Although the function reverts afterward, the damage (gas cost, potential reentrancy, or side effects from the external call) is already committed. This allows attackers to drain gas from callers by submitting invalid proofs that trigger expensive but ultimately reverted external calls.",
+      "severity": "high",
+      "original_id": "ba06215f3f21afa3"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_009",
+      "title": "Inconsistent Use of q_mod and p_mod in Modular Arithmetic Causes Incorrect Validation",
+      "description": "The library uses two distinct prime moduli: `q_mod` (21888242871839275222246405745257275088548364400416034343698204186575808495617) and `p_mod` (21888242871839275222246405745257275088696311157297823662689037894645226208583). These correspond to the scalar field and curve order of BLS12-381. However, in `ecc_sub`, the function computes `p_mod - by` to negate a point, but `p_mod` is the curve order (not the scalar field). This is correct for elliptic curve arithmetic. However, in `fr_div`, `fr_mul_add`, and other field operations, `q_mod` is used \u2014 which is correct for scalar operations. The critical flaw is in `get_wx_wg`: the function performs ECC operations using `p_mod` implicitly (via `ecc_add`, `ecc_sub`, `ecc_mul`) but then uses `q_mod` for scalar arithmetic. This is correct per BLS12-381. However, in `fr_reverse`, the function reverses bytes of a 256-bit value and then computes `v = tmp % 0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001`, which is the order of the G1 group (r). This is correct. But in `squeeze_challenge`, the function hashes into an absorbing state and then uses `to_scalar(res)` to reduce the hash to a scalar in the field of order r. This is correct. The real issue is in `ecc_mul_add`: the function uses a single 5-element input array and performs two staticcalls (7 and 6) to modify the same array in-place. The first call (ecc_mul) modifies input[3] and input[4] (the result), then the second call (ecc_add) uses those modified values as inputs. This is correct. However, in `get_wx_wg`, the function calls `ecc_mul_add_pm` with opcode 281470825071501, which is a 48-bit value. The `ecc_mul_add_pm` function processes opcode in 8-bit chunks, shifting right by 8 bits each iteration. But the opcode is passed as a uint256, and the function only checks `a != 0xff` to break. This is correct. The actual vulnerability is in `fr_mul_add_mt` and `fr_mul_add_pm`: they use `m[a]` where `a` is derived from opcode & 0xff. But `m` is an array of 84 elements, and `a` can be any value from 0 to 255. If `a >= 84`, the function will access out-of-bounds memory in assembly, causing undefined behavior. This is a critical memory corruption vulnerability. For example, if opcode = 0x00000054 (a=84), then `m[84]` is accessed \u2014 but `m` has indices 0..83. This causes a memory read from outside the array, potentially leaking sensitive data or causing a revert. This violates Pattern 3 (Execution Boundaries) because the validation (a < 84) is never performed, and the execution (memory access) uses an unbounded index. This can lead to arbitrary memory reads, which may expose private keys or cause the contract to revert unpredictably.",
+      "severity": "critical",
+      "original_id": "7d687fad721cd391"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_010",
+      "title": "Out-of-Bounds Array Access in fr_mul_add_mt and fr_mul_add_pm Leads to Memory Corruption",
+      "description": "In `fr_mul_add_mt` and `fr_mul_add_pm`, the variable `a` is derived from `opcode & 0xff`, which can range from 0 to 255. The array `m` is declared as `uint256[84]`, so valid indices are 0 to 83. When `a >= 84`, the assembly code accesses `m[a]` with an out-of-bounds index. In Solidity, this does not revert \u2014 instead, it reads from memory outside the array, potentially accessing unrelated storage or calldata. For example, if `opcode = 0x00000054` (a=84), then `m[84]` reads from memory location `m + 84 * 32`, which is beyond the 84-element array. This memory may contain the next variable in the stack (e.g., `base`, `t`, or `proof`), leading to data leakage or incorrect arithmetic. In `fr_mul_add_pm`, if `a = 84`, then `proof[a]` is accessed \u2014 but `proof` is a calldata array of unknown length. If `proof.length <= 84`, this causes a revert due to invalid calldata access. If `proof.length > 84`, it reads arbitrary user-provided data as a scalar, corrupting the entire verification. This allows an attacker to craft a proof with opcode bits set to 84+ to read arbitrary calldata as if it were a proof element, potentially bypassing verification by feeding a valid-looking scalar. For example, if the attacker sets `opcode = 0x00000054` and places a valid G1 point in `proof[84]` and `proof[85]`, the verifier will use those as if they were part of the proof, allowing a forged proof to pass. This is a critical vulnerability because it enables arbitrary memory reads and bypasses cryptographic security.",
+      "severity": "critical",
+      "original_id": "fb1ac542544e17d5"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_011",
+      "title": "Incorrect Use of p_mod in ecc_sub Leads to Invalid Point Arithmetic",
+      "description": "In `ecc_sub`, the function computes `ecc_add(ax, ay, bx, p_mod - by)`. This assumes that negating a point on the curve is equivalent to negating the y-coordinate modulo p_mod. However, in BLS12-381, the curve is defined over the field F_p, and negation of a point (x,y) is (x, -y mod p). But `p_mod` is defined as the curve order (the scalar field), not the base field. The base field modulus for BLS12-381 is p = 0x1a0111ea397fe69a4b1ba7b6434bacd764774b84f38512bf6730d2a0f6b0f6241eabfffeb153ffffb9feffffffffaaab, which is approximately 2^381. The value `p_mod` defined in the code (21888242871839275222246405745257275088696311157297823662689037894645226208583) is actually the order of the G1 group (r), not the base field modulus. The base field modulus is much larger (~2^381). Therefore, `p_mod - by` is computed modulo r, not modulo the base field p. This is mathematically incorrect. The correct negation should be `p_base - by`, where p_base is the base field modulus. Using r instead of p_base means that the negated y-coordinate is not a valid point on the curve, leading to incorrect point addition and subtraction. This causes the entire verification to fail or pass incorrectly. For example, if a valid proof requires computing (x1,y1) - (x2,y2), the function computes (x1,y1) + (x2, r - y2), which is not the same as (x1,y1) - (x2,y2) on the curve. This results in an incorrect final point, causing the pairing check to fail even for valid proofs, or worse, pass for invalid ones if the error cancels out. This violates Pattern 3 (Execution Boundaries) because the arithmetic is inconsistent with the cryptographic curve definition, leading to incorrect validation outcomes.",
+      "severity": "critical",
+      "original_id": "e66f1141cae83a8d"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_012",
+      "title": "State Synchronization Failure in get_wx_wg Due to Reused Variable m[2]",
+      "description": "In `get_wx_wg`, the variable `m[2]` is used to store a challenge value from `squeeze_challenge` at line 478. Later, at line 504, `m[2]` is overwritten with `mulmod(0, m[2], q_mod)`, setting it to 0. Then, at line 505, `m[24]` is computed as `addmod(m[2], m[24], q_mod)`, which becomes `addmod(0, m[24], q_mod) = m[24]`. This is correct. However, at line 506, `m[25]` is computed as `addmod(m[2], proof[83], q_mod) = addmod(0, proof[83], q_mod) = proof[83]`. This is also correct. But later, at line 580, `m[2]` is used again in `t0 = (fr_mul_add(m[79], m[2], m[81]))`. At this point, `m[2]` is 0, but it was originally a challenge value used in the computation of `m[81]` and other terms. The challenge value `m[2]` was used to compute `m[24]` and `m[25]`, but then overwritten to 0. Later, when `m[79]` and `m[81]` are combined with `m[2]`, the value 0 is used instead of the original challenge. This breaks the cryptographic proof because `m[2]` is a public challenge that should remain constant throughout the computation. The reuse of `m[2]` as a temporary variable without preserving its original value breaks the algebraic structure of the proof. This causes the final verification to fail for valid proofs. For example, if the original `m[2]` was 0x1234, and `m[81]` was computed as `mulmod(m[79], m[2], q_mod)`, then later `t0 = fr_mul_add(m[79], m[2], m[81])` becomes `fr_mul_add(m[79], 0, m[81]) = m[81]`, which is not equal to `m[79] * 0x1234 + m[81]`. This causes the final `m[2]` to be incorrect, leading to a failed verification. This violates Pattern 6 (State Synchronization) because a state variable is reused without preserving its semantic value, breaking the cryptographic invariant.",
+      "severity": "high",
+      "original_id": "c0be7fcede6214a1"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_013",
+      "title": "Missing Access Control on Public Verification Function",
+      "description": "The `verify` function is declared as `public` and performs critical cryptographic verification of zk-SNARK proofs that determine the validity of a rollup batch. However, it has no access control modifiers (e.g., `onlyOwner`, `onlyAdmin`). This violates Pattern 4 (Access Control in Interfaces). Any external actor can call `verify` with arbitrary inputs, potentially triggering expensive pairing checks and consuming gas. While this does not directly steal funds, it enables denial-of-service attacks by flooding the contract with invalid proofs, causing high gas costs for legitimate users or sequencers. In a rollup system, this function is likely called by a sequencer or aggregator \u2014 but without access control, any user can spam it. The interface does not indicate any restrictions, and the function is not protected by any modifier. This is a high-severity access control issue because it allows unbounded external interaction with a computationally expensive function.",
+      "severity": "high",
+      "original_id": "79863460ec8db337"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_014",
+      "title": "Automatic Processing of Withdrawal Funds via Default Receive Function",
+      "description": "The MorphToken contract has no receive or fallback function, but it is an ERC20 token that can receive ETH via external contracts or bridges. However, the contract does not distinguish between ETH sent as user deposits versus ETH returned from external systems (e.g., L2 staking or distribute contracts). Since the contract has no logic to handle ETH, any ETH sent to it is permanently locked. This creates a critical vulnerability where system-generated refunds or withdrawal returns from external contracts (e.g., L2Staking) can be sent to MorphToken, permanently locking funds because the contract cannot process or return them. The contract's only interaction with external systems is via minting tokens to DISTRIBUTE_CONTRACT, but if DISTRIBUTE_CONTRACT or L2_STAKING_CONTRACT sends ETH back to MorphToken (e.g., as a refund, fee, or error return), those ETH are irrecoverable.",
+      "severity": "critical",
+      "original_id": "8ff08a4364a2031a"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_015",
+      "title": "Inflation Rate Calculation Ignores Sign Bit and Allows Zero/Invalid Inputs",
+      "description": "The inflation calculation in mintInflations() multiplies totalSupply by a rate without validating that the rate is positive. The rate is stored as a uint256, but if a malicious actor sets rate=0 (which is allowed), or if the rate is interpreted as a signed value in external systems, the multiplication yields zero inflation. More critically, the code does not validate that the rate is within a mathematically valid domain for inflation (i.e., rate > 0). This leads to silent truncation of inflation to zero for any epoch with rate=0, even if the intent was non-zero inflation. The mathematical domain for inflation rate should be (0, \u221e), but the contract accepts 0, producing mathematically invalid (zero) output without error.",
+      "severity": "high",
+      "original_id": "cbe3b09aacc63145"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_016",
+      "title": "Inflation Minting Can Be Stalled Indefinitely Due to Unbounded Loop and State Commitment Timing",
+      "description": "The mintInflations() function loops from _inflationMintedEpochs to upToEpochIndex, minting inflation for each epoch. However, if the loop is interrupted (e.g., by gas limit exhaustion), the state variable _inflationMintedEpochs is only updated after the entire loop completes. This means that if the transaction fails mid-loop (e.g., due to high epoch range or low gas), no inflation is minted, but the caller cannot retry because _inflationMintedEpochs remains unchanged \u2014 yet the caller cannot pass the same upToEpochIndex again because the require(upToEpochIndex >= _inflationMintedEpochs) condition will pass, but the loop will again fail. This creates a state where inflation minting is permanently stuck for epochs beyond the gas-limited point, even though the system is designed to allow incremental minting. This is a lifecycle issue: state commitment (_inflationMintedEpochs) occurs after operation completion, making partial success impossible and failure irreversible.",
+      "severity": "high",
+      "original_id": "2f29d598206def4e"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_017",
+      "title": "Inflation Rate Lookup Uses Linear Search with No Bounds Check on Array Index",
+      "description": "In mintInflations(), the rate for epoch i is found by iterating backward through _epochInflationRates. However, the loop condition 'j > 0' and access '_epochInflationRates[j].effectiveEpochIndex' assumes the array has at least one element. If _epochInflationRates.length == 0 (which is impossible after initialize() but possible in a corrupted state or during upgrade), accessing _epochInflationRates[j] with j = -1 (due to underflow in j > 0 loop) would cause a revert. More critically, the loop does not validate that j is within bounds before accessing the array. While Solidity 0.8+ has bounds checking, the logic is still vulnerable if the array is manipulated externally (e.g., via a malicious proxy or during upgrade). The rate selection logic assumes at least one rate exists, but the code does not validate _epochInflationRates.length > 0 before the loop. This is a type system integrity issue because the array's semantic meaning (ordered rate schedule) is not enforced at runtime, leading to undefined behavior.",
+      "severity": "medium",
+      "original_id": "ee66d1df0ae25382"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_018",
+      "title": "Inflation Rate Update Allows Rate to Be Set to Zero, Breaking Economic Model",
+      "description": "The updateRate() function allows setting a new rate to zero (uint256) without validation. The requirement only checks that the new rate is different from the previous one and that the effective epoch is greater. A rate of 0 is mathematically invalid for inflation (as it implies no new tokens will ever be minted), yet it is accepted. This breaks the economic model: if the rate is set to 0, then all future inflation minting will be 0, permanently freezing the token supply. This is a domain validation failure: the mathematical domain for inflation rate is (0, \u221e), but the contract accepts 0 silently. No error is thrown, and the system continues as if valid. This can be exploited by a malicious owner to halt inflation and devalue the token.",
+      "severity": "high",
+      "original_id": "d31172bd564785b4"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_019",
+      "title": "Inflation Amount Calculation Uses Integer Division Without Rounding, Leading to Permanent Precision Loss",
+      "description": "The inflation amount is calculated as (_totalSupply * rate) / PRECISION. Since all values are uint256, integer division truncates any fractional part. For example, if _totalSupply = 1e18 and rate = 1e15 (0.01%), then increment = (1e18 * 1e15) / 1e16 = 1e17, which is correct. But if _totalSupply = 1e18 and rate = 1e15 - 1 (slightly less), then increment = (1e18 * (1e15 - 1)) / 1e16 = (1e33 - 1e18) / 1e16 = 1e17 - 100, which truncates 100 tokens. Over many epochs, this truncation accumulates. For example, over 10,000 epochs with 0.01% inflation, 100 tokens per epoch are lost \u2192 1,000,000 tokens permanently lost. This is a precision boundary issue: the system uses fixed-point arithmetic but does not round or compensate for truncation, leading to irreversible loss of value to the inflation pool.",
+      "severity": "high",
+      "original_id": "e7403600c5c2fd6e"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_020",
+      "title": "Mathematical Domain Violation in fr_pow with Zero Input",
+      "description": "The fr_pow function computes modular exponentiation without validating that the base 'a' is non-zero. When a=0 and power>0, the result is 0, which is mathematically correct, but when a=0 and power=0, 0^0 is undefined. The function silently returns 1 (due to assembly returning result[0] which is uninitialized for a=0, power=0), producing a mathematically invalid result without error.",
+      "severity": "high",
+      "original_id": "004032dcacd55b67"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_021",
+      "title": "Raw Bit Comparison in Pairing Verification Without Normalization",
+      "description": "The pairing function compares G1 and G2 points by raw bit representation without normalizing elliptic curve points. Elliptic curve points have multiple valid representations (e.g., affine vs projective, different point at infinity encodings). If two points are mathematically equal but encoded differently (e.g., one normalized, one not), the raw bit comparison will fail, causing valid proofs to be rejected.",
+      "severity": "high",
+      "original_id": "349edd118586601a"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_022",
+      "title": "Gas-Dependent Subcall Failure in _ecc_mul_add Leading to Silent State Corruption",
+      "description": "The _ecc_mul_add function uses staticcall with remaining gas, which may fail silently if gas is insufficient (EVM's 63/64 rule). Since the function does not check the return value of the second staticcall (for ecc_add), a gas exhaustion in the second call causes the function to proceed as if successful, returning corrupted (input[3], input[4]) values. This leads to invalid ECC operations in ecc_mul_add and ecc_mul_add_pm, causing verification to pass with invalid proofs.",
+      "severity": "critical",
+      "original_id": "74f162c56b88409b"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_023",
+      "title": "Insecure Hash Challenge Generation with Non-Atomic Absorbing State Update",
+      "description": "The squeeze_challenge function modifies the absorbing array in-place and uses it for subsequent hash computations. However, the function does not atomically commit the hash result before reusing the array. An attacker can manipulate the proof to cause a reentrancy-like state corruption if the hash function is called recursively or if the contract is called in a context where state is shared (e.g., via delegatecall). This breaks the Fiat-Shamir heuristic and allows forging valid proofs.",
+      "severity": "high",
+      "original_id": "79b77a8acbdc2815"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_024",
+      "title": "Interface Incompatibility in ecc_mul_add with External zk-SNARK Backend",
+      "description": "The ecc_mul_add function assumes the precompile at address 7 supports 3 inputs (px, py, s) and returns 2 outputs (x, y). However, many zk-SNARK backends (e.g., Ethereum's precompile v2) expect 4 inputs (px, py, s, qx, qy) for point multiplication and addition. The function incorrectly passes only 3 inputs, causing ABI encoding mismatch and silent revert in the precompile, leading to incorrect results or transaction failure.",
+      "severity": "critical",
+      "original_id": "ce3c28f99e58dc31"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_025",
+      "title": "Fork Behavioral Divergence in get_verify_circuit_g2_s/n vs get_target_circuit_g2_s/n",
+      "description": "The functions get_verify_circuit_g2_s/n and get_target_circuit_g2_s/n return hardcoded G2 points. However, in forked zk-SNARK systems (e.g., zkSync, Starknet), these points are often dynamically generated or derived from a trusted setup ceremony. Hardcoding them assumes the original setup (e.g., Powers of Tau) is unchanged. If the target chain uses a different trusted setup, the pairing verification will always fail, rendering the entire verification system broken and funds unclaimable.",
+      "severity": "critical",
+      "original_id": "5014e8d193204303"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_026",
+      "title": "Silent Truncation in instances[1] and instances[3] Bit Packing",
+      "description": "The instances[1] and instances[3] values are packed by shifting and ORing with a single bit: (target_circuit_final_pair[0] >> 136) + ((target_circuit_final_pair[1] & 1) << 136). This truncates the upper bits of target_circuit_final_pair[1] beyond the 137th bit. If target_circuit_final_pair[1] contains values > 2^137, the truncation silently corrupts the input, leading to invalid circuit evaluation and potential bypass of verification.",
+      "severity": "high",
+      "original_id": "cc29251d67861fd8"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_027",
+      "title": "Inflation Rate Selection Logic Allows Manipulation of Minted Inflation Amounts",
+      "description": "The mintInflations function selects the inflation rate for each epoch by iterating backward through _epochInflationRates and picking the first rate whose effectiveEpochIndex <= current epoch. However, if the array is manipulated to have multiple entries with the same effectiveEpochIndex, the function will pick the *last* one added (due to backward iteration), which may be an arbitrarily low rate set by an attacker. This allows an attacker to reduce the inflation minted to DISTRIBUTE_CONTRACT by inserting a low-rate entry just before minting, effectively stealing inflation rewards intended for stakers. The function lacks access control to prevent rate insertion by non-owners, and the rate selection logic is vulnerable to ordering manipulation.",
+      "severity": "critical",
+      "original_id": "314f473bb07244ea"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_028",
+      "title": "Inflation Rate Update Allows Timing Attack to Reduce Future Inflation",
+      "description": "The updateRate function allows any owner to insert a new inflation rate with an effectiveEpochIndex. An attacker who is the owner can insert a new rate with a very low value (e.g., 0) and set effectiveEpochIndex to the next epoch. Then, when mintInflations is called by the RecordContract, it will use this low rate for all future epochs until a higher rate is set. Since mintInflations is called by a separate contract (RecordContract) and not atomically with rate updates, the attacker can delay the minting until after inserting the low rate, effectively reducing inflation for all future epochs. This is a classic timing attack on economic state updates without atomicity or rate locking.",
+      "severity": "high",
+      "original_id": "7a84235152c2f50e"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_029",
+      "title": "Inflation Minting Uses TotalSupply Without Snapshots, Leading to Inflation Inflation",
+      "description": "The mintInflations function calculates inflation as (_totalSupply * rate) / PRECISION. However, _totalSupply is a live variable that changes during the minting loop as each increment is minted to DISTRIBUTE_CONTRACT. This means that each subsequent inflation mint increases the total supply used for the next epoch's calculation, creating a compounding effect. For example, if totalSupply starts at 1,000,000 and rate is 1e16 (100%), the first epoch mints 1,000,000, making totalSupply 2,000,000. The next epoch then mints 2,000,000, not 1,000,000. This leads to exponential inflation far beyond the intended rate. The function should use a snapshot of totalSupply at the start of the loop, not the live value.",
+      "severity": "critical",
+      "original_id": "71194ce016a3f617"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_030",
+      "title": "Epoch Inflation Rate Lookup Fails for Gaps and Missing Entries",
+      "description": "The rate lookup loop assumes that _epochInflationRates is densely populated with increasing effectiveEpochIndex values. However, if an owner skips an epoch index (e.g., sets rate for epoch 5, then epoch 10), the loop will incorrectly assign the rate for epoch 6-9 as the rate from epoch 5, which is correct. But if the array is modified to have a rate with effectiveEpochIndex = 1000 and then a new rate is inserted with effectiveEpochIndex = 10, the backward iteration will pick the rate for epoch 10 for all epochs 10-999, which is correct. However, if the array is empty or has no entry <= current epoch, the loop defaults to _epochInflationRates[0].rate, which may be an outdated rate from epoch 0. This is not inherently wrong, but if the first rate is set to 0 and no subsequent rate is ever set, all inflation becomes 0. The vulnerability is that there is no validation that _epochInflationRates[0].effectiveEpochIndex == 0, and if it is not, then epochs 0 to first effectiveEpochIndex-1 will use an incorrect rate (the first rate in array, which may be meant for a later epoch). This leads to under-minting inflation for early epochs.",
+      "severity": "high",
+      "original_id": "964bf84a1c197f7c"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_031",
+      "title": "Incorrect Ranking Update in _updateSequencerSet Leads to Incorrect Sequencer Set and Reward Distribution",
+      "description": "The _updateSequencerSet function assumes that stakerAddresses is sorted by delegation amount in descending order, but this is only guaranteed after startReward() is called. Before rewardStarted is true, stakerAddresses is ordered by insertion order, not by delegation amount. When addStaker() or removeStakers() are called before rewardStarted, and sequencerSetMaxSize is exceeded, _updateSequencerSet() is called and selects the first sequencerSetMaxSize addresses from stakerAddresses \u2014 which are not the top delegators. This results in the wrong set of sequencers being selected, leading to incorrect reward distribution and potential loss of staking incentives for top delegators. The issue is compounded because the ranking system (stakerRankings) is updated based on insertion order, not delegation amount, until startReward() is called. This creates a permanent desynchronization between the actual delegation amounts and the sequencer set, which cannot be corrected without restarting the protocol.",
+      "severity": "critical",
+      "original_id": "2a68f928a563283c"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_032",
+      "title": "Undelegation Claiming Loop Allows Reentrancy and Partial Claiming Without Revert",
+      "description": "The claimUndelegation() function iterates through undelegations and removes claimed entries by swapping with the last element and popping. However, if the internal _transfer() call to send Morph tokens fails (e.g., due to insufficient balance or external contract revert), the function does not revert \u2014 it simply skips the remaining undelegations. This allows an attacker to trigger a partial claim, consuming the claim opportunity for some undelegations while leaving others unclaimed. Since undelegations are removed from the array during the loop, the unclaimed entries are permanently lost. The function does not use a reentrancy guard on the external transfer, and the state update (removal from undelegations array) occurs before the transfer, creating a dangerous state commitment before external call. This results in permanent loss of funds for the delegator.",
+      "severity": "critical",
+      "original_id": "642f11f2a1b83b9f"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_033",
+      "title": "Incorrect Ranking Update in delegateStake() After Delegation Causes Incorrect Sequencer Set Selection",
+      "description": "In delegateStake(), after a delegation increases a staker's balance, the code attempts to bubble up the staker's position in stakerAddresses if rewardStarted is true and beforeRanking > 1. However, the loop only compares adjacent elements and does not guarantee the staker reaches its correct position. For example, if a staker with ranking 5 (delegation: 100) receives a delegation of 1000, making their total 1100, and the staker at ranking 1 has 200, ranking 2 has 300, ranking 3 has 400, ranking 4 has 500, the bubble-up loop will only swap with ranking 4 (500), then ranking 3 (400), etc., but will stop at ranking 2 (300) because 1100 > 300, but then 1100 is not compared to 200. The staker ends up at ranking 3, not ranking 1. This causes _updateSequencerSet() to select the wrong top candidates. If sequencerSetMaxSize is 3, the staker with 1100 should be in the set, but if they are incorrectly ranked 3rd, they are included \u2014 but if they were incorrectly ranked 4th, they would be excluded. This leads to incorrect sequencer selection and misallocation of rewards.",
+      "severity": "high",
+      "original_id": "c5ef4856c15ecd60"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_034",
+      "title": "UndelegateLockEpochs Applied Incorrectly When Staker is Removed, Leading to Immediate Unlock and Fund Theft",
+      "description": "In undelegateStake(), if a staker is removed (stakerRankings[delegatee] == 0), the unlockEpoch is set to effectiveEpoch (current epoch + 1). However, if the staker is removed after a delegation but before the undelegation is claimed, the undelegation becomes claimable immediately in the next epoch \u2014 even though the staker is no longer active. An attacker can delegate to a staker, then have the staker removed via L1 sync (removeStakers), and immediately claim the undelegation in the next epoch. This bypasses the intended lock period. For example: if undelegateLockEpochs = 3, but the staker is removed, the unlockEpoch becomes effectiveEpoch = 5, so the undelegation can be claimed at epoch 5, even though the lock should have been until epoch 8. This allows attackers to effectively bypass the lock mechanism and withdraw funds immediately after staker removal, undermining the protocol's security model.",
+      "severity": "high",
+      "original_id": "0f1c50ffeefc4a37"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_035",
+      "title": "Incorrect Use of candidateNumber in Ranking Updates Causes Permanent Desynchronization",
+      "description": "candidateNumber is incremented when a staker's totalDelegationAmount goes from 0 to >0, and decremented when it goes from >0 to 0. However, candidateNumber is used in undelegateStake() to determine the range for ranking updates: for (uint256 i = stakerRankings[delegatee] - 1; i < candidateNumber - 1; i++). But candidateNumber does not reflect the number of active stakers with delegation \u2014 it reflects the number of stakers that ever had delegation. If a staker is removed (via removeStakers), candidateNumber is decremented, but stakerAddresses still contains the removed staker's address until it is popped. This causes the ranking update loop to iterate over invalid indices. For example, if 10 stakers exist, 5 are removed, candidateNumber becomes 5, but stakerAddresses still has 10 elements. The loop tries to update rankings from index 0 to 4, but the removed stakers' addresses are still in stakerAddresses at indices 5-9, causing the ranking updates to corrupt the rankings of active stakers. This leads to incorrect sequencer set selection and reward distribution.",
+      "severity": "high",
+      "original_id": "4700a2909db4350c"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_036",
+      "title": "Reward Start Sorting Algorithm is Incomplete and Non-Deterministic",
+      "description": "In startReward(), the code attempts to sort stakerAddresses by delegation amount using a bubble sort variant, but it only performs a single pass from index 1 to end. This is insufficient to fully sort the array. For example, if the array is [A:100, B:50, C:200], after the first iteration: A:100, C:200, B:50 \u2014 B is still at the end. The algorithm does not guarantee the array is sorted. This means _updateSequencerSet() will select the first sequencerSetMaxSize addresses from a partially sorted list, which may not be the top delegators. This leads to incorrect sequencer selection and misallocation of rewards. The sorting algorithm must be a full bubble sort or use a proper sorting method. This is a critical flaw because the entire reward distribution mechanism depends on correct ranking.",
+      "severity": "critical",
+      "original_id": "043068049116c543"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_037",
+      "title": "claimReward() for Empty Delegatee Uses claimAll() Without Access Control, Allowing Unauthorized Claiming",
+      "description": "In claimReward(), if delegatee == address(0), it calls IDistribute(DISTRIBUTE_CONTRACT).claimAll(_msgSender(), targetEpochIndex). However, claimAll() is not restricted to the delegator's own claims \u2014 it may allow claiming rewards for any staker if the distribute contract does not enforce ownership. Even if distribute contract enforces it, the L2Staking contract exposes a public function that allows any user to trigger claimAll() for any delegator by passing address(0). This creates a potential front-running or griefing attack: an attacker can call claimReward(address(0), X) for a victim's address, consuming the victim's claimable reward epoch and forcing them to wait for the next epoch. This is a denial-of-service vector on reward claiming. The function should require that if delegatee == address(0), then _msgSender() must be the delegator whose rewards are being claimed \u2014 but it does not verify this. The contract assumes the distribute contract will enforce ownership, but this is an unsafe delegation of access control.",
+      "severity": "high",
+      "original_id": "006d07da163ab97d"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_038",
+      "title": "StakerRankings and stakerAddresses Desynchronization After removeStakers() Causes Incorrect Sequencer Set",
+      "description": "In removeStakers(), when a staker is removed, the code shifts all subsequent stakerAddresses elements down and decrements their stakerRankings. However, if multiple stakers are removed in one call, and one of them has a ranking higher than another, the shifting logic can cause rank desynchronization. For example: stakerAddresses = [A(r1), B(r2), C(r3), D(r4)]; remove [B, D]. After removing B: [A(r1), C(r2), D(r3)]; then removing D: [A(r1), C(r2)]. But stakerRankings[D] is deleted, but C's ranking was decremented twice: once when B was removed (r3->r2), then again when D was removed (r2->r1). But C was never at r3 after B was removed \u2014 it was at r2. The code decrements all ranks after the removed index, but if multiple removals occur, the same staker's rank is decremented multiple times, even if they were not after all removed addresses. This causes stakerRankings to become incorrect, leading to _updateSequencerSet() selecting the wrong top stakers.",
+      "severity": "high",
+      "original_id": "bd08a3701bcc67f0"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_039",
+      "title": "Desynchronized Staker Ranking and Sequencer Set Update Due to Incomplete Sorting in _updateSequencerSet",
+      "description": "The _updateSequencerSet function assumes stakerAddresses is sorted by delegation amount when selecting the top sequencers, but sorting is only performed during startReward() and delegateStake()/undelegateStake() under limited conditions. This creates a desynchronization between the actual delegation rankings and the order of stakerAddresses, causing the sequencer set to be incorrectly populated. Attackers can exploit this by making small, strategically timed delegations that do not trigger re-sorting, causing high-delegation stakers to be excluded from the sequencer set while low-delegation stakers are included. This results in misallocation of block production rewards and fee revenue, effectively stealing economic value from legitimate stakers.",
+      "severity": "critical",
+      "original_id": "5701eb6d63cb6d3c"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_040",
+      "title": "Unrestricted Access to updateSequencerSetMaxSize Allows Fee Manipulation via Sequencer Set Reduction",
+      "description": "The updateSequencerSetMaxSize function is only protected by onlyOwner, but it directly reduces latestSequencerSetSize without validating that the new size is compatible with current delegation rankings. An owner can maliciously reduce sequencerSetMaxSize to a value below the number of top stakers, triggering _updateSequencerSet() to shrink the sequencer set. This causes high-delegation stakers to be removed from the sequencer set, denying them block rewards and commission eligibility. Since reward distribution is proportional to sequencer status, this manipulation redirects revenue to lower-delegation stakers still in the set, enabling a targeted theft of future rewards. The attack requires no external interaction and can be executed at any time after initialization.",
+      "severity": "high",
+      "original_id": "22602f0005bb6e0f"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_041",
+      "title": "Unit Mismatch in claimReward and claimCommission Interfaces with IDistribute Contract",
+      "description": "The claimReward and claimCommission functions pass stakerDelegations and delegations values to IDistribute without converting them to the expected reward unit representation. IDistribute expects reward amounts in raw token units (1e18), but the L2Staking contract passes delegation amounts that are already in raw units. However, IDistribute may internally normalize these values for share calculations (e.g., dividing by total stake). If IDistribute expects normalized values (e.g., scaled by 1e18) but receives raw values, it will miscalculate reward shares by a factor of 1e18, causing delegators to receive 0 reward. Conversely, if IDistribute expects raw values but receives normalized, it overpays by 1e18x. The contract does not document or enforce unit conversion, and IDistribute's interface is not verified for compatibility, creating a high risk of catastrophic reward miscalculation.",
+      "severity": "high",
+      "original_id": "ef79e538a17bbc4f"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_042",
+      "title": "Pagination Loop in getAllDelegatorsInPagination Accesses Out-of-Bounds Array Index",
+      "description": "The getAllDelegatorsInPagination function calculates end = pageSize * (pageIndex + 1) - 1, then iterates from start to end inclusive. However, it assigns delegatorsInPage[i] = delegators[staker].at(i), where i is the global index in the EnumerableSet, but the output array is indexed from 0 to pageSize-1. This causes a mismatch: when pageIndex=1 and pageSize=10, i ranges from 10 to 19, but delegatorsInPage[10] is out of bounds (array size is 10). This results in a revert due to array index out of bounds. The function assumes the output array index equals the global set index, which is incorrect. This breaks pagination for any non-zero pageIndex and prevents legitimate users from accessing their delegation data.",
+      "severity": "high",
+      "original_id": "92f7183093a9f5f1"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_043",
+      "title": "Undelegation Claim Loop Modifies Array During Iteration Without Proper Bounds Synchronization",
+      "description": "In claimUndelegation(), the loop modifies undelegations[delegator] by swapping and popping elements while iterating with a fixed length variable. However, after a pop(), the array shrinks, but the loop continues using the original length variable (length = length - 1). This causes the loop to skip elements: when undelegation[i] is removed and replaced with the last element, the next iteration increments i, skipping the moved element. For example, with 3 undelegations: [A, B, C], if A is claimable, it is swapped with C, array becomes [C, B], length becomes 2, and i increments to 1, skipping B. This results in undelegated funds being permanently locked, as they are never claimed. The attack is exploitable by any user with multiple undelegations, causing irreversible loss of funds.",
+      "severity": "critical",
+      "original_id": "381e7d9e13a7aeef"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_044",
+      "title": "Automatic Processing of Withdrawal Funds via Receive Function",
+      "description": "The L2Staking contract has no explicit receive or fallback function, but it inherits from Staking which may handle ETH transfers. More critically, the contract accepts MorphToken transfers via _transferFrom and _transfer, but does not distinguish between user-initiated deposits and system-returned funds (e.g., from claimUndelegation or reward distributions). This allows an attacker to send MorphToken directly to the contract, tricking it into treating system-returned funds as new deposits, leading to double-counting of staking amounts and inflation of delegation totals.",
+      "severity": "high",
+      "original_id": "927bfd060ec2ce46"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_045",
+      "title": "Challenge Reward Double-Spend via RevertBatch and ClaimReward Race",
+      "description": "The Rollup contract allows a malicious actor to claim the same challenge reward twice by exploiting the non-atomic interaction between revertBatch and claimReward. When revertBatch is called, it refunds challenge deposits to challengers and deletes challenge records, but does not reset batchChallengeReward. If a challenger calls claimReward after revertBatch but before the challenge is re-initiated, they can claim the reward again when a new challenge is created on the same batch index, because batchChallengeReward is never zeroed out after refund. This allows infinite reward extraction by repeatedly challenging, reverting, and claiming.",
+      "severity": "critical",
+      "original_id": "c4284a8a5ffba5f5"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_046",
+      "title": "Challenge Reward Claim Allows Double-Spending of Challenge Deposits",
+      "description": "The challenge reward system allows a challenger to claim the same challenge deposit multiple times by exploiting the lack of reentrancy protection and state update ordering. When a challenger wins a challenge, the reward is added to batchChallengeReward[msg.sender], but the claimReward function does not prevent reentrancy or ensure the reward is only claimed once. An attacker can call claimReward in a loop via a malicious contract, draining all challenge deposits from the contract.",
+      "severity": "critical",
+      "original_id": "17534698ac01cf50"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_047",
+      "title": "FinalizeBatch Allows Finalizing Non-Committed Batches via State Manipulation",
+      "description": "The finalizeBatch function checks if the batch exists via batchExist(), which requires batchDataStore[batchIndex].originTimestamp > 0 and committedBatches[batchIndex] != 0. However, after a batch is reverted via revertBatch, batchDataStore[batchIndex - 1] is deleted, but batchDataStore[batchIndex] remains untouched. An attacker can call revertBatch on batch N, then call finalizeBatch on batch N+1 with a forged header that matches the original state, bypassing the existence check because batchDataStore[N+1] still exists from the original commit. This allows finalizing a batch that was never properly committed.",
+      "severity": "high",
+      "original_id": "0d5e6b10f615469d"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_048",
+      "title": "Batch Challenge Window Extension Allows Delayed Finalization and DoS",
+      "description": "In challengeState(), when a challenge is initiated, the code adds proofWindow to the finalizeTimestamp of all batches from lastFinalizedBatchIndex+1 to lastCommittedBatchIndex. This means that even batches not under challenge have their finalization delayed. An attacker can repeatedly challenge every new batch, causing all future batches to be perpetually delayed. This effectively DoSes the entire rollup by preventing any batch from being finalized, locking all withdrawals and L1 message processing indefinitely.",
+      "severity": "high",
+      "original_id": "4bf2771c68a7a9e9"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_049",
+      "title": "RevertBatch Allows Owner to Revert Finalized Batches via Index Manipulation",
+      "description": "The revertBatch function requires that the batch being reverted is unfinalized (_batchIndex > lastFinalizedBatchIndex), but it does not validate that the batch being reverted is the most recently committed batch. An attacker with owner privileges can call revertBatch with a batchIndex that is less than lastFinalizedBatchIndex but greater than the target batch, causing the function to delete committedBatches entries for batches that have already been finalized. This breaks the immutability of finalized state roots and allows the owner to erase historical state, violating the core security assumption of the rollup.",
+      "severity": "high",
+      "original_id": "4863cce982437b86"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_050",
+      "title": "Proof Verification Bypass via Zero KZG Data Proof",
+      "description": "The _verifyProof function checks that _kzgDataProof.length == 160, but does not validate that the data is non-zero or meaningful. An attacker can submit a 160-byte array of all zeros as _kzgDataProof. The point evaluation precompile will still return BLS_MODULUS for zero inputs under certain conditions (e.g., if the commitment and proof are zero), allowing a fake proof to be accepted. This bypasses the zk-proof verification entirely, allowing any batch to be proven valid without a real proof.",
+      "severity": "critical",
+      "original_id": "6163c424f4b2be13"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_051",
+      "title": "L1 Message Pop Can Skip Valid Messages Due to Bitmap Indexing Error",
+      "description": "In _loadL1MessageHashes, the bitmap is indexed using _totalL1MessagesPoppedInBatch >> 8, but the bitmap is provided as calldata and the offset is calculated using _skippedL1MessageBitmap.offset. However, the function does not validate that the bitmap length is sufficient for the number of messages being processed. An attacker can submit a batch with a very large _totalL1MessagesPoppedInBatch value, causing the bitmap index to wrap around or point to garbage data. This allows the contract to incorrectly mark valid L1 messages as skipped, preventing them from being processed and permanently locking user funds.",
+      "severity": "high",
+      "original_id": "bf8419edda3dd253"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_052",
+      "title": "Batch Header Hash Validation Occurs After State Update in commitBatch",
+      "description": "In commitBatch, the function computes _batchHash from the batch header and then updates committedBatches[_batchIndex] = _batchHash before validating that committedBatches[_batchIndex] == _parentBatchHash. This means that if an attacker submits a batch with a forged parent hash, the state is updated before the validation check. If the validation fails, the state remains corrupted, and the batch is left in an inconsistent state. This allows an attacker to corrupt the batch chain by submitting invalid batches that overwrite valid ones before validation.",
+      "severity": "high",
+      "original_id": "870a40fc3e1e44b5"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_053",
+      "title": "Challenge Reward Calculation Uses Unverified Sequencer Bitmap",
+      "description": "In _challengerWin, the function calls IL1Staking(l1StakingContract).slash(sequencersBitmap) to slash sequencers and add the reward to the challenger. However, the sequencersBitmap is taken directly from batchDataStore[batchIndex].signedSequencersBitmap, which is set during commitBatch using IL1Staking(l1StakingContract).getStakerBitmap(_msgSender()). This bitmap is not validated against the actual sequencer set in the batch header. An attacker can submit a batch with a malicious sequencer bitmap that includes addresses not in the valid sequencer set, causing the contract to slash innocent addresses and transfer their staked funds to the attacker.",
+      "severity": "critical",
+      "original_id": "ccaba238af5a52b3"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_054",
+      "title": "Inconsistent Challenge Window Extension During Challenge Causes Denial of Service and Economic Manipulation",
+      "description": "The challengeState function extends the finalizeTimestamp of all batches between lastFinalizedBatchIndex and lastCommittedBatchIndex by proofWindow when a challenge is initiated. However, this extension is not properly synchronized with the batchInsideChallengeWindow() check, which relies on batchDataStore[batchIndex].finalizeTimestamp. This creates a desynchronization between the challenge logic and the challenge window validation logic. An attacker can exploit this by submitting a challenge on a batch that is about to become challengeable, then immediately triggering a batch finalization before the extended timestamp takes effect. This allows the attacker to bypass the challenge window entirely and finalize batches without being challenged, or alternatively, cause legitimate challengers to be unable to challenge valid batches due to the extended timestamps being incorrectly applied to batches that are not under challenge. The financial impact is that sequencers can avoid slashing by finalizing batches without challenge, or legitimate challengers lose their deposits because they cannot challenge within the intended window.",
+      "severity": "high",
+      "original_id": "7f039243733bd8dc"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_055",
+      "title": "Unprotected updateFinalizePeriodSeconds Allows Timing Attack to Bypass Challenge Window",
+      "description": "The updateFinalizePeriodSeconds function is only protected by onlyOwner, but it directly modifies the finalizationPeriodSeconds variable used to compute batchDataStore[batchIndex].finalizeTimestamp = block.timestamp + finalizationPeriodSeconds. An attacker who is not the owner cannot call this function directly, but if the owner is malicious or compromised, they can manipulate the finalization period to shrink it to 0 after a batch is committed but before it is challenged. This causes all future batches to have finalizeTimestamp = block.timestamp, making them immediately eligible for finalization and bypassing the challenge window entirely. This allows the sequencer to finalize batches without any challenge, avoiding potential slashing. The economic impact is that sequencers can permanently avoid challenge penalties by coordinating with the owner to reduce finalizationPeriodSeconds to 0 after committing a batch but before the challenge window opens. This is a critical economic manipulation vulnerability because it breaks the entire security model of the rollup.",
+      "severity": "critical",
+      "original_id": "909a6d79ee574de3"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_056",
+      "title": "Batch Challenge Reward Calculation Uses Unverified State Variables Leading to Double-Spending",
+      "description": "The _challengerWin and _defenderWin functions add challengeDeposit to batchChallengeReward without verifying that the challenge has not already been resolved. If a batch is challenged and then finalized (via proveState) and then challenged again (due to a race condition or reentrancy), the same challengeDeposit can be claimed twice. The challengeDeposit is stored in challenges[batchIndex].challengeDeposit, but when _defenderWin or _challengerWin is called, it does not zero out the challengeDeposit after payout. This allows an attacker to call proveState to win the challenge and claim the reward, then call challengeState again on the same batch (if it's still in committed state) and claim the same deposit again. The financial impact is that an attacker can drain the entire challenge deposit pool by repeatedly challenging and winning on the same batch. For example, if challengeDeposit = 10 ETH, an attacker can claim 10 ETH per challenge, and since the deposit is not reset, they can claim it infinitely.",
+      "severity": "critical",
+      "original_id": "32b8d178bf0e7105"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_057",
+      "title": "Incorrect L1 Message Bitmap Indexing in _loadL1MessageHashes Causes Data Loss and Message Censorship",
+      "description": "The _loadL1MessageHashes function uses _totalL1MessagesPoppedInBatch >> 8 to compute the bitmap index, but this is incorrect because _totalL1MessagesPoppedInBatch is the cumulative count of messages popped in the current batch, not the global index. The bitmap is indexed by global message index, so the correct index should be (_totalL1MessagesPoppedOverall - _numL1Messages + i) >> 8. This causes the function to read the wrong bitmap word for each message, leading to incorrect skipping decisions. For example, if the first message in a batch has global index 1000, the function reads bitmap[1000>>8] = bitmap[3], but if _totalL1MessagesPoppedInBatch is 0 at the start of the batch, it reads bitmap[0], which is wrong. This results in messages being incorrectly skipped or not skipped, leading to message censorship or double-spending. The financial impact is that users can lose L1-to-L2 messages, or malicious sequencers can censor messages to prevent withdrawals or cross-chain interactions.",
+      "severity": "high",
+      "original_id": "5f57e193873ba4f1"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_058",
+      "title": "RevertBatch Does Not Reset Challenge State for All Batches, Enabling Double Reward Claim",
+      "description": "The revertBatch function deletes challenges for batches being reverted and returns challenge deposits to challengers, but it only does so for batches where !challenges[batchIndex].finished. However, if a batch was challenged and then proven (finished=true), the challenge is not reset during revert. This means that if a batch is reverted after being proven, the challenger's deposit is not returned, and the batchChallengeReward is not updated. This creates a situation where the same challenge deposit can be claimed twice: once by the prover in _defenderWin, and then again by the challenger if the batch is later challenged again after being reverted and re-committed. The financial impact is that challengers can claim rewards for challenges on batches that were already resolved, leading to double-spending of challenge deposits. For example, if a challenge deposit is 5 ETH, and a batch is challenged, proven, reverted, and then re-committed and challenged again, the challenger can claim 5 ETH twice.",
+      "severity": "high",
+      "original_id": "1e6ccfc53be0b4bf"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_059",
+      "title": "State Synchronization Failure in _updateSequencerSet After Delegation/Undelegation",
+      "description": "The _updateSequencerSet function assumes stakerAddresses is sorted by delegation amount in descending order, but this invariant is not maintained after partial state updates during delegation or undelegation. The sorting logic in delegateStake and undelegateStake only performs bubble-sort-style swaps for one position at a time, leaving the array partially sorted. When _updateSequencerSet is called, it selects the first N addresses from stakerAddresses as the new sequencer set, but if the array is not fully sorted, the selected set may not represent the top N delegators by stake. This causes the protocol to assign sequencer rights to suboptimal or incorrect validators, undermining security and economic incentives. Crucially, the function does not re-sort the entire array before selection, and no validation ensures the array is sorted before use.",
+      "severity": "high",
+      "original_id": "75f1cd0cbe9b59cf"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_060",
+      "title": "Missing User Protection in undelegateStake and claimUndelegation (Pattern 1)",
+      "description": "The undelegateStake function allows a delegator to initiate an undelegation without any mechanism to specify a minimum acceptable return or execution bounds. The claimUndelegation function then processes undelegations in a loop that removes successfully claimable entries from the array, but does not guarantee that all pending undelegations are processed in a single call. An attacker can front-run or manipulate block timing to cause partial claim execution, where only some undelegations are processed, leaving the delegator with locked funds and no recourse. The user has no control over how many undelegations are claimed per transaction, and the function does not revert on partial success. This exposes users to potential loss of liquidity and inability to reclaim funds if gas limits are exceeded or if the contract state changes between calls.",
+      "severity": "high",
+      "original_id": "53c745a5af2e67b8"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_061",
+      "title": "Validation Timing Violation in delegateStake (Pattern 2)",
+      "description": "In delegateStake, the function first transfers Morph tokens from the delegator to the contract via _transferFrom, and only then checks if the delegatee is a valid staker using isStaker(delegatee). This means that if the delegatee is not a valid staker (e.g., removed from the set), the tokens are still transferred and locked in the contract with no way to reclaim them. The validation (isStaker) occurs after the state change (token transfer), violating the principle that validation must precede state modification. This allows malicious actors to delegate to non-staker addresses (e.g., burned or removed addresses) and permanently lock funds.",
+      "severity": "critical",
+      "original_id": "0d35bf7f6b530640"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_062",
+      "title": "Incorrect Ranking Update in undelegateStake Leading to Incorrect Sequencer Set Selection",
+      "description": "In undelegateStake, when a staker's delegation is reduced, the function attempts to re-sort the stakerAddresses array based on delegation amounts. However, the loop condition 'for (uint256 i = stakerRankings[delegatee] - 1; i < candidateNumber - 1; i++)' incorrectly assumes that candidateNumber represents the total number of stakers with non-zero delegation, but candidateNumber is only decremented when a staker's delegation drops to zero. This causes the sorting loop to run over an incorrect range. For example, if a staker ranked 5 with 1000 tokens delegates away 999 tokens (leaving 1), candidateNumber remains unchanged, but the sorting loop runs from index 4 to candidateNumber-1, which may include stakers with higher delegation than the current one. This results in incorrect ranking assignments, and when _updateSequencerSet is called, the sequencer set is selected from a mis-sorted array, potentially excluding high-stake validators and including low-stake ones. This undermines the security model of the protocol.",
+      "severity": "high",
+      "original_id": "79f82fb1dbd33de7"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_063",
+      "title": "Replay Protection Bypass in claimUndelegation Due to State Commitment Timing (Pattern 7)",
+      "description": "In claimUndelegation, the function iterates through undelegations and removes them from the array as they are claimed. However, if an external call (e.g., to the MorphToken contract) fails during _transfer, the function does not revert, and the undelegation entries that were already removed from the array are permanently deleted, even though the token transfer failed. This means the state (undelegations array) is committed before the external call succeeds, violating replay protection: the same undelegation can be claimed again by a different user if the token transfer fails due to insufficient balance or reentrancy. The function does not use a check-effects-interaction pattern, and the state change (removal from undelegations) occurs before the transfer, making it vulnerable to partial failure and double-spending.",
+      "severity": "critical",
+      "original_id": "ad99c9de3b3df8d7"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_064",
+      "title": "Interface Compatibility Issue with IDistribute.claim and IDistribute.claimAll (Pattern 8)",
+      "description": "The claimReward function calls IDistribute(DISTRIBUTE_CONTRACT).claim or IDistribute(DISTRIBUTE_CONTRACT).claimAll, but the interface IDistribute is not provided in the code. If the actual DISTRIBUTE_CONTRACT implements a different signature (e.g., claim(address, address, uint256) vs. claim(address, uint256) or claimAll(address, uint256) vs. claimAll(uint256)), the call will revert due to ABI mismatch. This is a critical interface compatibility issue: the contract assumes a specific interface definition without verifying it, and if the DISTRIBUTE_CONTRACT is upgraded or forked (e.g., to a different version of the protocol), the claimReward function will break, preventing users from claiming rewards. This is a high-severity issue because it locks user rewards permanently if the external contract changes.",
+      "severity": "critical",
+      "original_id": "9bf70828ecaf772d"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_065",
+      "title": "Division by Zero Risk in currentEpoch() When rewardStartTime is 0",
+      "description": "The currentEpoch() function requires block.timestamp >= rewardStartTime, but if rewardStartTime is accidentally set to 0 (e.g., via a bug in initialize), then (block.timestamp - 0) / REWARD_EPOCH will compute a valid epoch number even if reward has not been started. However, the function does not validate that rewardStarted is true before computing the epoch. This allows users to call claimReward or claimCommission with an epoch value based on an invalid epoch calculation, potentially causing the DISTRIBUTE_CONTRACT to distribute rewards to wrong epochs or zero rewards. While not directly causing fund loss, it can lead to incorrect reward distribution and protocol insolvency if the distribute contract uses this value for accounting. The validation is incomplete: it checks timestamp but not rewardStarted state.",
+      "severity": "high",
+      "original_id": "3f58029c5134cce5"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_066",
+      "title": "Incorrect Pagination Logic in getAllDelegatorsInPagination (Pattern 9)",
+      "description": "The getAllDelegatorsInPagination function returns an array of size pageSize, but assigns values using the loop index i as the destination index: delegatorsInPage[i] = delegators[staker].at(i). This is incorrect because i starts at start = pageSize * pageIndex, but the array delegatorsInPage is indexed from 0 to pageSize-1. For example, if pageIndex=1 and pageSize=10, i starts at 10, but delegatorsInPage[10] is out of bounds (valid indices 0-9). This causes a silent out-of-bounds write, which in Solidity 0.8.x will revert due to array bounds checking. This is a logic error that breaks pagination entirely. The function should assign to delegatorsInPage[i - start]. This prevents users from retrieving delegator lists in pagination, effectively locking access to delegation data.",
+      "severity": "high",
+      "original_id": "9a994def4414e826"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_067",
+      "title": "Automatic ETH Processing Enables Fund Theft via Withdrawal Funds Re-deposit",
+      "description": "The Rollup contract's receive() function accepts ETH without any checks or restrictions, and there is no mechanism to distinguish between user deposits and system-returned funds (e.g., challenge rewards or slashed funds). This allows an attacker to send ETH directly to the contract, which is then indistinguishable from legitimate user deposits. When a legitimate user later initiates a withdrawal, the contract's accounting does not isolate withdrawal funds, potentially causing the withdrawal to be satisfied by the attacker's maliciously sent ETH, effectively stealing the user's withdrawal rights or enabling double-spending of system funds.",
+      "severity": "high",
+      "original_id": "2993f0d33d41e134"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_068",
+      "title": "Incorrect Bitmap Indexing in getStakersFromBitmap Leads to Fund Theft via Slashing",
+      "description": "The getStakersFromBitmap function incorrectly shifts the bitmap right by 1 bit and then uses 1-indexed bit positions to index into stakerSet, but the loop condition and bit masking logic are misaligned. This causes the function to return an incorrect subset of stakers when processing a bitmap. When the slash function uses this corrupted result to identify stakers to slash, it may slash the wrong addresses or miss intended targets. Crucially, the reward is calculated based on the total valueSum (which is correct), but the _msgRemoveStakers call sends an incorrect list of addresses to L2, causing L2 to remove the wrong stakers. This creates a permanent desynchronization between L1 and L2 state. An attacker can exploit this by registering as a staker, then triggering a slash event with a carefully crafted bitmap that causes the function to return a staker they control instead of the intended target. Since the reward is paid to the challenger based on the correct valueSum, the attacker receives the reward while the real target is incorrectly removed from L2, and the attacker's own staker remains active on L1. This allows the attacker to repeatedly claim rewards by having others slash the wrong staker, effectively stealing rewards without losing their own stake.",
+      "severity": "critical",
+      "original_id": "8d418cae8c248bc0"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_069",
+      "title": "Undelegation Claiming Incomplete State Restoration",
+      "description": "The claimUndelegation function removes undelegations from the array by swapping with the last element and popping, but does not properly handle the case where multiple undelegations exist for the same delegatee. This leads to incomplete state restoration: undelegations are removed from the array but the delegator's total delegation amount is not restored, and the delegator's position in the staker's delegator set is not re-established. This creates accounting inconsistency where funds are returned but the staking relationship is not properly reinitialized.",
+      "severity": "high",
+      "original_id": "9e7032c07f608446"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_070",
+      "title": "Staker Ranking Update Inconsistency After Delegation",
+      "description": "In delegateStake function, when a staker's ranking changes due to increased delegation, the code updates the stakerAddresses array via bubble sort but does not ensure that the ranking of all affected stakers is correctly updated. Specifically, when a staker moves up in ranking, the code updates only adjacent pairs, but if the staker moves multiple positions, intermediate rankings are left inconsistent. This causes stakerRankings[addr] to diverge from the actual position in stakerAddresses, leading to incorrect sequencer set selection and reward distribution.",
+      "severity": "high",
+      "original_id": "6f0f2613ada45f19"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_071",
+      "title": "Reward Start Time Validation Bypass via Block Timestamp Manipulation",
+      "description": "The updateRewardStartTime function requires rewardStartTime > block.timestamp, but does not validate that the new rewardStartTime is strictly greater than the current block.timestamp at the time of state commitment. An attacker can front-run the transaction by mining a block with timestamp just below the target, causing the transaction to pass validation, then immediately mine a new block with timestamp >= target, effectively advancing the reward start time without proper delay. This allows premature reward distribution.",
+      "severity": "high",
+      "original_id": "e45cf104a245a85c"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_072",
+      "title": "Incorrect Sequencer Set Size Calculation During Reward Start",
+      "description": "In startReward(), the code sorts stakers by delegation amount but then calls _updateSequencerSet() which uses candidateNumber (count of stakers with non-zero delegation) to determine sequencer set size. However, candidateNumber is only incremented when a staker's delegation goes from 0 to >0, and decremented when it goes to 0. If a staker had delegation before reward started and it was zeroed out during sorting (e.g., due to reordering), candidateNumber does not reflect the true number of active stakers. This causes the sequencer set to be smaller than intended, reducing network security.",
+      "severity": "high",
+      "original_id": "914180b74c12d4e3"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_073",
+      "title": "ABI Interface Mismatch in notifyDelegation Call",
+      "description": "The contract calls IDistribute(DISTRIBUTE_CONTRACT).notifyDelegation with 6 parameters: (delegatee, delegator, epoch, delegatorAmount, totalDelegation, delegatorCount, isInitial). However, the standard IDistribute interface in most Morph forks (e.g., Morph v1.2+) defines notifyDelegation with only 5 parameters: (delegatee, delegator, epoch, delegatorAmount, totalDelegation). The 6th parameter (isInitial) is not part of the external interface and causes ABI encoding mismatch. This results in transaction revert on any DISTRIBUTE_CONTRACT that follows the standard interface, preventing delegation notifications and breaking reward distribution.",
+      "severity": "critical",
+      "original_id": "613acde5b1bc707b"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_074",
+      "title": "Undelegation Lock Epochs Bypass via Staker Removal",
+      "description": "In undelegateStake(), if a staker is removed (stakerRankings[delegatee] == 0), the unlockEpoch is set to effectiveEpoch (current epoch). However, the staker may have been removed by L1 sync (removeStakers) while delegations still exist. This allows delegators to immediately claim undelegated funds even if undelegateLockEpochs > 0, bypassing the lock period. This creates a financial risk where users can withdraw locked funds by having the staker removed by an external actor (e.g., L1 governance).",
+      "severity": "high",
+      "original_id": "956961638c6ceced"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_075",
+      "title": "Staker Ranking Corruption During removeStakers",
+      "description": "In removeStakers(), when a staker is removed, the code shifts all subsequent stakers down in stakerAddresses and decrements their rankings. However, if the removed staker is not in the top latestSequencerSetSize, the code still shifts rankings for all stakers below it, even if they are not part of the active sequencer set. This causes stakerRankings to become inconsistent with the actual sorted order of stakerDelegations, leading to incorrect _updateSequencerSet() behavior and potential misallocation of rewards to non-sequencers.",
+      "severity": "high",
+      "original_id": "6fdb6a3f4898683a"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_076",
+      "title": "Gas-Driven Subcall Failure in notifyDelegation",
+      "description": "The delegateStake function calls notifyDelegation() before transferring tokens. If the external call to DISTRIBUTE_CONTRACT fails due to gas limit exhaustion (EVM 63/64 rule), the parent transaction still succeeds because the call is not checked for success. The token transfer occurs, the delegation state is updated, but the distribute contract never receives the notification. This results in lost reward tracking: delegators earn rewards but the distribute contract does not record the delegation, causing permanent reward loss for the delegator.",
+      "severity": "critical",
+      "original_id": "3c06a321ecc2c271"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_077",
+      "title": "Automatic ETH Reception Triggers Unintended Withdrawal Claiming",
+      "description": "The L1Staking contract has no fallback or receive function, but its claimWithdrawal() function can be triggered by any caller who sends ETH to the contract. Since the contract does not verify the sender's intent or origin when receiving ETH, an attacker can send ETH directly to the contract, and if they are a previously withdrawn staker, the ETH will be immediately claimed as a withdrawal payout. This allows an attacker to effectively 'reclaim' staking funds without having initiated a legitimate withdrawal request, leading to double-spending of staking value.",
+      "severity": "critical",
+      "original_id": "e42a85e01e2b1fd7"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_078",
+      "title": "Desynchronized Staker Indexing in getStakersFromBitmap Leads to Missing Stakers and Fee Avoidance",
+      "description": "The getStakersFromBitmap function incorrectly assumes staker indexes are contiguous and starts bit iteration from bit 1, but the stakerSet array is indexed from 0 with stakerIndexes mapping to 1-based positions. When stakers are removed and the deleteList is cleaned, stakerSet slots are freed but the bitmap calculation does not account for gaps. This causes getStakersFromBitmap to miss valid stakers in the bitmap, leading to incorrect slashing calculations. An attacker can exploit this by repeatedly registering and removing stakers to create gaps in stakerSet, then triggering a slash with a bitmap that skips over these gaps. The slash function then undercounts the total staking value to be slashed, reducing the reward paid to the challenger and increasing the slashRemaining pool that the owner can claim. This results in a direct economic loss to the challenger and an unfair gain to the owner.",
+      "severity": "high",
+      "original_id": "e3404ad229c65d0b"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_079",
+      "title": "Unrestricted updateRewardPercentage Allows Timing Attack on Slash Rewards",
+      "description": "The updateRewardPercentage function is only restricted by onlyOwner, but it directly affects the reward calculation in the slash function: reward = (valueSum * rewardPercentage) / 100. An attacker who is about to be slashed can call updateRewardPercentage to reduce the reward percentage just before the slash is triggered by the rollup contract. Since the slash function is only callable by the rollup contract (onlyRollupContract), the attacker cannot trigger it directly. However, if the attacker can influence the timing of the rollup's slash transaction (e.g., by manipulating sequencer liveness or block timing), they can cause the slash to occur after the reward percentage has been lowered. This reduces the challenger's reward and increases the slashRemaining amount that the owner can later claim via claimSlashRemaining. The economic impact is that the challenger loses a portion of their expected reward, and the owner gains an equivalent amount in slashRemaining, effectively stealing from the challenger.",
+      "severity": "high",
+      "original_id": "240a94fa5836ebf1"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_080",
+      "title": "Incorrect Bitmap Indexing in getStakerBitmap and getStakersBitmap Causes Undercounting in Slash",
+      "description": "The getStakerBitmap and getStakersBitmap functions calculate the bitmap using 1 << stakerIndexes[addr], but stakerIndexes is 1-based (index 1 corresponds to stakerSet[0]). However, getStakersFromBitmap incorrectly uses (bitmap & (1 << i)) where i ranges from 1 to 254, which corresponds to stakerSet[i-1]. This is inconsistent: if stakerIndexes[addr] = 1, then getStakerBitmap returns 1 << 1 = 2, but getStakersFromBitmap expects bit 1 to represent stakerSet[0]. This means the bitmap returned by getStakerBitmap is off by one bit. When a staker with index 1 is included in a slash, the bitmap will be 2 (bit 1 set), but getStakersFromBitmap will interpret bit 1 as stakerSet[0], not stakerSet[1]. This causes the slash function to either miss the staker entirely or misidentify which staker is being slashed. In practice, this leads to undercounting of slashed stakers and reduced valueSum, which reduces the challenger reward and increases slashRemaining. For example, if a staker with index 1 is slashed, the bitmap is 2, but getStakersFromBitmap will check bit 1 and find stakerSet[0] \u2014 which may be a different staker or empty \u2014 leading to a 0.5% to 100% undercount depending on state.",
+      "severity": "high",
+      "original_id": "dba9ca671081665b"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_081",
+      "title": "State Commitment Before Challenge Validation in challengeState",
+      "description": "The challengeState function commits state (inChallenge = true, batchChallenged = batchIndex, challenges[batchIndex] updated) before validating that the batch is within the challenge window. This allows an attacker to front-run a legitimate challenge by submitting a challenge with an invalid batch index after the state is committed but before the window check fails, consuming the challenger's deposit and preventing legitimate challenges.",
+      "severity": "critical",
+      "original_id": "360a882f54aad272"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_082",
+      "title": "Incomplete State Restoration in revertBatch",
+      "description": "The revertBatch function deletes committedBatches and challenges entries but does not restore the finalizedStateRoots mapping or the withdrawalRoots mapping. This creates an inconsistency where a reverted batch's state root and withdrawal root remain marked as finalized, allowing future finalizeBatch calls to skip validation and potentially finalize invalid state roots.",
+      "severity": "high",
+      "original_id": "7db1a3f1fb6abc4b"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_083",
+      "title": "Mathematical Domain Violation in _loadL1MessageHashes",
+      "description": "The _loadL1MessageHashes function uses a bitmap index calculation based on _totalL1MessagesPoppedInBatch >> 8 and & 0xff, but does not validate that _totalL1MessagesPoppedInBatch is within the bounds of the _skippedL1MessageBitmap length. This can cause out-of-bounds calldataload access when _totalL1MessagesPoppedInBatch exceeds the bitmap size, leading to arbitrary memory reads and potential contract failure or data corruption.",
+      "severity": "high",
+      "original_id": "6a8984449ebb495f"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_084",
+      "title": "Authorization Context Binding Missing in challengeState",
+      "description": "The challengeState function accepts a challenge deposit and binds the challenger's address to the challenge, but does not bind the challenge to the specific batch header hash. An attacker can submit a valid challenge for batch N, then later submit a different batch header for batch N with a different state root, and the challenge will still be valid because only the batch index is used for lookup, not the hash. This allows a front-runner to replace the batch header after challenge commitment.",
+      "severity": "high",
+      "original_id": "b90772b20a904b60"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_085",
+      "title": "Interface Definition Incompatibility in _verifyProof",
+      "description": "The _verifyProof function calls IRollupVerifier(verifier).verifyAggregateProof with parameters (version, batchIndex, _aggrProof, _publicInputHash). However, the external verifier contract (IRollupVerifier) is assumed to have a function signature matching this exact parameter order and types. If the verifier contract is upgraded or forked (e.g., to include a chainId parameter or change struct encoding), the ABI encoding will mismatch, causing the call to revert silently and preventing batch finalization without error reporting.",
+      "severity": "medium",
+      "original_id": "6f9a1f0a4b7e6703"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_086",
+      "title": "Precision Loss in _commitChunk Transaction Count Validation",
+      "description": "In _commitChunk, _totalTransactionsInChunk is calculated as (dataPtr - startPtr) / 32 + (_numTransactionsInBlock - _numL1MessagesInBlock). The division (dataPtr - startPtr) / 32 assumes each non-skipped L1 message hash is exactly 32 bytes, which is true, but the calculation does not validate that the number of non-skipped messages matches the actual count derived from the bitmap. This can lead to silent overcounting if the bitmap is malformed, allowing a chunk to exceed maxNumTxInChunk without triggering a revert.",
+      "severity": "medium",
+      "original_id": "b87882fd9f1e50e2"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_087",
+      "title": "Resource-Controlled Failure in _popL1Messages",
+      "description": "The _popL1Messages function calls IL1MessageQueue.popCrossDomainMessage in a loop. Each call consumes gas, and if the remaining gas is insufficient for the final call (due to EVM's 63/64 gas rule), the call fails silently while the parent function continues. This results in L1 messages being marked as popped in the rollup state (via updated counters) but not actually popped from the L1 queue, causing funds to be permanently locked on L1 while the rollup proceeds as if they were processed.",
+      "severity": "high",
+      "original_id": "2d73beb3a809dbbc"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_088",
+      "title": "Blacklist State Inconsistency Leading to Unauthorized Token Transfers",
+      "description": "The contract uses two separate state mappings to track blacklist status: _deprecatedBlacklisted (used in _isBlacklisted) and balanceAndBlacklistStates (which is intended to encode both balance and blacklist state in a single uint256). However, _setBlacklistState only updates _deprecatedBlacklisted, while _setBalance overwrites the entire balanceAndBlacklistStates value, discarding any blacklist bit. This creates a critical inconsistency: an address can be marked as blacklisted in _deprecatedBlacklisted but still have a non-zero balance in balanceAndBlacklistStates, and since _balanceOf ignores _deprecatedBlacklisted and only reads balanceAndBlacklistStates, blacklisted users can still send and receive tokens via transfer and transferFrom, violating the entire blacklist mechanism. The contract's logic assumes blacklist state is encoded in the lower bit of balanceAndBlacklistStates, but this encoding is never actually used or enforced.",
+      "severity": "critical",
+      "original_id": "054998b628726638"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_089",
+      "title": "Blacklist State Inconsistency Allows Unauthorized Transfers",
+      "description": "The contract uses a deprecated mapping _deprecatedBlacklisted to track blacklist status, but the _setBalance function overwrites the entire balanceAndBlacklistStates storage slot, erasing the blacklist bit. This allows blacklisted accounts to bypass restrictions by triggering a balance update, effectively unblacklisting themselves. The _setBalance function does not preserve the blacklist state, creating a critical inconsistency between the actual blacklist status and the balance representation.",
+      "severity": "critical",
+      "original_id": "0fa5bb10194a5676"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_090",
+      "title": "FiatTokenV1 Accepts Native Currency Without Handling - Funds Can Be Irreversibly Locked",
+      "description": "The FiatTokenV1 contract is an ERC20 token that does not implement a receive or fallback function, but it also does not explicitly reject native currency transfers. This means that if users or external systems send ETH (or other native tokens) directly to the contract address, the funds will be permanently locked because there is no mechanism to withdraw or interact with them. The contract has no logic to distinguish between token transfers and native currency deposits, and no way to recover native tokens sent to it. This creates a critical financial risk where any accidental or malicious native token transfer results in permanent loss.",
+      "severity": "critical",
+      "original_id": "75df8f34d449de54"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_091",
+      "title": "Staker Bitmap Index Off-by-One Error Causes Incorrect Staker Identification",
+      "description": "The getStakersFromBitmap function incorrectly shifts the bitmap right by 1 bit and then uses 1-indexed stakerIndexes to access stakerSet, but the bit iteration logic fails to align with the actual stakerSet indices. This causes the function to return incorrect or zero-address stakers when decoding bitmaps, leading to slashing of wrong addresses or failure to slash intended ones.",
+      "severity": "critical",
+      "original_id": "b3f007423928a95d"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_092",
+      "title": "Withdrawal Claim Allows Double-Spending by Re-Entering During _cleanStakerStore",
+      "description": "The claimWithdrawal function calls _cleanStakerStore() before transferring ETH. Since _cleanStakerStore() modifies deleteList and deleteableHeight, and the function is not reentrancy-guarded at the point of _transfer(), an attacker can re-enter claimWithdrawal via a malicious receiver contract, claim the same withdrawal multiple times before the state is fully cleaned.",
+      "severity": "critical",
+      "original_id": "a08c3509cf7376e6"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_093",
+      "title": "Slash Function Does Not Validate Staker Existence Before Slashing, Leading to False Positive Rewards",
+      "description": "The slash function iterates over addresses from a bitmap and checks withdrawals[sequencers[i]] > 0, but does not verify that sequencers[i] is a valid registered staker via isStaker(). An attacker can construct a bitmap with arbitrary addresses (e.g., random addresses or zero address), causing valueSum to increment for non-stakers, leading to fraudulent reward claims from the protocol treasury.",
+      "severity": "high",
+      "original_id": "8594291a4d5766a8"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_094",
+      "title": "Staker Indexes Are Not Reset on Re-registration, Enabling Index Confusion and Double-Spending",
+      "description": "When a staker is removed (via removeStaker or withdraw), stakerIndexes[addr] is deleted but not reset. If the same address re-registers, _addStaker assigns a new index, but if the old index was not fully purged from memory (e.g., in a forked chain or during state corruption), the mapping may still reference stale data. This can cause isActiveStaker to return false positives or negatives, leading to incorrect slashing or withdrawal eligibility.",
+      "severity": "high",
+      "original_id": "b39054a2f035a53e"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_095",
+      "title": "Gas Limit Subcall Failure Not Checked, Leading to L1-L2 State Desynchronization",
+      "description": "The _msgAddStaker and _msgRemoveStakers functions use sendMessage without checking the return value. If the cross-chain message fails due to insufficient gas (e.g., due to attacker-controlled gas limits or L2 congestion), the L1 state is updated (staker removed or added) but L2 state is not. This creates permanent desynchronization, allowing attackers to withdraw from L1 while still being active on L2, or vice versa.",
+      "severity": "high",
+      "original_id": "8421c268f1f41f21"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_096",
+      "title": "Staker Bitmap Generation Uses Unsafe Bit Shift on Dynamic Index, Risk of Overflow",
+      "description": "The getStakerBitmap function computes bitmap = 1 << stakerIndexes[_staker]. Since stakerIndexes is uint8 (1-255), shifting 1 by 255 bits overflows uint256, resulting in 0. This causes the bitmap to be 0 for the last staker, making them unslashable and invisible to getStakersBitmap. Attackers can exploit this to remain undetected while being active stakers.",
+      "severity": "high",
+      "original_id": "bfd78ed1aa1a917d"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_097",
+      "title": "ClaimSlashRemaining Allows Owner to Drain Protocol Funds by Manipulating slashRemaining",
+      "description": "The slashRemaining variable is incremented by valueSum - reward, but valueSum is computed from unverified addresses. An attacker can register a dummy staker, trigger a slash with a bitmap containing that staker and 254 fake addresses, causing valueSum to be inflated by 255 * stakingValue. The owner can then claim the inflated slashRemaining, draining the protocol treasury.",
+      "severity": "critical",
+      "original_id": "48afc91abec67403"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_098",
+      "title": "Balance and Blacklist State Representation Boundary Violation",
+      "description": "The contract uses a single uint256 storage slot (balanceAndBlacklistStates) to store both the account balance (255 bits) and blacklist state (1 bit). However, the _setBalance function overwrites the entire slot, erasing the blacklist state when updating balance. This breaks the fundamental assumption that blacklist state is preserved across balance updates. Functions like _transfer, mint, and burn rely on _setBalance to update balances, but do not preserve the blacklist bit. This causes accounts to be unintentionally unblacklisted when their balance changes, violating the security invariant of the blacklist mechanism. The representation boundary between the combined storage format and its logical components is violated because _setBalance treats the slot as a pure balance value, ignoring its dual-purpose encoding.",
+      "severity": "critical",
+      "original_id": "a9159233af42e828"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_099",
+      "title": "Blacklist State Corruption via Balance Updates",
+      "description": "The _setBalance function overwrites the entire balanceAndBlacklistStates slot with only the balance value, discarding the 1-bit blacklist flag. This means any balance update (via transfer, mint, burn, or transferFrom) will unblacklist any previously blacklisted account. For example, if an account is blacklisted (balanceAndBlacklistStates = 0x8000...0000), and a transfer of 100 tokens occurs, _setBalance sets the slot to 100, clearing the blacklist bit. The _isBlacklisted function then returns false, allowing the account to perform transactions despite being blacklisted. This completely bypasses the blacklist security mechanism. An attacker can exploit this by having a blacklisted account receive a tiny transfer (e.g., 1 wei) from a non-blacklisted account, which unblacklists them permanently. The financial impact is total circumvention of the blacklist, allowing malicious actors to transact freely.",
+      "severity": "critical",
+      "original_id": "8cbff4026224fcdd"
+    }
+  ],
+  "input_tokens": 51243,
+  "output_tokens": 1685,
+  "cached_tokens": 923
+}

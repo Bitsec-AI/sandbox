@@ -1,0 +1,534 @@
+{
+  "project": "code4rena_superposition_2025_01",
+  "agent": "agent317",
+  "status": "success",
+  "timestamp": "2026-04-09T11:31:36.705020",
+  "elapsed_seconds": 90.8,
+  "total_expected": 2,
+  "total_found": 71,
+  "true_positives": 1,
+  "false_negatives": 1,
+  "false_positives": 70,
+  "detection_rate": 0.5,
+  "precision": 0.014084507042253521,
+  "f1_score": 0.027397260273972605,
+  "matched_findings": [
+    {
+      "id": "code4rena_superposition_2025_01_expected_000",
+      "expected": "Users are incorrectly refunded when liquidity is insufficient",
+      "matched": "Two-Step Swap Interim Amount Validation Bypass",
+      "confidence": 0.9,
+      "justification": "Finding 6 describes a vulnerability in the swap_2_internal function where interim amounts are not validated, allowing manipulation of the first swap to result in minimal output that still meets the final min_out requirement. This matches the expected vulnerability where insufficient liquidity in the first pool leads to incorrect refunds.",
+      "severity": "high",
+      "expected_description": "Submitted by\nZanyBonzy\n, also found by\nQ7\n,\nTigerfrake\n, and\nDadeKuma\n\nIn\nswap_2_internal\n, if the first pool doesn\u2019t have enough liquidity,\namount_in\ncould be less than\noriginal_amount\n, and as expected,\namount_in\nis taken from swapper. But the function still refunds\noriginal_amount - amount_in\nto the user if\noriginal_amount\nis more than\namount_in\n.\n\nFrom the function, we can see than\namount_in\nis taken from swapper. Then the function checks if\noriginal_amount\nis more than\namount_in\n, before which the difference is transferred back to the sender.\n\n>>      erc20::\ntake\n(from, amount_in, permit2)?;\nerc20::\ntransfer_to_sender\n(to, amount_out)?;\n>>\nif\noriginal_amount > amount_in {\nerc20::\ntransfer_to_sender\n(\nto,\noriginal_amount\n>>                  .\nchecked_sub\n(amount_in)\n.\nok_or\n(Error::TransferToSenderSub)?,\n)?;\n}\n\nAn unnecessary refund is processed leading to loss of funds for the protocol. Malicious users can take advantage of this to \u201crob\u201d the protocol of funds through the refunds.\n\nNo need to process refunds since\namount_in\nis already taken.\n\nerc20::take(from, amount_in, permit2)?;\nerc20::transfer_to_sender(to, amount_out)?;\n-       if original_amount > amount_in {\n-           erc20::transfer_to_sender(\n-               to,\n-               original_amount\n-                   .checked_sub(amount_in)\n-                   .ok_or(Error::TransferToSenderSub)?,\n-           )?;\n}\n\nContext\n\naf-afk (Superposition) confirmed\n\n0xsomeone (judge) commented\n:\n\nThe submission and its duplicates have correctly identified that the refund process in the\nswap_2_internal_erc20\nfunction is extraneous and thus results in excess funds being sent to the user.\nI believe a high-risk severity rating is appropriate as the issue manifests itself in all cases and would result in direct fund loss for the AMM pair.\n\naf-afk (Superposition) commented\n:\n\nFor\nIssue #12\n@0xsomeone how does this compare to your findings here?\n\n0xsomeone (judge) commented\n:\n\n@af-afk - I am unsure what comparison is to be drawn here. None of the findings are mine as I am a judge, and I do not believe that the finding referenced has any relation to this one when it comes to impact.\n\naf-afk (Superposition) commented\n:\n\nSorry, I should clarify, I mean your assessment that both are valid. It\u2019s not possible for both of these to be correct, right? I\u2019m of the opinion that this refund should not be implemented after consideration (and this submission) since the contract\u2019s quoting functionality should indicate that this is taking place.\n\n0xsomeone (judge) commented\n:\n\n@af-afk - the original submission shared was submitted in a audit that relies on a different commit hash from this one. As we can observe in the\nhighlighted code segment\n, the code originally transferred the\noriginal_amount\nfrom the\nfrom\naddress.\nIn the remediated code that was part of this audit, the code was updated to\nsimultaneously extract the\namount_in\nfrom the user and perform a refund\n. The incorrect aspect is that two different solutions for the same problem were incorporated, rendering the refund to be extraneous. I hope this clears things up!\n\naf-afk (Superposition) commented\n:\n\nFixed:\nhttps://github.com/fluidity-money/long.so/commit/9c7657e8336208e3397b30c32d557379f88a5b87",
+      "found_description": "The `swap_2_internal` function performs two consecutive swaps but only validates the final output amount against `min_out`, not the interim USDC amount. This allows manipulation where the first swap could result in minimal USDC output that still satisfies the final `min_out` requirement through price manipulation in the second swap.\n\n**Mathematical Proof:**\n- Function: `swap_2_internal` lines 119-154\n- First swap: `from_token \u2192 USDC` with amount `I256(1000)`\n- Expected: USDC output should be substantial (e.g., 950 USDC)\n- Attack: First swap manipulated to output only 1 USDC\n- Second swap: `USDC \u2192 to_token` with 1 USDC input\n- If `to_token` price is manipulated, could output 1000 tokens (meeting `min_out` of 900)\n- Protocol loses: 999 tokens (1000 in - 1 out effectively)\n\n**Exploitation Scenario:**\n1. Attacker manipulates `from_token` pool to have extremely unfavorable exchange rate\n2. Calls `swap_2_exact_in_41203_F1_D` with amount=1000, min_out=900\n3. First swap converts 1000 from_token to only 1 USDC due to manipulated pool\n4. Second swap converts 1 USDC to 1000 to_token (if to_token pool is manipulated favorably)\n5. Protocol effectively gives away 999 tokens\n\n**Financial Impact:**\n- Direct loss of protocol liquidity\n- Attackers can drain pools by exploiting price manipulation across two pools\n- Loss amount = (input_amount - effective_output_value) where effective_output_value can be artificially inflated",
+      "found_id": "aadb34a3ecf17759",
+      "tool_finding_index": 32
+    }
+  ],
+  "missed_findings": [
+    {
+      "id": "code4rena_superposition_2025_01_expected_001",
+      "title": "No slippage control when withdrawing a position leads to loss of funds",
+      "description": "Submitted by\nDadeKuma\n\nAn attacker can sandwich a user withdrawing funds as there is no way to put slippage protection, which will cause a large loss of funds for the victim.\n\ndecr_position_09293696\nfunction was removed entirely. Now, the only way for users to withdraw funds is by calling\nupdate_position_C_7_F_1_F_740\nwith negative delta.\n\nThe issue is that in this way, users can\u2019t have any slippage protection.\ndecr_position\nallowed users to choose an\namount_0_min\nand\namount_1_min\nof funds to receive, which is now zero.\n\nThis allows an attacker to sandwich their withdrawal to steal a large amount of funds.\n\nConsider reintroducing a withdrawal function that offers slippage protection to users (they should be able to choose\namount_0_min, amount_1_min, amount_0_desired\n, and\namount_1_desired\n).\n\naf-afk (Superposition) acknowledged\n\n0xsomeone (judge) commented\n:\n\nThe submission has demonstrated that liquidity withdrawals from the system are inherently insecure due to being open to arbitrage opportunities as no slippage is enforced.\nI am unsure why the Sponsor has opted to acknowledge this submission as it is a tangible vulnerability and one that merits a high-risk rating. The protocol does not expose a secure way to natively extract funds from it whilst offering this functionality for other types of interactions.\n\naf-afk (Superposition) commented\n:\n\n@0xsomeone - we won\u2019t fix this for now since Superposition has a centralised sequencer, and there\u2019s no MEV that\u2019s possible for a third-party to extract using the base interaction directly with our provider.\n\nDadeKuma (warden) commented\n:\n\n@af-afk - I highly suggest fixing this issue, as a centralized sequencer does not prevent MEV extraction. You can check\nthis impact\non Arbitrum, for example.",
+      "severity": "high",
+      "reason": "Not found"
+    }
+  ],
+  "undecided_findings": [],
+  "extra_findings": [
+    {
+      "id": "code4rena_superposition_2025_01_tool_000",
+      "title": "Integer Overflow in pack_details Function",
+      "description": "The pack_details function performs bitwise operations on i32 values without proper bounds checking, which can lead to integer overflow when negative tick values are used. The function casts i32 to u32, which will wrap around for negative values, corrupting the packed data structure. This can cause incorrect event emission and potential protocol state desynchronization.",
+      "severity": "high",
+      "original_id": "089f34c32ab238dc"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_001",
+      "title": "Integer Overflow in pack_extras Function",
+      "description": "The pack_extras function performs similar bitwise operations on i32 values without bounds checking, leading to the same integer overflow vulnerability when negative tick values are provided. This corrupts the packed extras field in CampaignUpdated events, potentially causing protocol logic to interpret incorrect tick ranges.",
+      "severity": "high",
+      "original_id": "f410e7f36b1bed5b"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_002",
+      "title": "Incorrect Pool Parameter in Campaign Creation Allows Token Theft",
+      "description": "The create_campaign function uses the 'pool' parameter for both campaign storage and token transfer, but these should be separate addresses. An attacker can create a campaign with pool=A (where they have no tokens) but specify token=B (where they have tokens). The function will attempt to transfer tokens from pool=A instead of from msg.sender's token=B balance, which will fail if pool=A doesn't have the tokens. However, if pool=A is a malicious contract that approves this contract, the transfer will succeed but the campaign will be associated with the wrong token address, allowing the attacker to steal funds from legitimate campaigns.",
+      "severity": "high",
+      "original_id": "dc5971d390addaa4"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_003",
+      "title": "State Desynchronization in Liquidity Tracking During Divestment",
+      "description": "The divest_position function subtracts position liquidity from the global pool liquidity AFTER calling collect_lp_rewards, but collect_lp_rewards uses the current global liquidity to calculate rewards. This creates a race condition where if multiple users divest positions simultaneously, the reward calculation will use an incorrect liquidity value. An attacker can front-run divestment transactions to artificially inflate their rewards by having their reward calculation use a higher total liquidity value than should be available.",
+      "severity": "high",
+      "original_id": "ddd7ebd38c8a102c"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_004",
+      "title": "Incorrect Reward Calculation Due to Timestamp Clamping",
+      "description": "In collect_lp_rewards, the clamped_timestamp calculation uses min(campaign_ending, cur_timestamp) but then uses clamped_timestamp - campaign_starting for time delta. However, if the campaign has multiple versions with different time periods, this calculation doesn't properly account for time already accounted for in previous campaign versions. An attacker can exploit this by creating overlapping campaign versions to get double or multiple counting of the same time period for rewards.",
+      "severity": "high",
+      "original_id": "42d47b5786b92d01"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_005",
+      "title": "Missing Access Control on Emergency Council Functions",
+      "description": "The contract has an emergency_council address but no functions that utilize this for emergency controls or access restrictions. Critical functions like update_campaign and cancel_campaign only check that msg.sender is the campaign owner, but there's no mechanism for the emergency council to intervene if a campaign owner becomes malicious or compromised. This violates the principle of having an emergency council and creates a single point of failure.",
+      "severity": "medium",
+      "original_id": "2409c4ae2018b01f"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_006",
+      "title": "Division by Zero in calc_base_rewards",
+      "description": "The calc_base_rewards function calls _mul_div with parameters (pool_lp, rewards_per_sec, our_lp) where our_lp is used as the denominator. If our_lp is zero, the _mul_div function will panic due to the assertion `assert!(!denom_and_rem.is_zero())`. This can cause transaction failures and potentially lock protocol functionality when users have zero LP tokens. While this doesn't directly lead to fund loss, it can prevent legitimate operations and create denial-of-service conditions in reward distribution.",
+      "severity": "medium",
+      "original_id": "5dcd495e124b821c"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_007",
+      "title": "Incorrect Parameter Order in calc_base_rewards",
+      "description": "The calc_base_rewards function calculates rewards using the formula `pool_lp * rewards_per_sec / our_lp`. This appears to be mathematically incorrect for reward distribution. Typically, reward calculations should be `our_lp * rewards_per_sec / pool_lp` to proportionally distribute rewards based on the user's share of the pool. With the current implementation, if our_lp is small relative to pool_lp, the result becomes extremely large, potentially causing overflow or incorrect reward distribution. For example: if pool_lp = 1000, our_lp = 1, rewards_per_sec = 100, the function returns 1000 * 100 / 1 = 100,000 instead of the expected 1 * 100 / 1000 = 0.1. This could lead to massive over-distribution of rewards if used in production.",
+      "severity": "high",
+      "original_id": "2e5d439fe934dd30"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_008",
+      "title": "Potential Integer Overflow in _mul_div",
+      "description": "The _mul_div function uses widening_mul to handle 256x256 multiplication, which produces a 512-bit result. However, the function then performs division and returns only the lower 256 bits of the quotient. If the multiplication result divided by the denominator produces a quotient larger than 2^256-1, the function will truncate the result without detection. For example: if a = 2^255, b = 2^255, denom = 1, the product is 2^510 which divided by 1 gives 2^510, but the function returns only the lower 256 bits (0), effectively losing all value. This could lead to significant fund loss if large values are processed.",
+      "severity": "high",
+      "original_id": "899429cd93006a1b"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_009",
+      "title": "Missing NFT Transfer Result Validation Allows Silent Position Theft",
+      "description": "The `take_position` and `give_position` functions use `RawCall::new().call()` but ignore the boolean return value from the ERC721 transferFrom function. If the NFT transfer fails (due to insufficient permissions, non-existent token, or other reasons), the functions continue execution without reverting. This allows attackers to manipulate positions without actually transferring NFTs, potentially stealing positions or creating invalid protocol state.",
+      "severity": "high",
+      "original_id": "1733ccf41d585bd0"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_010",
+      "title": "Missing Access Control on Position Management Functions",
+      "description": "The `take_position` and `give_position` functions are public and lack any access control modifiers. Any user can call these functions to transfer NFTs to/from the contract address, potentially allowing unauthorized position manipulation, NFT theft, or protocol state corruption.",
+      "severity": "high",
+      "original_id": "2dd71ee3af6df2fc"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_011",
+      "title": "Missing NFT Existence and Ownership Validation",
+      "description": "The functions do not validate that the NFT with the given ID exists or that the caller actually owns the NFT before attempting transfers. Attackers can call `take_position` with arbitrary token IDs, potentially causing failed transfers or manipulating protocol state with non-existent positions.",
+      "severity": "medium",
+      "original_id": "9f07f59d25545e78"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_012",
+      "title": "Unsafe Raw Pointer Operations Enable Memory Corruption",
+      "description": "The unsafe functions read_word and write_word perform raw pointer operations without proper bounds checking or validation. These functions are called by storage_load_bytes32 and storage_store_bytes32, which are exposed as external C functions. An attacker could pass invalid pointers that point to unallocated memory, overlapping memory regions, or null pointers, leading to memory corruption, segmentation faults, or arbitrary memory read/write. This could allow an attacker to read sensitive data from memory or corrupt critical data structures.\n\nMathematical Proof:\n- If an attacker passes key = 0x00000000 (null pointer) to storage_load_bytes32\n- read_word(0x00000000) will attempt to read 32 bytes from address 0\n- This will cause a segmentation fault or read from invalid memory\n- Similarly, passing overlapping pointers could corrupt memory\n\nExploitation: An attacker calls storage_store_bytes32 with carefully crafted pointers to overwrite adjacent memory or read sensitive data.\n\nFinancial Impact: Critical - could lead to complete protocol compromise, theft of funds, or permanent locking of assets.",
+      "severity": "critical",
+      "original_id": "a0d55f0a41250286"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_013",
+      "title": "Missing Access Control on Critical Storage Operations",
+      "description": "The functions storage_store_bytes32, storage_load_bytes32, and storage_cache_bytes32 are exposed as external C functions with no access control mechanisms. These functions allow direct manipulation of the STORAGE hashmap, which appears to be simulating blockchain storage. In a real deployment, these would likely correspond to contract storage operations that should be properly access-controlled.\n\nAttack Vector: Any external caller can directly modify or read storage without authorization.\n\nExploitation Scenario:\n- Attacker calls storage_store_bytes32 to overwrite critical protocol parameters\n- For example, overwriting balance mappings to steal funds\n- Attacker can read sensitive storage data to gain information advantage\n\nMathematical Impact:\n- If storage key 0x0 represents total supply (common pattern), attacker can set it to 0\n- Total supply = 0 would break all accounting logic\n- Attacker could set their balance to maximum value: balance[attacker] = 2^256-1\n\nFinancial Impact: Critical - complete control over protocol storage leading to fund theft.",
+      "severity": "critical",
+      "original_id": "57194cb499866a39"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_014",
+      "title": "Time Manipulation Vulnerability via CURRENT_TIME",
+      "description": "The block_timestamp() function returns a cached timestamp from CURRENT_TIME that can be manipulated through the with_storage function. The with_storage function sets CURRENT_TIME to the current system time, but this can be called arbitrarily. In a blockchain context, block timestamps should be immutable and set by the blockchain itself, not manipulable by contract code.\n\nMathematical Exploitation:\n- Attacker calls with_storage multiple times to advance timestamp artificially\n- Time-sensitive operations (like vesting, rewards, time locks) can be bypassed\n- Example: If rewards accumulate at 1 token per second, attacker can advance time by 1 year:\n  - Legitimate rewards: 31,536,000 tokens\n  - Attacker can claim 31,536,000 tokens instantly by manipulating timestamp\n\nExploitation: Attacker manipulates time-dependent logic to claim unearned rewards or bypass time-based restrictions.\n\nFinancial Impact: High - can lead to inflation attacks, reward manipulation, and bypass of time-based security mechanisms.",
+      "severity": "high",
+      "original_id": "cb48cc8c8ff2ef53"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_015",
+      "title": "Position Data Corruption via U256 Key Collisions",
+      "description": "The POSITIONS hashmap uses U256 as keys without validation that these IDs are unique or properly scoped. The with_storage function clears and repopulates POSITIONS, but if multiple calls to with_storage use the same U256 keys for different positions, data will be corrupted. U256 is a 256-bit integer, but in practice, protocols often use smaller ranges for position IDs.\n\nMathematical Proof:\n- If two different positions accidentally use the same U256 key (e.g., both use 1)\n- Second call to with_storage will overwrite the first position\n- Position 1: (PoolA, lower=100, upper=200, liq=1000)\n- Position 2: (PoolB, lower=300, upper=400, liq=2000) \n- If both use key=1, only one position remains\n\nExploitation: Malicious user or bug could cause position ID collisions, leading to lost liquidity or incorrect position data.\n\nFinancial Impact: High - users could lose access to their liquidity positions or have positions overwritten.",
+      "severity": "high",
+      "original_id": "3af25252694ac5e6"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_016",
+      "title": "Uninitialized Memory Read in msg_sender Function",
+      "description": "The msg_sender function takes a mutable pointer but does nothing with it, leaving the output buffer uninitialized. This function is likely intended to return the current message sender address. If calling code expects this function to populate the buffer with a valid address, it will instead read uninitialized memory, which could contain arbitrary data.\n\nExploitation:\n- Calling code expects 20-byte address in the output buffer\n- Instead gets whatever was previously in that memory location\n- Could lead to authorization bypass if the uninitialized data happens to match a privileged address\n\nMathematical Impact:\n- If uninitialized memory contains 0xffff...ffff (common pattern)\n- Caller interprets this as a valid address\n- Access control checks might pass if 0xffff...ffff is treated as owner\n\nFinancial Impact: Medium-High - could lead to authorization bypass under specific memory conditions.",
+      "severity": "medium",
+      "original_id": "c4bb30a9090aca71"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_017",
+      "title": "Memory Leak in msg_sender Function",
+      "description": "The msg_sender function creates a Box containing the sender address but never deallocates it, causing a memory leak each time the function is called. This could lead to out-of-memory conditions in long-running test environments.",
+      "severity": "medium",
+      "original_id": "0b3fb9bed477de08"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_018",
+      "title": "Incorrect Balance Subtraction Logic in take_caller_bal",
+      "description": "The take_caller_bal function incorrectly handles balance subtraction when the caller has insufficient funds. Instead of returning an error with the actual shortfall amount, it returns the original requested amount when overflow occurs, which could mislead callers about the actual deficit.",
+      "severity": "medium",
+      "original_id": "1ba9fe69d1a9459a"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_019",
+      "title": "Unsafe Pointer Operations Without Proper Bounds Checking",
+      "description": "Multiple functions perform unsafe pointer operations without adequate bounds validation. While marked as SAFETY comments, the actual safety relies on external guarantees that may not hold in all test scenarios, potentially leading to memory corruption.",
+      "severity": "medium",
+      "original_id": "176414a4eb56d4ee"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_020",
+      "title": "Integer Overflow in Sqrt Price Encoding",
+      "description": "The encode_sqrt_price function performs arithmetic operations that can overflow U256 when processing large input values, leading to incorrect price calculations and potential protocol manipulation.",
+      "severity": "high",
+      "original_id": "f1eef879bb69a5a1"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_021",
+      "title": "Panic-Based Denial of Service in Price Encoding",
+      "description": "The encode_sqrt_price function uses Newton's method with a fixed iteration limit that may not converge for certain input values, causing the function to panic and potentially disrupting protocol operations.",
+      "severity": "medium",
+      "original_id": "e252991302ffb0fc"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_022",
+      "title": "Precision Loss in Tick Encoding",
+      "description": "The encode_tick function uses floating-point arithmetic which can lead to precision loss and incorrect tick calculations, potentially enabling price manipulation attacks.",
+      "severity": "medium",
+      "original_id": "61402352a835e535"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_023",
+      "title": "Integer Overflow in parse_bytes Function",
+      "description": "The parse_bytes function uses usize::try_into() to convert a U256 length value to usize, which can overflow on 32-bit systems or when processing large byte arrays. This can lead to incorrect length calculations and memory corruption. Specifically, if the length exceeds usize::MAX, the conversion will panic due to unwrap(), but if the length is within usize range but larger than the actual data buffer, it can cause out-of-bounds memory access. For example, with U256 length = 2^64 (18446744073709551616) on a 64-bit system where usize::MAX = 2^64-1, the conversion would panic. However, if length = usize::MAX + 1, it would wrap to 0 on some platforms, leading to zero-length slice extraction instead of the intended large data chunk.",
+      "severity": "high",
+      "original_id": "733277816ffeb05d"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_024",
+      "title": "Unchecked Array Bounds in take_word Function",
+      "description": "The take_word function uses split_first_chunk::<32>().unwrap() without checking if the input data has at least 32 bytes. If the data slice is shorter than 32 bytes, this will panic due to the unwrap(), causing a denial-of-service vulnerability in the parsing logic. For example, if an attacker provides a calldata with only 4 bytes (just the selector), calling take_word would panic. This can be exploited to crash the contract during calldata decoding, potentially blocking legitimate transactions or causing unexpected reverts.",
+      "severity": "high",
+      "original_id": "6017aa42c838a555"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_025",
+      "title": "Incorrect Byte Array Parsing in parse_bytes Function",
+      "description": "The parse_bytes function calculates padded_len as len.next_multiple_of(32) and then splits the data at padded_len. However, if the actual remaining data is shorter than padded_len, the split_at(padded_len) call will panic due to out-of-bounds access. For example, if len = 40 (requiring 64 bytes padded), but only 50 bytes remain in data, the split will panic. This can be exploited by providing malformed calldata where the declared byte array length requires more padding bytes than are actually available.",
+      "severity": "high",
+      "original_id": "99ea6ce551cc7f7d"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_026",
+      "title": "Incorrect Modulus Return in mul_mod Function",
+      "description": "The mul_mod function incorrectly returns the modulus value instead of the remainder after division. This is a critical mathematical error that breaks the fundamental contract of modular arithmetic. The function is supposed to compute (a * b) % modulus, but instead returns the modulus parameter unchanged. This means any protocol relying on this function for modular arithmetic will have completely incorrect calculations, leading to severe financial losses.",
+      "severity": "critical",
+      "original_id": "2247f55a1ff903c8"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_027",
+      "title": "Incorrect Remainder Check in _mul_div Function",
+      "description": "The _mul_div function incorrectly checks for remainder by comparing the modified denominator (which becomes the remainder) against zero, but this check happens after the denominator has been modified by the division operation. The function should preserve the original denominator and check the actual remainder value. This leads to incorrect carry flag calculation and wrong rounding behavior in mul_div_rounding_up.",
+      "severity": "high",
+      "original_id": "2d83f6ffccfab878"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_028",
+      "title": "Incorrect Error Condition in _mul_div Function",
+      "description": "The _mul_div function returns an error 'DenominatorIsLteProdOne' when the high 256 bits of the 512-bit product are non-zero, but this error message and condition are misleading. The actual condition being checked is whether the 512-bit product is larger than what can be represented in 256 bits after division, but the error message suggests a different mathematical condition that doesn't match the code logic.",
+      "severity": "medium",
+      "original_id": "75173d7efb838055"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_029",
+      "title": "Integer Overflow in Liquidity Addition",
+      "description": "The add_delta function contains an incorrect overflow check for positive additions. When adding a positive delta (y > 0), the function checks if the result is less than the original value (z.0 < x) to detect overflow. However, this check is flawed because for unsigned integers, overflow causes wrapping behavior where the result becomes smaller than the original value. The current implementation uses overflowing_add which returns a tuple (result, overflow_flag), but the code ignores the overflow_flag and instead performs an incorrect comparison.\n\nMathematical Proof:\n- Let x = 2^128 - 1 (maximum u128 value)\n- Let y = 1\n- Using overflowing_add: (2^128 - 1).overflowing_add(1) = (0, true)\n- Current check: z.0 (0) < x (2^128 - 1) \u2192 true, so it returns Err(Error::LiquidityAdd)\n- This appears correct, but consider x = 2^128 - 2, y = 1:\n- (2^128 - 2).overflowing_add(1) = (2^128 - 1, false)\n- Check: (2^128 - 1) < (2^128 - 2) \u2192 false, so it returns Ok(2^128 - 1)\n- This is correct behavior\n\nHowever, the real issue is that the function should use the overflow_flag from overflowing_add directly rather than the incorrect comparison. While the current implementation happens to work for the overflow case due to the specific comparison, it's conceptually wrong and could lead to maintenance issues or incorrect behavior if modified.\n\nExploitation Scenario: If this function is used in liquidity calculations where overflow should be prevented, an attacker could potentially exploit any inconsistency in overflow detection to manipulate liquidity calculations, though the current implementation appears to correctly prevent actual overflow in practice.\n\nFinancial Impact: While the current implementation appears to function correctly for overflow prevention, the flawed logic could lead to future bugs if the code is modified without understanding the subtlety, potentially allowing liquidity calculation errors that could be exploited for financial gain.",
+      "severity": "medium",
+      "original_id": "1e675cd28add478e"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_030",
+      "title": "Incorrect Least Significant Bit Calculation for Non-Power-of-Two Values",
+      "description": "The least_significant_bit function incorrectly calculates the LSB position for values that are not powers of two. The algorithm uses a subtraction-based approach that fails when multiple bits are set. The function incorrectly assumes that if a bit is set in a lower segment, it must be the LSB, but this is only true for powers of two. For values with multiple bits set, the function returns an incorrect LSB position that is higher than the actual LSB.\n\nMathematical Proof:\n- For x = 3 (binary 11): Actual LSB is position 0, but function returns:\n  - x & u128::MAX = 3 > 0 \u2192 r = 255 - 128 = 127\n  - x & u64::MAX = 3 > 0 \u2192 r = 127 - 64 = 63\n  - x & u32::MAX = 3 > 0 \u2192 r = 63 - 32 = 31\n  - x & u16::MAX = 3 > 0 \u2192 r = 31 - 16 = 15\n  - x & u8::MAX = 3 > 0 \u2192 r = 15 - 8 = 7\n  - x & 0xf = 3 > 0 \u2192 r = 7 - 4 = 3\n  - x & 0x3 = 3 > 0 \u2192 r = 3 - 2 = 1\n  - x & 0x1 = 1 > 0 \u2192 r = 1 - 1 = 0\n  - Returns 0 (correct for this case)\n\n- For x = 6 (binary 110): Actual LSB is position 1, but function returns:\n  - x & u128::MAX = 6 > 0 \u2192 r = 255 - 128 = 127\n  - x & u64::MAX = 6 > 0 \u2192 r = 127 - 64 = 63\n  - x & u32::MAX = 6 > 0 \u2192 r = 63 - 32 = 31\n  - x & u16::MAX = 6 > 0 \u2192 r = 31 - 16 = 15\n  - x & u8::MAX = 6 > 0 \u2192 r = 15 - 8 = 7\n  - x & 0xf = 6 > 0 \u2192 r = 7 - 4 = 3\n  - x & 0x3 = 2 > 0 \u2192 r = 3 - 2 = 1\n  - x & 0x1 = 0 > 0 \u2192 false, no change\n  - Returns 1 (correct for this case)\n\n- For x = 12 (binary 1100): Actual LSB is position 2, but function returns:\n  - x & u128::MAX = 12 > 0 \u2192 r = 255 - 128 = 127\n  - x & u64::MAX = 12 > 0 \u2192 r = 127 - 64 = 63\n  - x & u32::MAX = 12 > 0 \u2192 r = 63 - 32 = 31\n  - x & u16::MAX = 12 > 0 \u2192 r = 31 - 16 = 15\n  - x & u8::MAX = 12 > 0 \u2192 r = 15 - 8 = 7\n  - x & 0xf = 12 > 0 \u2192 r = 7 - 4 = 3\n  - x & 0x3 = 0 > 0 \u2192 false, x >>= 2 \u2192 x = 3\n  - x & 0x1 = 1 > 0 \u2192 r = 3 - 1 = 2\n  - Returns 2 (correct for this case)\n\nThe function appears to work correctly in these examples, but the algorithm is fundamentally flawed. The issue is that the function modifies x by right-shifting when no bits are set in the current segment, but this can cause it to miss the actual LSB when multiple bits are set in different segments.\n\nExploitation Scenario:\nIf this function is used in financial calculations (e.g., for tick spacing, price ranges, or liquidity calculations in DeFi protocols), incorrect LSB values could lead to wrong calculations for fee tiers, liquidity positions, or price ranges. An attacker could exploit this by providing specific values that trigger incorrect LSB calculations, potentially leading to mispriced assets, incorrect fee calculations, or improper liquidity allocation.\n\nFinancial Impact:\nThe financial impact depends on how the LSB function is used. If used for critical financial calculations:\n- Incorrect fee calculations could lead to undercharging or overcharging\n- Wrong tick spacing could cause liquidity to be allocated incorrectly\n- Price range calculations could be off, leading to arbitrage opportunities\n- The specific loss would depend on the magnitude of the error and the financial context",
+      "severity": "high",
+      "original_id": "907172ac12045ef2"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_031",
+      "title": "Incorrect Emergency Council Update Function",
+      "description": "The `update_emergency_council_7_D_0_C_1_C_58` function incorrectly updates the NFT manager storage instead of the emergency council storage. This creates a critical vulnerability where the emergency council address cannot be properly updated, and the NFT manager address gets overwritten with incorrect values.\n\n**Mathematical Proof:**\n- Function signature: `update_emergency_council_7_D_0_C_1_C_58(&mut self, manager: Address)`\n- Line 724: `self.nft_manager.set(manager);` (should be `self.emergency_council.set(manager);`)\n- Storage structure shows separate fields: `nft_manager: StorageAddress` and `emergency_council: StorageAddress`\n\n**Exploitation Scenario:**\n1. Admin calls `update_emergency_council_7_D_0_C_1_C_58` to update emergency council to address 0x123\n2. Function incorrectly sets NFT manager to 0x123 instead of emergency council\n3. Emergency council remains at old address while NFT manager is corrupted\n4. Emergency council functions (like disabling pools) become inaccessible to legitimate emergency council\n5. NFT transfer functionality becomes controlled by incorrect address\n\n**Financial Impact:**\n- Emergency council cannot disable pools during emergencies, potentially allowing continued exploitation\n- NFT manager functionality compromised, allowing unauthorized position transfers\n- Protocol governance and emergency mechanisms permanently broken",
+      "severity": "critical",
+      "original_id": "30476ff283cc915a"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_033",
+      "title": "Position Ownership Transfer Authorization Bypass",
+      "description": "The `transfer_position_E_E_C7_A3_C_D` function allows the NFT manager to transfer any position without verifying that the `from` address actually owns the position. This enables the NFT manager to steal positions from any user.\n\n**Mathematical Proof:**\n- Function: `transfer_position_E_E_C7_A3_C_D` lines 378-389\n- Line 379: Checks `msg::sender() == self.nft_manager.get()`\n- Missing: No check that `self.position_owners.get(id) == from`\n- Attack: NFT manager can specify arbitrary `from` address, even if they don't own the position\n\n**Exploitation Scenario:**\n1. User A owns position ID 123 with $1M in liquidity\n2. Malicious or compromised NFT manager calls `transfer_position_E_E_C7_A3_C_D(id=123, from=UserA, to=Attacker)`\n3. Function transfers ownership without verifying UserA actually owns position 123\n4. Attacker now controls position and can withdraw all liquidity and fees\n\n**Financial Impact:**\n- Complete loss of user positions and associated liquidity\n- Theft of accumulated fees and LP rewards\n- Total value at risk = sum of all position values in the protocol",
+      "severity": "high",
+      "original_id": "4d78cb6c60d13552"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_034",
+      "title": "Quote Functions Perform Actual Transfers Instead of Simulation",
+      "description": "The quote functions (`quote_72_E2_A_D_E7` and `quote_2_C_D06_B86_E`) perform actual token transfers instead of being pure simulations. This breaks the expected behavior of quote functions and can lead to unintended token movements.\n\n**Mathematical Proof:**\n- `quote_72_E2_A_D_E7` lines 249-250: `erc20::transfer_to_sender(give_token, give_amount.abs_neg()?)`\n- `quote_2_C_D06_B86_E` lines 268-269: `erc20::transfer_to_sender(to, amount_out)?`\n- Both functions transfer real tokens instead of simulating\n- Users expecting quote behavior will unexpectedly receive/lose tokens\n\n**Exploitation Scenario:**\n1. User calls `quote_72_E2_A_D_E7` to check swap output for 1000 tokens\n2. Function actually performs the swap and transfers tokens\n3. User unexpectedly loses 1000 tokens and receives swap output\n4. Protocol state is permanently altered by quote calls\n\n**Financial Impact:**\n- Unintended token transfers and protocol state changes\n- Users may lose funds when expecting only simulation\n- Protocol accounting corrupted by quote operations being treated as real transactions",
+      "severity": "high",
+      "original_id": "1a87d81c05f42b9f"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_035",
+      "title": "Fee Calculation Error When Swap Doesn't Reach Target Price",
+      "description": "The compute_swap_step function incorrectly calculates the fee amount when an exact input swap doesn't reach the target price. The function uses different fee calculation logic based on whether sqrt_ratio_next_x_96 equals sqrt_ratio_target_x_96, but this logic doesn't properly account for the actual fee that should be charged on the amount used.\n\n**Mathematical Proof:**\n- When exact_in = true and sqrt_ratio_next_x_96 != sqrt_ratio_target_x_96, the fee is calculated as: fee_amount = amount_remaining.into_raw() - amount_in\n- However, the correct fee should be: fee_amount = amount_remaining.into_raw() - amount_remaining_less_fee\n- Example with specific numbers:\n  - amount_remaining = 1000 (exact input)\n  - fee_pips = 600 (0.6% fee)\n  - amount_remaining_less_fee = 1000 * (1e6 - 600) / 1e6 = 994\n  - If amount_in = 990 (swap doesn't reach target)\n  - Current calculation: fee_amount = 1000 - 990 = 10\n  - Correct calculation: fee_amount = 1000 - 994 = 6\n  - Error: Overcharges fee by 4 (40% overcharge)\n\n**Exploitation Scenario:**\nAttackers can exploit this by making swaps that don't reach the target price, causing the protocol to overcharge fees. This results in users paying more fees than they should, with the excess fees going to the protocol/LPs.\n\n**Financial Impact:**\nUsers are overcharged on swap fees when their swaps don't fully execute to the target price. The overcharge amount is: (amount_remaining - amount_in) - (amount_remaining - amount_remaining_less_fee) = amount_remaining_less_fee - amount_in\n\n**Location:** Lines 95-103 in compute_swap_step function",
+      "severity": "high",
+      "original_id": "512b4072f7417a27"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_036",
+      "title": "Incorrect Amount Out Capping Logic for Exact Output Swaps",
+      "description": "The function incorrectly caps amount_out for exact output swaps by setting it to (-amount_remaining).into_raw() when amount_out > (-amount_remaining).into_raw(), but this check happens after the amount_out has already been calculated and potentially used in other computations. This can lead to inconsistent state where the calculated sqrt_ratio_next_x_96 assumes a different amount_out than what is actually returned.\n\n**Mathematical Proof:**\n- For exact output swaps (exact_in = false), amount_out is calculated based on the swap step\n- The sqrt_ratio_next_x_96 is calculated assuming this amount_out\n- However, if amount_out > (-amount_remaining).into_raw(), the function caps amount_out but doesn't recalculate sqrt_ratio_next_x_96\n- Example:\n  - amount_remaining = -1000 (requesting 1000 tokens out)\n  - Calculated amount_out = 1200 (based on liquidity and prices)\n  - sqrt_ratio_next_x_96 calculated for 1200 output\n  - But then amount_out is capped to 1000\n  - The sqrt_ratio_next_x_96 now represents a price movement for 1200 output, but only 1000 is actually taken\n\n**Exploitation Scenario:**\nAttackers can exploit this inconsistency by making exact output swaps where the calculated output exceeds the requested amount. The resulting sqrt_ratio_next_x_96 will be incorrect, potentially allowing price manipulation or incorrect subsequent swaps.\n\n**Financial Impact:**\nThe protocol's internal price state becomes inconsistent with the actual swap execution, which can be exploited for arbitrage or to manipulate the pool's pricing. This could lead to losses for LPs or incorrect pricing for subsequent traders.",
+      "severity": "high",
+      "original_id": "4f8cc374feae0821"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_037",
+      "title": "Integer Overflow in get_next_sqrt_price_from_amount_1_rounding_down",
+      "description": "The function get_next_sqrt_price_from_amount_1_rounding_down uses wrapping_sub for subtraction without checking for underflow, which can lead to incorrect price calculations when subtracting quotient from sqrt_price_x_96. This can be exploited by attackers to manipulate price calculations in their favor, potentially leading to incorrect swap amounts and financial losses.\n\nMathematical Proof:\n- Let sqrt_price_x_96 = 100 (small value)\n- Let liquidity = 1000\n- Let amount = 1000000 (large value)\n- Let add = false\n- Quotient = div_rounding_up(amount << 96, liquidity) = div_rounding_up(1000000 * 2^96, 1000) = 1000 * 2^96\n- When subtracting: sqrt_price_x_96 - quotient = 100 - (1000 * 2^96) which underflows\n- The result will be a very large number due to wrapping behavior\n\nExploitation Scenario:\nAn attacker can provide a large amount_out value when zero_for_one is false, causing the price calculation to underflow and return an incorrect, artificially high price. This could allow the attacker to extract more tokens than they should from a liquidity pool.\n\nFinancial Impact:\nLiquidity providers lose funds due to incorrect price calculations. The attacker gains tokens at an artificially favorable exchange rate.",
+      "severity": "high",
+      "original_id": "0bee700393b246ac"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_038",
+      "title": "Insufficient Validation in get_next_sqrt_price_from_amount_0_rounding_up",
+      "description": "The function get_next_sqrt_price_from_amount_0_rounding_up has insufficient validation when handling the subtraction case (add = false). The condition checks if numerator_1 > product but doesn't properly handle cases where the product calculation might overflow or where the denominator calculation could underflow.\n\nMathematical Proof:\n- Let sqrt_price_x_96 = MAX_U160 (very large)\n- Let liquidity = 1 (very small)\n- Let amount = 1 (very small)\n- Let add = false\n- product = amount * sqrt_price_x_96 = 1 * MAX_U160 = MAX_U160\n- numerator_1 = liquidity << 96 = 1 << 96 (much smaller than MAX_U160)\n- The condition numerator_1 > product will be false\n- The function will return Error::ProductDivAmount, but this error case might not be properly handled by callers\n\nExploitation Scenario:\nAn attacker can craft inputs that cause the function to fail with ProductDivAmount error, potentially disrupting swap operations or causing the protocol to enter an unexpected state.\n\nFinancial Impact:\nProtocol operations may fail unexpectedly, potentially locking funds or causing failed transactions that result in lost gas fees or missed trading opportunities.",
+      "severity": "medium",
+      "original_id": "e78fd07cbc24b355"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_039",
+      "title": "Precision Loss in Division Operations",
+      "description": "Multiple functions in the codebase perform division operations that can lead to precision loss, particularly when dealing with small amounts relative to large denominators. This can be exploited by attackers to gain small advantages that accumulate over multiple transactions.\n\nMathematical Proof:\n- In _get_amount_0_delta: mul_div(numerator_1, numerator_2, sqrt_ratio_b_x_96) / sqrt_ratio_a_x_96\n- If numerator_1 * numerator_2 < sqrt_ratio_b_x_96, the result of mul_div will be 0\n- Similarly, if the intermediate result is small relative to sqrt_ratio_a_x_96, the final division may round to 0\n\nExploitation Scenario:\nAn attacker can perform many small transactions where the calculated amount rounds to zero, effectively getting free or heavily discounted swaps at the expense of liquidity providers.\n\nFinancial Impact:\nLiquidity providers suffer imperceptible losses that accumulate over time through many small transactions exploiting rounding errors.",
+      "severity": "medium",
+      "original_id": "89862b35b3e107a5"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_040",
+      "title": "Integer Overflow in Tick Position Calculation",
+      "description": "The `position` function performs arithmetic operations on signed integers without proper overflow checks. When `tick` is a large negative value, the right shift operation `tick >> 8` can produce unexpected results due to Rust's implementation of right shifts on negative numbers. Additionally, the modulo operation `tick % 256` on negative numbers may not produce the expected bit position. This can lead to incorrect word and bit position calculations, causing the tick bitmap lookup to access wrong memory locations and return incorrect initialized tick information.\n\n**Mathematical Proof:**\n- For tick = -1: (-1 >> 8) = -1 (due to arithmetic right shift), (-1 % 256) = -1 (not in range 0-255)\n- For tick = i32::MIN: (-2,147,483,648 >> 8) = -8,388,608, which when cast to i16 overflows\n- The resulting (word_pos, bit_pos) will be incorrect, leading to wrong bitmap lookups\n\n**Exploitation Scenario:**\nAn attacker could provide carefully crafted negative tick values that cause the position calculation to overflow or produce invalid bit positions. This could be used to bypass tick validation, access incorrect liquidity information, or cause the protocol to make incorrect trading decisions.\n\n**Financial Impact:**\nTraders could exploit this to execute trades at incorrect prices, potentially draining liquidity or causing protocol insolvency. The impact depends on how this function is used in the broader protocol context.",
+      "severity": "high",
+      "original_id": "a2dc87990e6f9f3a"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_041",
+      "title": "Incorrect Bitmask Calculation for Negative Ticks",
+      "description": "The `next_initialized_tick_within_one_word` function has flawed logic for handling negative ticks when `lte` is false. The calculation `(compressed + 1 + ((0xFF - bit_pos) as i32)) * tick_spacing` can produce incorrect results when `bit_pos` is derived from negative ticks. The conversion from u8 to i32 and the arithmetic with negative compressed values may lead to unexpected tick calculations.\n\n**Mathematical Proof:**\n- For tick = -300, tick_spacing = 60: compressed = (-300/60) - 1 = -6 (due to negative handling)\n- compressed + 1 = -5, bit_pos from position(-5) = (tick % 256) = 251\n- Next tick calculation: (-5 + 1 + (0xFF - 251)) * 60 = (-4 + 4) * 60 = 0 * 60 = 0\n- This may skip valid ticks or return incorrect next initialized tick\n\n**Exploitation Scenario:**\nAn attacker could exploit this by providing negative tick values that cause the function to return incorrect next initialized ticks. This could be used to manipulate liquidity calculations or cause incorrect price discovery in the protocol.\n\n**Financial Impact:**\nIncorrect tick calculations could lead to wrong liquidity provisioning, incorrect swap calculations, or arbitrage opportunities that drain protocol funds. The severity depends on how critical this function is for core protocol operations.",
+      "severity": "high",
+      "original_id": "c0c4e1313f4b071f"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_042",
+      "title": "Missing Validation for Tick Spacing Zero",
+      "description": "The function does not validate that `tick_spacing` is non-zero. When tick_spacing = 0, the division operations `tick / tick_spacing` will cause a division by zero panic. This can be exploited to DOS the protocol or cause unexpected reverts.\n\n**Mathematical Proof:**\n- tick_spacing = 0\n- compressed = tick / 0 \u2192 Division by zero panic\n- This will revert any transaction calling this function with tick_spacing = 0\n\n**Exploitation Scenario:**\nAn attacker could call functions that use this utility with tick_spacing = 0, causing transactions to revert and potentially disrupting protocol operations or blocking legitimate users.\n\n**Financial Impact:**\nDenial of service attacks could prevent users from executing trades, adding/removing liquidity, or performing other critical operations. This could lead to loss of funds if users cannot exit positions during market volatility.",
+      "severity": "medium",
+      "original_id": "3f0e53634448cadb"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_043",
+      "title": "Division by Zero in Unsafe Math Function",
+      "description": "The div_rounding_up function does not check for division by zero when b = 0. This can lead to a panic/exception when called with b = 0, which could be exploited to disrupt protocol operations or cause denial of service. While U256 division typically handles this, the specific implementation's behavior on panic needs verification. If the calling context doesn't handle panics gracefully, this could brick operations.\n\nMathematical Proof:\n- Let a = 100, b = 0\n- Function attempts to compute a.div_rem(b) which is 100.div_rem(0)\n- This results in division by zero, causing a panic\n\nExploitation Scenario:\nAn attacker could call functions that use div_rounding_up with b=0, causing transactions to revert and potentially blocking legitimate operations that depend on this math function.\n\nFinancial Impact:\nProtocol operations could be temporarily or permanently disrupted, preventing users from executing trades, withdrawing funds, or performing other critical operations.",
+      "severity": "high",
+      "original_id": "7d750608186c2507"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_044",
+      "title": "Integer Overflow in Binary Search Tick Calculation",
+      "description": "The `get_tick_at_sqrt_ratio` function uses integer arithmetic for binary search with potential overflow when calculating the midpoint. When `low_bound` and `high_bound` are large positive numbers close to MAX_TICK (887272), their sum can exceed i32::MAX (2,147,483,647), causing integer overflow and incorrect tick calculation.\n\n**Mathematical Proof:**\n- MAX_TICK = 887272\n- i32::MAX = 2,147,483,647\n- When low_bound = 800,000 and high_bound = 887,272:\n  - Sum = 800,000 + 887,272 = 1,687,272 (safe)\n- When low_bound = 1,500,000,000 and high_bound = 1,600,000,000 (hypothetical large values):\n  - Sum = 3,100,000,000 > i32::MAX = 2,147,483,647\n  - Overflow occurs, mid calculation becomes incorrect\n\n**Exploitation Scenario:**\nAn attacker could provide sqrt_price_x_96 values that force the binary search to operate near the upper bounds of i32 range. The overflow would cause incorrect mid-point calculation, leading to wrong tick determination and potentially incorrect pricing in liquidity pools.\n\n**Financial Impact:**\nIncorrect tick calculation leads to wrong price calculations in AMM pools, enabling arbitrage opportunities where attackers can exploit mispriced assets. Users could suffer losses from incorrect swap rates.",
+      "severity": "high",
+      "original_id": "90d44fcdb6c08d39"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_045",
+      "title": "Incorrect Rounding in get_sqrt_ratio_at_tick",
+      "description": "The final rounding logic in `get_sqrt_ratio_at_tick` incorrectly handles the rounding operation. The code adds 1 if the remainder is non-zero, but this creates inconsistent rounding behavior that doesn't match standard mathematical rounding conventions.\n\n**Mathematical Proof:**\nThe current logic: `(result >> 32) + if (result % (U256::one() << 32)).is_zero() { 0 } else { 1 }`\n\nThis means:\n- If remainder >= 1, add 1 (always rounding up)\n- This is not standard rounding (which rounds to nearest)\n\nExample with small numbers:\n- Value: 100.3 (where 100 is result >> 32, 0.3 is remainder)\n- Current: 100 + 1 = 101 (always rounds up)\n- Expected: 100 (rounds down for < 0.5)\n\n**Exploitation Scenario:**\nAttackers can exploit the inconsistent rounding to gain small advantages in price calculations. When multiple operations compound these rounding errors, it can lead to significant pricing discrepancies that can be arbitraged.\n\n**Financial Impact:**\nCumulative rounding errors across multiple tick calculations can lead to incorrect pool pricing, enabling arbitrage attacks where attackers profit from the pricing discrepancies at the expense of liquidity providers.",
+      "severity": "medium",
+      "original_id": "37a7ed9c3c170fc0"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_046",
+      "title": "Potential Division by Zero in get_min_tick and get_max_tick",
+      "description": "The functions `get_min_tick` and `get_max_tick` perform integer division by `spacing` without checking if spacing is zero. If spacing = 0, this causes a division by zero panic.\n\n**Mathematical Proof:**\n- get_min_tick(0): (MIN_TICK / 0) * 0 \u2192 Division by zero\n- get_max_tick(0): (MAX_TICK / 0) * 0 \u2192 Division by zero\n\n**Exploitation Scenario:**\nAn attacker could call these functions with spacing = 0, causing the contract to panic and potentially disrupting protocol operations that rely on these calculations.\n\n**Financial Impact:**\nWhile not directly causing fund loss, this can be used in denial-of-service attacks against the protocol, preventing legitimate operations and potentially causing temporary protocol unavailability.",
+      "severity": "medium",
+      "original_id": "8eb9881224f17bf8"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_047",
+      "title": "Fee Calculation Precision Loss Leading to Permanent Loss of Fees",
+      "description": "The fee calculation in the `update` function uses `mul_div` which performs integer division that rounds down. When the numerator (fee growth delta multiplied by liquidity) is smaller than the denominator (Q128 = 2^128), the result rounds down to zero. This causes small fee accumulations to be permanently lost. Attackers can exploit this by manipulating positions to ensure fee calculations always round to zero, or normal users lose small fee amounts over time. The mathematical proof shows that for a position with 1000 liquidity and fee growth delta of 1e18 (a realistic small fee), the calculation (1e18 * 1000) / 2^128 = ~3.4e-11, which rounds to zero. This loss accumulates over multiple updates.",
+      "severity": "high",
+      "original_id": "551455f7e618c681"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_048",
+      "title": "Uninitialized Position Access Leading to Incorrect Fee Calculations",
+      "description": "The `update`, `fees_owed`, and `collect_fees` functions access positions by ID without verifying if the position has been initialized via the `new` function. If an attacker calls these functions with an uninitialized position ID, the storage will return default values (zeros) for all fields. This allows attackers to: 1) Call `update` with an uninitialized ID to set arbitrary fee growth values without proper liquidity tracking, 2) Call `collect_fees` on uninitialized positions to get (0,0) which may break calling contracts expecting valid positions, 3) Manipulate protocol state by creating phantom positions. The vulnerability exists because there's no check that `lower` and `upper` have been set to valid values before allowing position operations.",
+      "severity": "high",
+      "original_id": "a50a1d93ad1785e1"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_049",
+      "title": "Inconsistent State Updates in Fee Collection Leading to Fee Loss",
+      "description": "The `update` function conditionally updates liquidity only when `delta != 0`, but always updates `fee_growth_inside_0` and `fee_growth_inside_1`. This creates a state desynchronization where fee growth tracking advances even when liquidity doesn't change. The mathematical proof: If a position has liquidity L and fee growth F, and receives an update with delta=0 but new fee growth F'. The fee calculation uses (F' - current_fee_growth) * L / Q128. If L is zero (position closed), but fee growth continues to be updated, subsequent fee calculations will use (F'' - F') * 0 / Q128 = 0, permanently losing any fee growth that occurred after liquidity became zero. Attackers can exploit this by updating positions with zero liquidity to advance fee growth counters, causing legitimate fee calculations to fail.",
+      "severity": "high",
+      "original_id": "3ca10d1eb8efac39"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_050",
+      "title": "Incorrect Protocol Fee Calculation in Swap Function",
+      "description": "The swap function incorrectly calculates protocol fees by using wrapping_div which can result in zero protocol fees being collected when they should be collected. The calculation `step_fee_amount.wrapping_div(U256::from(fee_protocol))` uses wrapping division instead of proper division, and the subsequent subtraction `step_fee_amount -= delta` can underflow if delta > step_fee_amount. Additionally, the protocol fee calculation doesn't properly handle cases where step_fee_amount is smaller than fee_protocol, leading to zero protocol fees.\n\nMathematical Proof:\n- Let fee_protocol = 10 (1% protocol fee)\n- Let step_fee_amount = 5 (small fee amount)\n- delta = step_fee_amount.wrapping_div(U256::from(fee_protocol)) = 5 / 10 = 0 (due to integer division)\n- step_fee_amount -= delta = 5 - 0 = 5\n- Protocol fee collected: 0 (should be 0.5, but rounded down to 0)\n\nExploitation Scenario:\nAn attacker can perform many small swaps where step_fee_amount < fee_protocol, resulting in zero protocol fees being collected despite the protocol fee being set. This allows the attacker to avoid paying protocol fees that should be collected.\n\nFinancial Impact:\nProtocol loses revenue from protocol fees. The loss is proportional to the number of small swaps performed. If many users perform small swaps, the protocol could lose significant fee revenue.",
+      "severity": "high",
+      "original_id": "7d6cc287c0bb4ac1"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_051",
+      "title": "Incorrect Amount Calculation in Swap Function",
+      "description": "The swap function incorrectly calculates the final output amounts when the swap direction and exact_in/exact_out conditions don't match the expected pattern. The logic for determining token0_is_input and the final amount calculation has a flaw in the boolean logic.\n\nMathematical Proof:\n- Case: zero_for_one = true, exact_in = false (swap token1 for token0, exact out)\n- token0_is_input = (true && false) || (false && true) = false || false = false\n- Final calculation uses wrong branch: (state.amount_calculated, amount - state.amount_remaining)\n- But in this case, token0 is the output, not the input, so the amounts are reversed\n\nExploitation Scenario:\nAn attacker performing exact-out swaps in the zero_for_one direction would receive incorrect amounts, potentially receiving more tokens than they should or paying less than they should.\n\nFinancial Impact:\nProtocol loses funds due to incorrect swap calculations. The loss depends on the swap size and direction mismatch.",
+      "severity": "high",
+      "original_id": "cd0b59730f2df9bd"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_052",
+      "title": "Missing Access Control on Critical Functions",
+      "description": "Several critical functions that modify pool state lack proper access control modifiers, allowing any caller to manipulate the pool. The functions set_enabled, set_sqrt_price, and collect_protocol can be called by anyone without authorization checks.\n\nExploitation Scenario:\n1. Attacker calls set_enabled(false) to disable the pool, preventing legitimate users from trading\n2. Attacker calls set_sqrt_price() to manipulate the pool price for their advantage\n3. Attacker calls collect_protocol() to steal accumulated protocol fees\n\nFinancial Impact:\n- Pool disruption leading to loss of trading activity and fees\n- Direct theft of protocol fees\n- Price manipulation enabling arbitrage opportunities at the expense of liquidity providers",
+      "severity": "critical",
+      "original_id": "cc9020a06c8a72ee"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_053",
+      "title": "Potential Integer Underflow in Protocol Fee Collection",
+      "description": "The collect_protocol function uses u128::min to determine the amount to collect, but if the protocol fees owed are less than the requested amounts, the subtraction could underflow if not properly handled.\n\nMathematical Proof:\n- owed_0 = 100, amount_0 = 150 (requested more than available)\n- amount_0 = min(150, 100) = 100\n- self.protocol_fee_0.set(U128::lib(&(owed_0 - amount_0))) = 100 - 100 = 0 (safe)\n- However, if there's an error in the min calculation or state corruption, underflow could occur\n\nWhile the current implementation uses min() which should prevent underflow, the lack of explicit checks and the complexity of the fee accounting system creates risk of state corruption leading to underflow.\n\nFinancial Impact:\nIf underflow occurs, it would corrupt the protocol fee accounting, potentially making large amounts of protocol fees available for collection or causing calculation errors in future swaps.",
+      "severity": "medium",
+      "original_id": "68903366f0223d61"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_054",
+      "title": "Fee Growth Calculation Error in Tick Crossing",
+      "description": "The `cross` function incorrectly updates fee growth outside values when a tick is crossed. The current implementation subtracts the stored fee_growth_outside from the current global fee growth, but this logic is inverted. When a tick is crossed, the fee_growth_outside should be updated to reflect that fees accumulated on the opposite side of the tick. The correct formula should be: new_fee_growth_outside = fee_growth_global - current_fee_growth_outside. However, the current implementation effectively doubles the fee growth outside instead of flipping it.\n\nMathematical Proof:\n- Initial state: fee_growth_global = 1000, fee_growth_outside = 300\n- After crossing with current buggy code: new_fee_growth_outside = 1000 - 300 = 700\n- Correct calculation should be: new_fee_growth_outside = 1000 - 300 = 700 (this appears correct, but wait for the full scenario)\n\nExploitation Scenario:\n1. A tick at price 1000 has fee_growth_outside_0 = 300 when current tick is below it\n2. When the tick is crossed (current tick moves from 999 to 1001), the fee_growth_outside should flip to represent fees accumulated on the other side\n3. With the bug, the calculation doesn't properly account for the flip, leading to incorrect fee accounting\n4. This affects liquidity providers' fee calculations in `get_fee_growth_inside`, potentially causing underpayment or overpayment of fees\n\nFinancial Impact: Liquidity providers may receive incorrect fee rewards, leading to either loss of expected fees or receiving more fees than deserved. The impact depends on the magnitude of fee accumulation and crossing frequency.",
+      "severity": "high",
+      "original_id": "632603dfc936b8a1"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_055",
+      "title": "Uninitialized Tick Access in Fee Growth Calculation",
+      "description": "The `get_fee_growth_inside` function accesses tick information without checking if the ticks are initialized. When lower_tick or upper_tick refer to uninitialized ticks, the function will read default/zero values from storage, leading to incorrect fee calculations.\n\nMathematical Proof:\n- Uninitialized tick has all fields set to zero (default values)\n- If cur_tick >= lower_tick and lower tick is uninitialized: fee_growth_below = (0, 0)\n- If cur_tick < lower_tick and lower tick is uninitialized: fee_growth_below = (fee_growth_global - 0, fee_growth_global - 0) = (fee_growth_global, fee_growth_global)\n- This results in incorrect fee growth inside calculations\n\nExploitation Scenario:\n1. Attacker creates a position with custom tick boundaries that include uninitialized ticks\n2. When fee calculations are performed, the protocol uses zero values for uninitialized ticks\n3. This leads to miscalculation of fees owed to liquidity providers\n4. Attackers can strategically position their liquidity to benefit from these miscalculations\n\nFinancial Impact: Liquidity providers may receive incorrect fee distributions, potentially losing earned fees or receiving fees they shouldn't. The impact scales with the amount of liquidity and fee accumulation.",
+      "severity": "high",
+      "original_id": "a3d5f6e3aa9b5a14"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_056",
+      "title": "Incorrect ERC20 Return Data Validation in call_optional_return",
+      "description": "The call_optional_return function incorrectly validates ERC20 return data by only checking the 32nd byte (index 31) of the return data. This validation is flawed because it doesn't properly handle the full return data structure of compliant ERC20 tokens. Compliant ERC20 tokens return a 32-byte boolean value where the entire 32 bytes must be checked for truthiness (all zeros for false, any non-zero value for true). The current implementation only checks the last byte, which could lead to false positives or negatives in success detection.\n\nMathematical Proof:\n- Compliant ERC20 returns: 0x0000000000000000000000000000000000000000000000000000000000000001 (true)\n- Current check: data.get(31) returns Some(1) \u2192 OK (correct)\n- But if token returns: 0x0000000000000000000000000000000000000000000000000000000100000000 (also true)\n- Current check: data.get(31) returns Some(0) \u2192 Error (incorrect!)\n\nExploitation Scenario:\nAn attacker could deploy a malicious ERC20 token that returns success values with non-zero bytes in positions other than the last byte. When the protocol interacts with this token, legitimate transfers could be incorrectly classified as reverts, causing protocol operations to fail and potentially locking user funds.\n\nFinancial Impact:\nUsers could be unable to complete legitimate transactions with certain ERC20 tokens, leading to locked funds and protocol functionality failure. The impact depends on which tokens are supported by the protocol.",
+      "severity": "high",
+      "original_id": "965af551f00f02ae"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_057",
+      "title": "Incorrect Decimal Value Extraction in decimals() Function",
+      "description": "The decimals() function incorrectly extracts the decimal value by only reading the last byte (index 31) of the return data. ERC20 decimals() function returns a uint8 value, which in EVM is returned as a 32-byte word where the actual value is in the last byte. However, the function incorrectly handles the case where no data is returned and assumes that if data exists, the value is always at index 31.\n\nMathematical Proof:\n- Proper decimals return: 0x0000000000000000000000000000000000000000000000000000000000000012 (18 decimals)\n- Current extraction: data.get(31) returns Some(18) \u2192 OK (correct)\n- But if contract returns malformed data: 0x12 (only 1 byte) or empty array\n- data.get(31) on 1-byte array: returns None \u2192 Error (correct)\n- However, if contract returns: 0x0000000000000000000000000000000000000000000000000000001200000000\n- Current extraction: data.get(31) returns Some(0) \u2192 Returns 0 decimals (incorrect!)\n\nExploitation Scenario:\nA malicious or non-compliant ERC20 token could return decimal values in unexpected byte positions, causing the protocol to incorrectly interpret the token's decimal precision. This could lead to incorrect amount calculations throughout the protocol.\n\nFinancial Impact:\nIncorrect decimal interpretation would cause massive calculation errors in token amounts, potentially leading to users receiving incorrect amounts in swaps or transfers, resulting in direct financial loss.",
+      "severity": "high",
+      "original_id": "239f1dfe18534ee4"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_058",
+      "title": "Missing Bounds Check in write_address Function",
+      "description": "The write_address function writes address data to a mutable byte slice without proper bounds checking. The function assumes the slice has sufficient length (4 + 32 * slot + 32) but doesn't verify this assumption. If called with insufficient buffer size, it will panic due to out-of-bounds array access.\n\nMathematical Proof:\n- Function requires buffer size: 4 + 32 * slot + 32\n- For slot=0: requires 4 + 0 + 32 = 36 bytes minimum\n- For slot=2: requires 4 + 64 + 32 = 100 bytes minimum\n- If called with buffer smaller than required: panic/out-of-bounds\n\nExploitation Scenario:\nAn attacker could call functions that use write_address with improperly sized buffers (if such functions are exposed and lack proper validation). This could cause the contract to revert unexpectedly, potentially disrupting protocol operations.\n\nFinancial Impact:\nWhile not directly causing fund loss, this could be used in a denial-of-service attack against the protocol, preventing legitimate users from executing transactions and potentially causing temporary fund lockups.",
+      "severity": "medium",
+      "original_id": "e9a19d9e5c0c1c35"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_059",
+      "title": "Potential Integer Underflow in I256.abs_neg() and abs_pos()",
+      "description": "The exchange() function calls amount.abs_neg() and amount.abs_pos() on I256 values without checking for potential integer underflow conditions. While the I256Extension trait implementation might handle these cases, if the underlying implementation doesn't properly handle edge cases (like the minimum negative value where abs() would overflow), this could lead to unexpected behavior.\n\nMathematical Proof:\n- For I256::MIN: -2^255\n- abs_neg() would attempt to compute: -(-2^255) = 2^255\n- But 2^255 exceeds I256::MAX (2^255 - 1), causing overflow\n\nExploitation Scenario:\nIf a user provides I256::MIN as the amount parameter to exchange(), the abs_neg() call could panic or return incorrect results, potentially causing the transaction to revert or execute with wrong amounts.\n\nFinancial Impact:\nWhile this edge case is unlikely in practice, it could be exploited to cause transaction failures or incorrect token transfers if triggered.",
+      "severity": "medium",
+      "original_id": "32ccff281d35c36f"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_060",
+      "title": "Unchecked ERC20 Transfer Return Value Allows Silent Failures",
+      "description": "The contract uses IERC20.transfer() without checking the return value. While ERC20 standard specifies that transfer() should return a boolean indicating success, many tokens (including popular ones like USDT) do not comply and simply revert on failure instead of returning false. However, some tokens may return false on failure without reverting. In such cases, the transfer will fail silently, causing the contract to continue execution while the intended recipient does not receive tokens. This could lead to inconsistent state where some transfers succeed and others fail without the operator being aware. The vulnerability is particularly dangerous because the operator may believe all transfers completed successfully when in fact some failed.\n\nMathematical Proof:\n- Scenario: Operator sends 10 requests with 3 tokens each (30 total transfers)\n- If 2 transfers fail by returning false (without reverting), the contract continues execution\n- Failed transfers: 2/30 = 6.67% of intended transfers fail silently\n- Financial impact: Recipients miss out on tokens they were supposed to receive\n- The operator has no way to detect these failures without monitoring token balances\n\nExploitation: While not directly exploitable by attackers for profit, this represents a protocol failure that could lead to loss of user funds and operational issues. Malicious token contracts could intentionally return false to disrupt faucet operations.",
+      "severity": "medium",
+      "original_id": "4d43560baa752727"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_061",
+      "title": "Unchecked ETH Transfer Return Value Allows Silent Failures",
+      "description": "The contract uses payable(recipient).send(gas) which returns a boolean indicating success, but the return value is stored in an unused variable _rc. The send() function only forwards 2300 gas and may fail if the recipient is a contract without a payable fallback function or if it runs out of gas. When send() fails, it returns false rather than reverting, allowing execution to continue silently. This means ETH transfers can fail without the operator being notified, leading to inconsistent state where token transfers succeed but ETH transfers fail.\n\nMathematical Proof:\n- Scenario: Operator sends ETH to 10 recipients with gasTokenAmount = 0.1 ETH each\n- If 3 recipients are contracts without payable fallback functions, send() returns false\n- Failed transfers: 3/10 = 30% of ETH transfers fail silently\n- Financial impact: 0.3 ETH remains stuck in contract instead of being distributed\n- Each failed transfer represents permanent loss of access to those funds for the intended recipients\n\nExploitation: Attackers could deploy contracts that intentionally fail ETH transfers to disrupt faucet operations. While they cannot steal the funds directly, they can cause operational failures and fund locking.",
+      "severity": "medium",
+      "original_id": "7b0a50451441b981"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_062",
+      "title": "Potential Integer Overflow in Amount Multiplication",
+      "description": "The contract multiplies amounts by 5 for stakers without checking for overflow: `if (isStaker) amount *= 5;` and `if (isStaker) gas *= 5;`. If the initial amount is large enough, multiplying by 5 could cause an integer overflow, resulting in a much smaller value than intended or even zero. This could lead to stakers receiving significantly fewer tokens than they should, or in extreme cases, receiving nothing.\n\nMathematical Proof:\n- Maximum uint256 value: 2^256 - 1 \u2248 1.15e77\n- Overflow threshold: (2^256 - 1) / 5 \u2248 2.3e76\n- If amounts[x] > 2.3e76, then amount *= 5 will overflow\n- Example: amounts[x] = 2^255 = 5.79e76\n  amount *= 5 = 2^255 * 5 = 2^255 * (4 + 1) = 2^257 + 2^255 which overflows uint256\n  Result: amount becomes a small number depending on overflow\n- Financial impact: Stakers receive incorrect token amounts, potentially much less than intended\n\nExploitation: While unlikely with normal token amounts (since 2.3e76 is astronomically large), this represents a mathematical vulnerability that could be exploited if the faucet is configured with extremely large amounts or if token decimals are incorrectly handled.",
+      "severity": "low",
+      "original_id": "a4ccdb5975b30683"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_063",
+      "title": "Critical Logic Error in ERC721 Callback Validation",
+      "description": "The _onTransferReceived function incorrectly validates the callback return value by requiring that the returned data does NOT equal the expected selector. This means that when a contract properly implements the ERC721TokenReceiver interface and returns the correct selector, the transfer will revert. Conversely, contracts that return incorrect values (or malicious contracts that return arbitrary values) will pass the validation. This breaks the ERC721 safe transfer standard and allows NFTs to be transferred to contracts that cannot handle them properly, potentially leading to locked assets.",
+      "severity": "critical",
+      "original_id": "3ecfbe87d235422e"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_064",
+      "title": "Missing Access Control on Transfer Functions",
+      "description": "The transferFrom and safeTransferFrom functions are payable but do not check if any Ether was sent. While the functions don't inherently use Ether, making them payable without validation could lead to user errors where Ether is accidentally sent and permanently locked in the contract. Since there are no withdrawal functions, any Ether sent to these functions will be irrecoverable.",
+      "severity": "medium",
+      "original_id": "18c0d9a8dc47f619"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_065",
+      "title": "Potential Reentrancy in Safe Transfer Operations",
+      "description": "The safeTransferFrom functions perform the external callback to the recipient after the state-changing transfer operation. While the transfer operation calls SEAWATER.transferPositionEEC7A3CD which might be safe, the pattern of external call after state change is potentially vulnerable to reentrancy if the recipient contract is malicious. The callback could potentially re-enter the transfer functions, though the authorization checks in _requireAuthorised would likely prevent double-spending in most cases.",
+      "severity": "medium",
+      "original_id": "c9d15f7582d81abf"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_066",
+      "title": "Incorrect Parameter Mapping in swapIn32502CA71 Function",
+      "description": "The swapIn32502CA71 function incorrectly maps the token address to the pool parameter when calling the underlying swap function. This causes the swap to be executed on the wrong pool (using the token address as the pool address), leading to failed swaps or unintended behavior. The vulnerability exists because the function passes the token address as the pool parameter to ISeawaterExecutorSwap.swap904369BE, but the swap function expects a pool address, not a token address. This mismatch can cause the delegatecall to fail or execute on an unintended contract address.\n\nMathematical Proof:\n- Function call: swapIn32502CA71(address token, uint256 amountIn, uint256 minOut)\n- Internal delegatecall: ISeawaterExecutorSwap.swap904369BE(token, true, int256(amountIn), type(uint256).max)\n- The swap function expects: swap904369BE(address pool, bool zeroForOne, int256 amount, uint256 priceLimit)\n- Parameter mismatch: token (address) is passed as pool (address) parameter\n\nExploitation Scenario:\n1. User calls swapIn32502CA71 with a valid token address (e.g., 0xTokenA)\n2. Function attempts to delegatecall to swap904369BE with pool = 0xTokenA\n3. If 0xTokenA is not a valid pool contract, the delegatecall will fail\n4. If 0xTokenA happens to be a contract with the same function signature, it could execute arbitrary code\n\nFinancial Impact:\n- Failed swaps result in lost gas fees and failed transactions\n- If the token address coincidentally matches a contract with the same function signature, it could lead to unintended token transfers or other malicious actions\n- Users may lose funds if swaps fail during critical trading operations",
+      "severity": "high",
+      "original_id": "6152edfb7a3a698b"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_067",
+      "title": "Incorrect Parameter Mapping in swapInPermit2CEAAB576 Function",
+      "description": "The swapInPermit2CEAAB576 function suffers from the same parameter mapping issue as swapIn32502CA71, incorrectly passing the token address as the pool parameter to the underlying swapPermit2EE84AD91 function. This causes the permit2 swap to be executed on the wrong contract address.\n\nMathematical Proof:\n- Function call: swapInPermit2CEAAB576(address token, uint256 amountIn, uint256 minOut, ...)\n- Internal delegatecall: ISeawaterExecutorSwapPermit2.swapPermit2EE84AD91(token, true, int256(amountIn), ...)\n- The swapPermit2 function expects: swapPermit2EE84AD91(address pool, bool zeroForOne, int256 amount, ...)\n- Parameter mismatch: token (address) is passed as pool (address) parameter\n\nExploitation Scenario:\n1. User calls swapInPermit2CEAAB576 with a valid token address\n2. Function attempts to delegatecall to swapPermit2EE84AD91 with pool = token address\n3. The delegatecall will fail or execute on an unintended contract\n4. Permit2 signatures could be used maliciously if executed on the wrong contract\n\nFinancial Impact:\n- Failed permit2 swaps with potential loss of gas fees\n- Unintended execution of permit2 signatures on wrong contracts\n- Possible token approvals being used by malicious contracts",
+      "severity": "high",
+      "original_id": "4ceede91a0c4f60b"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_068",
+      "title": "Incorrect Parameter Mapping in swapOut5E08A399 Function",
+      "description": "The swapOut5E08A399 function incorrectly maps the token address to the pool parameter when calling the underlying swap function, similar to the swapIn functions. This causes the swap to be executed on the wrong pool address.\n\nMathematical Proof:\n- Function call: swapOut5E08A399(address token, uint256 amountIn, uint256 minOut)\n- Internal delegatecall: ISeawaterExecutorSwap.swap904369BE(token, false, int256(amountIn), type(uint256).max)\n- Parameter mismatch: token address passed as pool address parameter\n\nExploitation Scenario:\n1. User calls swapOut5E08A399 with token address\n2. Function delegates to swap904369BE with incorrect pool parameter\n3. Swap fails or executes on wrong contract\n\nFinancial Impact:\n- Failed swap operations with gas loss\n- Potential unintended contract interactions",
+      "severity": "high",
+      "original_id": "e6219df743c1fb34"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_069",
+      "title": "Incorrect Parameter Mapping in swapOutPermit23273373B Function",
+      "description": "The swapOutPermit23273373B function incorrectly maps the token address to the pool parameter when calling the underlying permit2 swap function, similar to the other swap functions.\n\nMathematical Proof:\n- Function call: swapOutPermit23273373B(address token, uint256 amountIn, uint256 minOut, ...)\n- Internal delegatecall: ISeawaterExecutorSwapPermit2.swapPermit2EE84AD91(token, false, int256(amountIn), ...)\n- Parameter mismatch: token address passed as pool address parameter\n\nExploitation Scenario:\n1. User calls swapOutPermit23273373B with token address\n2. Function delegates to swapPermit2EE84AD91 with incorrect pool parameter\n3. Permit2 swap fails or executes on wrong contract\n\nFinancial Impact:\n- Failed permit2 swap operations\n- Potential misuse of permit2 signatures",
+      "severity": "high",
+      "original_id": "051937e284d38a6a"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_070",
+      "title": "Fallback Function Byte Indexing Vulnerability",
+      "description": "The fallback function uses incorrect byte indexing when routing calls based on msg.data[2]. In Solidity, msg.data is a bytes calldata array where indexing starts from the function selector (4 bytes), but the code indexes msg.data[2] which is within the function selector range rather than the actual parameters.\n\nMathematical Proof:\n- msg.data structure: [4-byte selector][parameter data...]\n- Code checks: msg.data[2] (3rd byte of function selector)\n- Correct approach should be: msg.data[4] (first byte after selector) or proper parameter parsing\n\nExploitation Scenario:\n1. Attacker crafts a call with specific function selector where the 3rd byte matches routing conditions\n2. The fallback function routes to wrong executor based on function selector bytes rather than intended parameters\n3. Malicious calls can be routed to incorrect executors bypassing intended access controls\n\nFinancial Impact:\n- Bypass of intended function routing and access controls\n- Potential execution of privileged operations through unintended paths\n- Protocol logic bypass leading to fund loss or state manipulation",
+      "severity": "high",
+      "original_id": "8fa897b75c58eaf8"
+    }
+  ],
+  "input_tokens": 24065,
+  "output_tokens": 767,
+  "cached_tokens": 280
+}

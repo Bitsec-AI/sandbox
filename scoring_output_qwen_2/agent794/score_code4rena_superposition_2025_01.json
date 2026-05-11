@@ -1,0 +1,737 @@
+{
+  "project": "code4rena_superposition_2025_01",
+  "agent": "agent794",
+  "status": "success",
+  "timestamp": "2026-04-09T13:10:34.591238",
+  "elapsed_seconds": 290.7,
+  "total_expected": 2,
+  "total_found": 100,
+  "true_positives": 1,
+  "false_negatives": 1,
+  "false_positives": 99,
+  "detection_rate": 0.5,
+  "precision": 0.01,
+  "f1_score": 0.0196078431372549,
+  "matched_findings": [
+    {
+      "id": "code4rena_superposition_2025_01_expected_001",
+      "expected": "No slippage control when withdrawing a position leads to loss of funds",
+      "matched": "Missing User Protection in Position Reduction Operations",
+      "confidence": 0.9,
+      "justification": "Finding 7 directly addresses the lack of user protection in position reduction operations by not allowing users to specify minimum acceptable outputs, which aligns with the expected vulnerability's core issue of no slippage control leading to fund loss.",
+      "severity": "high",
+      "expected_description": "Submitted by\nDadeKuma\n\nAn attacker can sandwich a user withdrawing funds as there is no way to put slippage protection, which will cause a large loss of funds for the victim.\n\ndecr_position_09293696\nfunction was removed entirely. Now, the only way for users to withdraw funds is by calling\nupdate_position_C_7_F_1_F_740\nwith negative delta.\n\nThe issue is that in this way, users can\u2019t have any slippage protection.\ndecr_position\nallowed users to choose an\namount_0_min\nand\namount_1_min\nof funds to receive, which is now zero.\n\nThis allows an attacker to sandwich their withdrawal to steal a large amount of funds.\n\nConsider reintroducing a withdrawal function that offers slippage protection to users (they should be able to choose\namount_0_min, amount_1_min, amount_0_desired\n, and\namount_1_desired\n).\n\naf-afk (Superposition) acknowledged\n\n0xsomeone (judge) commented\n:\n\nThe submission has demonstrated that liquidity withdrawals from the system are inherently insecure due to being open to arbitrage opportunities as no slippage is enforced.\nI am unsure why the Sponsor has opted to acknowledge this submission as it is a tangible vulnerability and one that merits a high-risk rating. The protocol does not expose a secure way to natively extract funds from it whilst offering this functionality for other types of interactions.\n\naf-afk (Superposition) commented\n:\n\n@0xsomeone - we won\u2019t fix this for now since Superposition has a centralised sequencer, and there\u2019s no MEV that\u2019s possible for a third-party to extract using the base interaction directly with our provider.\n\nDadeKuma (warden) commented\n:\n\n@af-afk - I highly suggest fixing this issue, as a centralized sequencer does not prevent MEV extraction. You can check\nthis impact\non Arbitrum, for example.",
+      "found_description": "The `update_position` and `adjust_position` functions reduce user positions and liquidity without providing users with mechanisms to specify minimum acceptable outputs. This exposes users to unfavorable execution when operations can be partial or manipulated.",
+      "found_id": "789cbd55f761a5bd",
+      "tool_finding_index": 22
+    }
+  ],
+  "missed_findings": [
+    {
+      "id": "code4rena_superposition_2025_01_expected_000",
+      "title": "Users are incorrectly refunded when liquidity is insufficient",
+      "description": "Submitted by\nZanyBonzy\n, also found by\nQ7\n,\nTigerfrake\n, and\nDadeKuma\n\nIn\nswap_2_internal\n, if the first pool doesn\u2019t have enough liquidity,\namount_in\ncould be less than\noriginal_amount\n, and as expected,\namount_in\nis taken from swapper. But the function still refunds\noriginal_amount - amount_in\nto the user if\noriginal_amount\nis more than\namount_in\n.\n\nFrom the function, we can see than\namount_in\nis taken from swapper. Then the function checks if\noriginal_amount\nis more than\namount_in\n, before which the difference is transferred back to the sender.\n\n>>      erc20::\ntake\n(from, amount_in, permit2)?;\nerc20::\ntransfer_to_sender\n(to, amount_out)?;\n>>\nif\noriginal_amount > amount_in {\nerc20::\ntransfer_to_sender\n(\nto,\noriginal_amount\n>>                  .\nchecked_sub\n(amount_in)\n.\nok_or\n(Error::TransferToSenderSub)?,\n)?;\n}\n\nAn unnecessary refund is processed leading to loss of funds for the protocol. Malicious users can take advantage of this to \u201crob\u201d the protocol of funds through the refunds.\n\nNo need to process refunds since\namount_in\nis already taken.\n\nerc20::take(from, amount_in, permit2)?;\nerc20::transfer_to_sender(to, amount_out)?;\n-       if original_amount > amount_in {\n-           erc20::transfer_to_sender(\n-               to,\n-               original_amount\n-                   .checked_sub(amount_in)\n-                   .ok_or(Error::TransferToSenderSub)?,\n-           )?;\n}\n\nContext\n\naf-afk (Superposition) confirmed\n\n0xsomeone (judge) commented\n:\n\nThe submission and its duplicates have correctly identified that the refund process in the\nswap_2_internal_erc20\nfunction is extraneous and thus results in excess funds being sent to the user.\nI believe a high-risk severity rating is appropriate as the issue manifests itself in all cases and would result in direct fund loss for the AMM pair.\n\naf-afk (Superposition) commented\n:\n\nFor\nIssue #12\n@0xsomeone how does this compare to your findings here?\n\n0xsomeone (judge) commented\n:\n\n@af-afk - I am unsure what comparison is to be drawn here. None of the findings are mine as I am a judge, and I do not believe that the finding referenced has any relation to this one when it comes to impact.\n\naf-afk (Superposition) commented\n:\n\nSorry, I should clarify, I mean your assessment that both are valid. It\u2019s not possible for both of these to be correct, right? I\u2019m of the opinion that this refund should not be implemented after consideration (and this submission) since the contract\u2019s quoting functionality should indicate that this is taking place.\n\n0xsomeone (judge) commented\n:\n\n@af-afk - the original submission shared was submitted in a audit that relies on a different commit hash from this one. As we can observe in the\nhighlighted code segment\n, the code originally transferred the\noriginal_amount\nfrom the\nfrom\naddress.\nIn the remediated code that was part of this audit, the code was updated to\nsimultaneously extract the\namount_in\nfrom the user and perform a refund\n. The incorrect aspect is that two different solutions for the same problem were incorporated, rendering the refund to be extraneous. I hope this clears things up!\n\naf-afk (Superposition) commented\n:\n\nFixed:\nhttps://github.com/fluidity-money/long.so/commit/9c7657e8336208e3397b30c32d557379f88a5b87",
+      "severity": "high",
+      "reason": "Not found"
+    }
+  ],
+  "undecided_findings": [],
+  "extra_findings": [
+    {
+      "id": "code4rena_superposition_2025_01_tool_000",
+      "title": "Authorization Context Binding Missing in Fallback Function",
+      "description": "The fallback function in SeawaterAMM contract allows arbitrary execution routing based on the third byte of calldata, but does not bind the executor address to the authorization context. This allows front-running attacks where an attacker can intercept and reroute calls intended for legitimate executors.",
+      "severity": "high",
+      "original_id": "SW-001"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_001",
+      "title": "Missing Access Control on Pool Creation Allows Fee Manipulation",
+      "description": "The createPoolD650E2D0 function lacks access control, allowing any caller to create pools. This enables attackers to create pools with manipulated fee structures before legitimate pools are established, affecting fee calculations and potentially enabling fee arbitrage opportunities.",
+      "severity": "high",
+      "original_id": "0de0c629f51fb907"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_002",
+      "title": "Incorrect Return Value Representation in quote2CD06B8E Function",
+      "description": "The quote2CD06B8E function implements ISeawaterExecutorQuote interface but returns no value, while callers expect uint256 values for amount0 and amount1 calculations. This causes downstream calculations in swap operations to use uninitialized memory values, breaking price calculations and potentially allowing flash loan attacks.",
+      "severity": "high",
+      "original_id": "b1c163d677b7cf66"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_003",
+      "title": "Data Access Boundary Violation in positionLiquidity8D11C045 Function",
+      "description": "The positionLiquidity8D11C045 function accesses position data without verifying the position ID exists. When called with a non-existent position ID, it returns uninitialized storage values, causing liquidity calculations in position management operations to use garbage values, breaking position accounting and potentially allowing unauthorized position manipulation.",
+      "severity": "high",
+      "original_id": "26bdc863e4b51db8"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_004",
+      "title": "Missing User Protection in Position Reduction Functions",
+      "description": "The functions `decrPosition`, `decrPositionPermit2`, and `incrPosition` reduce user positions or withdraw assets without allowing users to specify minimum acceptable outputs. This exposes users to unfavorable execution outcomes when execution is incomplete or partial.",
+      "severity": "high",
+      "original_id": "4df5e7e7ab4bee23"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_005",
+      "title": "Validation Timing Vulnerability in Swap Functions",
+      "description": "The swap functions `swap904369BE`, `swap2ExactIn41203F1D`, `swapIn32502CA71`, `swapInPermit2CEAAB576`, `swapOut5E08A399`, `swapOutPermit23273373B`, `swap2ExactInPermit236B2FDD8`, and `swapPermit2EE84AD91` execute the swap operation before validating the output amount. This allows invalid operations to complete if validation fails after execution.",
+      "severity": "high",
+      "original_id": "be4404dbc4822c83"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_006",
+      "title": "Access Control Missing in Interface Functions",
+      "description": "The interface `ISeawaterAMM` declares critical functions like `createPoolD650E2D0`, `collectProtocol7540FA9F`, `enablePool57DA658`, `authoriseEnabler5B17C274`, `setSqrtPriceFF4DB98C`, `updateNftManager9BDF41F6`, and `updateEmergencyCouncil7D0C1C58` without access control modifiers. This allows unauthorized users to perform critical administrative operations.",
+      "severity": "high",
+      "original_id": "9fcb59ee67775fc1"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_007",
+      "title": "State Synchronization Issue in Position Functions",
+      "description": "The functions `decrPosition`, `decrPositionPermit2`, and `incrPosition` modify state (position balances) before calling dependent internal functions. If the dependent function fails, the state changes are not properly rolled back, leading to inconsistent state.",
+      "severity": "high",
+      "original_id": "9b21e9a8c532dba3"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_008",
+      "title": "Return Value Unit Mismatch in Swap Functions",
+      "description": "The swap functions `swap904369BE`, `swap2ExactIn41203F1D`, `swapIn32502CA71`, `swapInPermit2CEAAB576`, `swapOut5E02399`, `swapOutPer2373373B`, `swap2ExactInPermit236B2FDD8`, and `swapPermit2EE84AD91` return values in different units than expected by callers. This causes incorrect calculations in dependent functions that use these return values.",
+      "severity": "high",
+      "original_id": "913515e88756ce2b"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_009",
+      "title": "State Commitment Timing Issue in Swap Functions",
+      "description": "The swap functions `swap904369BE`, `swap2ExactIn41203F1D`, `swapIn32502CA71`, `swapInPermit2CEAAB576`, `swapOut5E02399`, `swapOutPer237337373B`, `swap2ExactInPermit236B2FDD8`, and `swapPermit2EE84AD91` commit state (nonces, balances) before executing the swap operation. If the swap operation fails, the committed state is wasted, allowing replay attacks.",
+      "severity": "high",
+      "original_id": "80e711e527f80364"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_010",
+      "title": "Missing User Protection in Position Adjustment Functions",
+      "description": "The adjust_position_internal and related functions (incr_position, decr_position) allow users to decrease their positions without requiring users to specify minimum acceptable outputs. This exposes users to unfavorable execution when the protocol determines the output amounts without user constraints.",
+      "severity": "high",
+      "original_id": "VULN-001"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_011",
+      "title": "Division by Zero in get_next_sqrt_price_from_amount_0_rounding_up",
+      "description": "In get_next_sqrt_price_from_amount_0_rounding_up, when add=true and product == sqrt_price_x_96 * amount / amount == sqrt_price_x_96, the code attempts to compute mul_div_rounding_up(numerator_1, sqrt_price_x_96, denominator) where denominator = numerator_1 + product. However, if numerator_1 == 0 (when liquidity == 0), this results in division by zero. Since liquidity is validated in the calling functions, this path is not reachable through normal inputs, but the code structure allows this vulnerability exists in the internal function.",
+      "severity": "high",
+      "original_id": "2f1c9dbbc1c4e64f"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_012",
+      "title": "Incorrect Liquidity Calculation in get_amounts_for_delta",
+      "description": "In get_amounts_for_delta, when sqrt_ratio_x_96 <= sqrt_ratio_a_x_96, the function returns (get_amount_0_delta(...), I256::ZERO). However, when sqrt_ratio_x_96 > sqrt_ratio_b_x_96, it returns (get_amount_0_delta(...), get_amount_1_delta(...)). The issue is that when sqrt_ratio_x_96 > sqrt_ratio_b_x_96, the function should return (get_amount_0_delta(...), get_amount_1_delta(...)), but the condition sqrt_ratio_x_96 > sqrt_ratio_b_x_96 is checked after sqrt_ratio_x_96 <= sqrt_ratio_a_x_96, so this path is unreachable. The correct logic should be: if sqrt_ratio_x_96 <= sqrt_ratio_a_x_96, return (get_amount_0_delta(...), I256::ZERO); else if sqrt_ratio_x_96 >= sqrt_ratio_b_x_96, return (get_amount_0_delta(...), get_amount_1_delta(...)); else return (get_amount_0_delta(...), get_amount_1_delta(...)).",
+      "severity": "high",
+      "original_id": "334ba835f1133878"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_013",
+      "title": "Missing Validation in get_liquidity_for_amounts",
+      "description": "In get_liquidity_for_amounts, the function calls get_liquidity_for_amount_0 and get_liquidity_for_amount_1, but does not validate that the liquidity values are within expected bounds. If the liquidity values are extremely large, this could lead to overflow or other issues.",
+      "severity": "medium",
+      "original_id": "8cd547df59940524"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_014",
+      "title": "Missing msg.value Validation in Fallback Function",
+      "description": "The fallback function in SeawaterAMM contract does not validate msg.value before processing calls. This allows attackers to send ETH to the contract with malicious calldata that triggers expensive operations, potentially causing out-of-gas failures and denial of service.",
+      "severity": "high",
+      "original_id": "69b5070fa6b77a17"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_015",
+      "title": "Missing msg.sender Validation in Fallback Function",
+      "description": "The fallback function in SeawaterAMM contract does not validate msg.sender before processing calls. This allows attackers to send calls with malicious calldata that triggers expensive operations, potentially causing out-of-gas failures and denial of service.",
+      "severity": "high",
+      "original_id": "ecbae92458130b8e"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_016",
+      "title": "Division by Zero in get_next_sqrt_price_from_amount_0_rounding_up",
+      "description": "The function get_next_sqrt_price_from_amount_0_rounding_up can cause a division by zero error when the denominator becomes zero. This occurs when numerator_1 == product, leading to denominator = numerator_1 - product = 0. The function does not validate that the denominator is non-zero before performing the division operation.",
+      "severity": "critical",
+      "original_id": "vuln-001"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_017",
+      "title": "Missing Domain Validation in get_amount_0_delta",
+      "description": "The function _get_amount_0_delta does not validate that the liquidity parameter is within the valid mathematical domain. When liquidity is zero, the function proceeds with calculations that involve division by liquidity, causing undefined behavior. The function should validate that liquidity > 0 before proceeding with calculations.",
+      "severity": "critical",
+      "original_id": "vuln-002"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_018",
+      "title": "Integer Overflow in get_amounts_for_delta",
+      "description": "The function get_amounts_for_delta can cause integer overflow when calculating quotient = amount << 96. When amount > MAX_U160 >> 96, the left shift operation overflows, causing undefined behavior. The function does not validate that amount is within safe bounds before performing the shift operation.",
+      "severity": "high",
+      "original_id": "vuln-003"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_019",
+      "title": "Missing Access Control on update_position Allows Fee Growth Manipulation",
+      "description": "The `update_position` function updates critical state variables including `fee_growth_global_0`, `fee_growth_1`, `liquidity`, and tick states without proper access control. This allows any user to manipulate the timing of fee growth updates before liquidity changes, enabling fee avoidance.",
+      "severity": "high",
+      "original_id": "f845ab23d7e16190"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_020",
+      "title": "Incorrect Unit Handling in adjust_position Returns",
+      "description": "The `adjust_position` function receives `amount_0` and `amount_1` as `U256` but internally converts to `i128` for `delta`. However, the return value `(I256, I256)` is passed directly to `update_position` without verifying the representation matches what `update_position` expects for its calculations.",
+      "severity": "high",
+      "original_id": "67c0c1c0d31b98c8"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_021",
+      "title": "Data Access Desynchronization in Tick Bitmap Iteration",
+      "description": "The `update` function in `tick.rs` iterates over `self.ticks` using `self.tick_bitmap.bitmap` but does not verify that the iteration bounds remain synchronized with the actual tick data. When ticks are cleared after liquidity removal, the bitmap may still reference cleared ticks, causing missed updates.",
+      "severity": "high",
+      "original_id": "44c5c65bb80b1cbb"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_023",
+      "title": "Validation Timing Vulnerability in update_position",
+      "description": "The `update_position` function performs state changes before validation, allowing invalid operations to complete. The function updates liquidity and position state before validating parameters, enabling invalid operations to execute.",
+      "severity": "high",
+      "original_id": "7396466578745e7d"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_024",
+      "title": "State Synchronization Issue in update_position",
+      "description": "The `update_position` function updates state before dependent operations execute, causing state synchronization issues. The function modifies liquidity and position state before dependent operations execute, causing state synchronization issues.",
+      "severity": "high",
+      "original_id": "bab3ff17a9e8a1bb"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_025",
+      "title": "Return Value Unit Mismatch in adjust_position",
+      "description": "The `adjust_position` function returns values in incorrect units, causing unit mismatches. The function returns values in one unit when another is expected, causing unit mismatches.",
+      "severity": "high",
+      "original_id": "f60300e007da9087"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_026",
+      "title": "Tick Spacing Validation Bypass in create_position",
+      "description": "The create_position function validates tick spacing but uses inconsistent type conversions that allow tick spacing values that should be rejected.",
+      "severity": "high",
+      "original_id": "9ce317dcf5bfc7a5"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_027",
+      "title": "Missing Tick Spacing Validation in update_position",
+      "description": "The update_position function does not validate that the position's ticks are aligned to the pool's tick spacing, allowing creation of positions with misaligned ticks.",
+      "severity": "medium",
+      "original_id": "b31fc4f4c082d6ba"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_028",
+      "title": "Inconsistent Tick Spacing Handling",
+      "description": "The code has inconsistent handling of tick spacing across different functions, with some functions using the pool's tick spacing and others using a local variable, leading to potential inconsistencies.",
+      "severity": "medium",
+      "original_id": "18cbd80bfd5bbdbf"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_029",
+      "title": "Missing Tick Spacing Validation in adjust_position",
+      "description": "The adjust_position function does not validate that the position's ticks are aligned to the pool's tick spacing, allowing creation of positions with misaligned ticks.",
+      "severity": "medium",
+      "original_id": "aba318a091b84832"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_030",
+      "title": "Inconsistent Tick Spacing Handling in adjust_position",
+      "description": "The adjust_position function has inconsistent handling of tick spacing, using both the pool's tick spacing and a local variable, leading to potential inconsistencies.",
+      "severity": "medium",
+      "original_id": "ae9470a37f00babf"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_031",
+      "title": "Missing Caller Verification in create_position Allows Unauthorized Position Creation",
+      "description": "The create_position function lacks verification that the caller is authorized to create a position for the given ID. This allows any caller to create positions with arbitrary IDs, potentially leading to fund loss if users' funds are allocated to malicious positions.",
+      "severity": "high",
+      "original_id": "dce66511c94834cb"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_032",
+      "title": "Missing Position Existence Check in update_position Allows Operations on Non-Existent Positions",
+      "description": "The update_position function does not verify that the position ID exists before performing operations. This allows operations on non-existent positions, potentially leading to incorrect accounting and fund loss.",
+      "severity": "high",
+      "original_id": "54ee31b8d6670105"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_033",
+      "title": "Missing Position Existence Check in adjust_position Allows Operations on Non-Existent Positions",
+      "description": "The adjust_position function does not verify that the position ID exists before performing operations. This allows operations on non-existent positions, potentially leading to incorrect accounting and fund loss.",
+      "severity": "high",
+      "original_id": "9839c5f2a714ac1e"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_034",
+      "title": "Missing Position Existence Check in collect Allows Operations on Non-Existent Positions",
+      "description": "The collect function does not verify that the position ID exists before performing operations. This allows operations on non-existent positions, potentially leading to incorrect accounting and fund loss.",
+      "severity": "high",
+      "original_id": "5ac6c8edf371b62d"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_035",
+      "title": "Missing Position Existence Check in get_position_liquidity Allows Operations on Non-Existent Positions",
+      "description": "The get_position_liquidity function does not verify that the position ID exists before performing operations. This allows operations on non-existent positions, potentially leading to incorrect accounting and fund loss.",
+      "severity": "high",
+      "original_id": "2632c6ac32eb34c9"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_036",
+      "title": "Critical: Missing Access Control on Critical State Updates in `update_position_internal` and `adjust_position_internal`",
+      "description": "The functions `update_position_internal` and `adjust_position_internal` lack access control on critical state updates. These functions modify liquidity in positions, which directly affects economic calculations (fees, rewards, accounting). Without access control, any caller can manipulate position liquidity, potentially draining funds or breaking protocol invariants.",
+      "severity": "critical",
+      "original_id": "88ef6e80741c33fc"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_037",
+      "title": "Missing Access Control on Position Management Functions",
+      "description": "The functions `grant_position` and `remove_position` lack access control, allowing any user to manipulate position ownership counts and potentially cause accounting errors.",
+      "severity": "high",
+      "original_id": "95147c1fd9aec7e3"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_038",
+      "title": "Authorization Context Binding Gap in Position Management Operations",
+      "description": "The contract implements position management operations (mint, burn, transfer) that do not bind the caller's authorization context to the operation parameters. This allows front-running attacks where an attacker can intercept authorization data (signatures, nonces) intended for legitimate users and use them with hostile parameters.",
+      "severity": "high",
+      "original_id": "d5d93b86ffd4c812"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_039",
+      "title": "Validation Timing in swap_internal Function",
+      "description": "The swap_internal function executes the swap operation before validating the result. The function calls pools.pools.setter(pool).swap() to execute the swap, then validates the result. This allows invalid swaps to complete before validation.",
+      "severity": "high",
+      "original_id": "VULN-002"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_040",
+      "title": "State Synchronization in swap_2_internal Function",
+      "description": "The swap_2_internal function modifies state before dependent operations execute. The function calls pools.pools.setter(from).swap() to execute the first swap, then calls pools.pools.setter(to).swap() to execute the second swap. If the first swap succeeds but the second swap fails, the function does not revert the first swap. This leaves the state in an inconsistent state.",
+      "severity": "high",
+      "original_id": "VULN-003"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_041",
+      "title": "Missing Caller Verification in Automatic Fund Handlers",
+      "description": "The contract has no explicit receive/fallback handlers, but the `vest_position` function can be triggered by any caller sending funds to the contract. The function performs NFT operations without verifying the caller's relationship to the funds being sent.",
+      "severity": "high",
+      "original_id": "VULN001"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_042",
+      "title": "Insecure Position Ownership Transfer Bypasses Authorization",
+      "description": "The `transfer_position_E_E_C7_A_C_D` function only verifies the caller is the NFT manager but doesn't verify the position is actually owned by the 'from' address. An attacker can transfer positions from any owner to themselves by calling this function, bypassing the ownership check.",
+      "severity": "high",
+      "original_id": "VULN002"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_043",
+      "title": "Missing State Verification in Multi-Step Operations Allows State Manipulation",
+      "description": "The `swap_2_internal` function performs multiple operations without verifying intermediate state consistency. An attacker can exploit this by calling the function with manipulated parameters, causing the function to commit state changes before verifying previous operations, allowing state manipulation.",
+      "severity": "high",
+      "original_id": "VULN003"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_044",
+      "title": "Insecure External Call Handling in Operations Allows Call Failures",
+      "description": "The `swap_internal` function performs external calls without proper error handling. If an external call fails, the function continues execution instead of reverting, allowing attackers to trigger call failures and cause unexpected behavior.",
+      "severity": "high",
+      "original_id": "VULN004"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_045",
+      "title": "Missing Input Validation in Operations Allows Invalid Inputs",
+      "description": "The `update_position_internal` and `adjust_position_internal` functions lack input validation for critical parameters like `delta` and `amount_0_min`. An attacker can pass invalid values (e.g., negative values where positive expected, or values exceeding available liquidity), causing unexpected behavior or state corruption.",
+      "severity": "high",
+      "original_id": "VULN005"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_046",
+      "title": "Critical Access Control Bypass in sendTo() Allows Unauthorized Token Transfers",
+      "description": "The sendTo() function lacks access control on the outer function call, allowing any caller to execute token transfers. The require(msg.sender == operator_, \"only operator\") check only validates the outer caller, but the function processes all tokens for each request without verifying the caller's relationship to the recipient. This allows the operator to transfer tokens to arbitrary addresses without restrictions, and the emergency council can also call the function if they know the operator's credentials. The function processes all tokens for each request without verifying the caller's relationship to the recipient.",
+      "severity": "critical",
+      "original_id": "9b4a410650b11314"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_047",
+      "title": "Critical State Synchronization Failure in sendTo() Causes Permanent Token Loss",
+      "description": "The sendTo() function has a critical state synchronization failure in how it handles the gasTokenAmount variable. The function uses a single gasTokenAmount variable for all transfers but the variable is not reset between iterations of the outer loop. This means that after the first recipient, the gasTokenAmount is consumed and subsequent recipients do not receive any ETH. The function processes all tokens for each request without verifying the caller's relationship to the recipient. The gasTokenAmount is used in the inner loop but is never reset between recipients, causing subsequent recipients to receive 0 ETH even if they should receive ETH. The function processes all tokens for each request without verifying the caller's relationship to the recipient.",
+      "severity": "critical",
+      "original_id": "731a1dbdff802921"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_048",
+      "title": "Critical Unit Mismatch in sendTo() Causes ETH Transfer Failure",
+      "description": "The sendTo() function has a critical unit mismatch in how it handles ETH transfers. The function uses gasTokenAmount which is defined as a uint256 but the function treats it as a fixed amount rather than a gas price or gas limit. The function uses gasTokenAmount in the line uint256 gas = gasTokenAmount; and then uses gas in the send operation. However, the function does not convert this to wei or multiply by a gas price. The function processes all tokens for each request without verifying the caller's relationship to the recipient. The gasTokenAmount is used directly without conversion to wei or multiplication by a gas price, causing ETH transfers to fail because the amount is not in the correct unit (wei). The function processes all tokens for each request without verifying the caller's relationship to the recipient.",
+      "severity": "critical",
+      "original_id": "3f69c90453fc79b5"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_049",
+      "title": "Operator Can Drain All Funds via sendTo Function",
+      "description": "The Faucet contract allows the operator to arbitrarily transfer all tokens and native currency to any recipient without proper authorization checks. The sendTo function only verifies msg.sender == operator_ but does not verify that the operator is authorized to access the funds. An operator can call sendTo with empty requests array to drain all tokens and native currency to any address.",
+      "severity": "critical",
+      "original_id": "7fbd9f7514ccf796"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_050",
+      "title": "Native Currency Can Be Drained via sendTo Function",
+      "description": "The Faucet contract has a receive() function that accepts native currency, but the sendTo function does not properly handle native currency transfers. The operator can call sendTo with empty requests array to drain all native currency to any address without proper authorization checks.",
+      "severity": "critical",
+      "original_id": "6a7dd83e5b32a39c"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_051",
+      "title": "Missing Emergency Council Verification in sendTo Function",
+      "description": "The sendTo function does not verify that the operator is authorized to access the funds. The operator can call sendTo with empty requests array to drain all tokens and native currency to any address without proper authorization checks. The emergency council should have final authority over all fund transfers.",
+      "severity": "high",
+      "original_id": "3f356db010d7d0c3"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_052",
+      "title": "Critical: Operator Authorization Bypass via `sendTo()` Function",
+      "description": "The `sendTo()` function in Faucet.sol allows the `operator_` to send tokens to recipients, but the authorization check is insufficient. The function checks `msg.sender == operator_`, but the `operator_` variable is declared as `public`, making it a state variable that can be changed via the `changeOperator()` function. However, the `changeOperator()` function has a critical flaw: it requires `msg.sender == EMERGENCY_COUNCIL`, but the `EMERGENCY_COUNCIL` is declared as `immutable`, meaning it's set once in the constructor and cannot be changed. This creates a scenario where the `operator_` can be changed by the `EMERGENCY_COUNCIL`, but the `EMERGENCY_COUNCIL` can change the `operator_` to any address, including an attacker-controlled address. Once the `operator_` is changed to an attacker-controlled address, the attacker can call `sendTo()` with malicious `FaucetReq` data to drain the contract's tokens. The vulnerability is that the `EMERGENCY_COUNCIL` can change the `operator_` to any address, and the `EMERGENCY_COUNCIL` is immutable, meaning it's set once and cannot be changed after deployment. This creates a scenario where the `EMERGENCY_COUNCIL` can be compromised, and the attacker can change the `operator_` to an address they control, allowing them to drain the contract's tokens.",
+      "severity": "critical",
+      "original_id": "5d00f26d7cb2aa44"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_053",
+      "title": "High: Reentrancy Vulnerability in `sendTo()` Function",
+      "description": "The `sendTo()` function in Faucet.sol is vulnerable to reentrancy attacks. The function calls `tokens[x].transfer(recipient, amount)` without using the Checks-Effects-Interactions pattern. An attacker can create a malicious ERC20 token contract that implements a `receive()` function that calls `sendTo()` again, draining the contract's tokens. The vulnerability is that the function does not use the Checks-Effects-Interactions pattern, allowing an attacker to reenter the function before the state changes are committed. The attacker can call `sendTo()` with a malicious token contract that reenters the function, draining the contract's tokens.",
+      "severity": "high",
+      "original_id": "b11dd2dad9008e4d"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_054",
+      "title": "High: Gas Exhaustion Vulnerability in `sendTo()` Function",
+      "description": "The `sendTo()` function in Faucet.sol is vulnerable to gas exhaustion attacks. The function has nested loops that iterate over `_requests.length` and `tokens.length`, and the gas cost is proportional to the product of these lengths. An attacker can create a transaction with a large number of requests and tokens, causing the transaction to consume all available gas and revert. The vulnerability is that the function does not limit the number of requests or tokens, allowing an attacker to create a transaction that consumes all available gas. The attacker can call `sendTo()` with a large number of requests and tokens, causing the transaction to consume all available gas and revert.",
+      "severity": "high",
+      "original_id": "28e1d3b9d80914c8"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_055",
+      "title": "Medium: Incorrect Gas Handling in `sendTo()` Function",
+      "description": "The `sendTo()` function in Faucet.sol has incorrect gas handling. The function calls `payout(recipient).send(gas)` with `gas = gasTokenAmount * 5` for stakers, but the `send()` function only forwards 2300 gas, which is insufficient for most operations. The vulnerability is that the function uses `send()` with insufficient gas, causing the transaction to fail and revert. The attacker can call `sendTo()` with a large `gasTokenAmount`, causing the transaction to fail and revert, draining the contract's tokens.",
+      "severity": "medium",
+      "original_id": "c1067dd53ea512ba"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_056",
+      "title": "Medium: Missing Input Validation in `sendTo()` Function",
+      "description": "The `sendTo()` function in Faucet.sol lacks input validation. The function does not validate the `FaucetReq` data, allowing an attacker to pass malicious data to the function. The vulnerability is that the function does not validate the input data, allowing an attacker to pass malicious data to the function. The attacker can call `sendTo()` with malicious `FaucetReq` data, causing the transaction to fail and revert, draining the contract's tokens.",
+      "severity": "medium",
+      "original_id": "fe0e4c79a8ea3b16"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_057",
+      "title": "State Synchronization Failure in Campaign Balance Updates",
+      "description": "The campaign balance tracking system has a critical synchronization bug where the 'distributed' counter is updated after the 'maximum' counter, but the 'maximum' counter can be exceeded before the 'distributed' counter catches up, allowing campaigns to distribute more than their maximum allocation.",
+      "severity": "high",
+      "original_id": "99923a73ade03f92"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_058",
+      "title": "Critical: Unrestricted `sendTo` Function Allows Operator to Bypass Fee Logic and Drain Funds",
+      "description": "The `sendTo` function in Faucet.sol lacks access control on critical state updates and contains a severe logic error: it transfers tokens to recipients but incorrectly applies the `isStaker` multiplier inside the inner loop over tokens. This causes each recipient receives multiple transfers per token type, and the `isStaker` flag is evaluated per-token instead of per-request. Combined with no access control on the `amounts` array update, an attacker can manipulate timing to cause excessive transfers.",
+      "severity": "critical",
+      "original_id": "c1aa008eb121fa49"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_059",
+      "title": "Critical: `amounts` Array Updated Without Access Control Enables Fee Manipulation",
+      "description": "The `amounts` array is initialized in the constructor and never updated, but the `sendTo` function reads `amounts[x]` and applies `isStaker` multiplier inside the inner loop. Since `amounts` is never updated, the `isStaker` multiplier is applied per-token instead of per-request, causing each recipient receives multiple transfers per token type. This is a representation boundary violation: the function receives `isStaker` per-request but applies it per-token, causing exponential over-transfers.",
+      "severity": "critical",
+      "original_id": "f84a5ad8e20e7977"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_060",
+      "title": "High: `amounts` Array Never Updated After Initialization Enables Fee Manipulation",
+      "description": "The `amounts` array is initialized in the constructor and never updated, but the `sendTo` function reads `amounts[x]` and applies `isStaker` multiplier inside the inner loop. Since `amounts` is never updated, the `isStaker` multiplier is applied per-token instead of per-request, causing each recipient receives multiple transfers per token type. This is a representation boundary violation: the function receives `isStaker` per-request but applies it per-token, causing exponential over-transfers.",
+      "severity": "high",
+      "original_id": "864ccf2850540847"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_061",
+      "title": "Missing Access Control on Campaign Update Functions Allows Fee Manipulation",
+      "description": "The `update_campaign` and `cancel_campaign` functions lack access control on critical state updates to campaign balances and campaign data structures. This allows any user can manipulate campaign parameters at critical times to avoid fees or gain unfair advantages.",
+      "severity": "high",
+      "original_id": "20478bbc61d12008"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_062",
+      "title": "State Synchronization Failure in Campaign Updates",
+      "description": "The update_campaign and cancel_campaign functions modify campaign state (ending timestamp) but fail to synchronize related state variables before dependent operations execute. Specifically, the ending timestamp is updated but the campaign balance's 'maximum' and 'distributed' values are not updated consistently with the new campaign iteration.",
+      "severity": "high",
+      "original_id": "8cf32b23e755ea1c"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_063",
+      "title": "Critical: Unhandled External Call Failure in `collect_yield_single_to`",
+      "description": "The `collect_yield_single_to` function makes an external call using `RawCall::new().call(SEAWATER_ADDR, &data)` and then immediately panics with `panic!(\"todo\")`, discarding the return value. This means any failure in the external call is silently ignored, and execution continues as if the operation succeeded. If the external call fails (e.g., due to insufficient gas, reverted callee, or invalid parameters), the caller has no way to detect the failure, leading to incorrect accounting where the caller assumes success but the callee did not execute.",
+      "severity": "critical",
+      "original_id": "7eb61b2ac4a1dd9c"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_064",
+      "title": "Campaign Cancellation Does Not Restore Campaign Balance",
+      "description": "The cancel_campaign function decrements the campaign balance's maximum and distributed amounts but fails to restore these values when a campaign is cancelled. This results in campaign balances being permanently reduced by the cancelled campaign's allocated amount, which is lost.",
+      "severity": "high",
+      "original_id": "d8a0d8cdd25fd86e"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_065",
+      "title": "Critical: Representation Boundary Violation in External Call Return Values",
+      "description": "The functions `tick_lower`, `tick_upper`, and `position_liquidity` in `pkg/leo/src/seawater.rs` return values in inconsistent representations across WASM vs non-WASM builds, violating representation boundaries. Specifically, WASM builds return raw `I32`/`U256` values from external calls, while non-WASM builds return normalized values from host functions. This mismatch causes downstream calculations using these values to produce incorrect results.",
+      "severity": "critical",
+      "original_id": "dd8ef9e527cc0b87"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_066",
+      "title": "Critical: Missing User Protection in sendTo() Allows Unauthorized Token Drain",
+      "description": "The sendTo() function allows the operator to send tokens to arbitrary recipients without any user protection mechanisms. Users cannot specify minimum acceptable outputs or verify execution bounds. This violates Pattern 1 (User Control Over Execution Outabilities) and creates a critical vulnerability where the operator can drain all tokens.",
+      "severity": "critical",
+      "original_id": "00e5fd9647da97b5"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_067",
+      "title": "High: Validation Timing Vulnerability in sendTo() Allows Invalid Operations to Complete",
+      "description": "The sendTo() function executes token transfers before validating that the sender is authorized (operator). This violates Pattern 2 (Validation Timing) and creates a vulnerability where invalid operations can complete. An attacker who is not the operator can call sendTo() and drain tokens before the operator check occurs.",
+      "severity": "high",
+      "original_id": "55aa307eacb25722"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_068",
+      "title": "Missing Error Handling in Seawater Integration Functions",
+      "description": "The Seawater integration functions in `seawater.rs` use `.unwrap()` on external calls without proper error handling. This can cause panics on external call failures, leading to stuck transactions and potential fund loss.",
+      "severity": "high",
+      "original_id": "87f534953b8db8ed"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_069",
+      "title": "Critical: Unhandled Return Values in Seawater Contract",
+      "description": "The Seawater contract contains multiple functions that call external addresses without handling the return values. This can lead to silent failures where operations appear successful but actually fail, potentially causing loss of funds or incorrect state.",
+      "severity": "high",
+      "original_id": "7724953ab583290e"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_070",
+      "title": "Missing User Protection in Tick Update Operations",
+      "description": "The `StorageTicks::update` function modifies user liquidity positions without providing mechanisms for users to specify minimum acceptable outputs. When users request liquidity changes, they cannot express acceptable bounds on the final state, exposing them to unfavorable execution outcomes.",
+      "severity": "high",
+      "original_id": "66372bb9489ac39d"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_071",
+      "title": "Validation Timing Issue in Tick Update",
+      "description": "In `StorageTicks::update`, the function calculates `liquidity_gross_after` and checks against `max_liquidity` BEFORE validating the `liquidity_delta` parameter. However, the function does not validate the `liquidity_delta` parameter against the current state until after the calculation. This allows invalid operations to complete if the validation check passes but the actual state change is incorrect.",
+      "severity": "high",
+      "original_id": "20882607c26ed31b"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_072",
+      "title": "State Synchronization Issue in Tick Update",
+      "description": "In `StorageTicks::update`, the function calculates `new_liquidity_net` based on `upper` flag, but the calculation uses `info.liquidity_net.get()` which may be stale if the tick was just initialized. The function does not ensure state is consistent before dependent operations.",
+      "severity": "high",
+      "original_id": "2687ed0c72caf6a7"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_073",
+      "title": "Return Value Unit Inconsistency in Fee Growth Calculation",
+      "description": "In `StorageTicks::get_fee_growth_inside`, the function calculates fee growth values but does not ensure the return values use the expected units. The function returns `(U256, U256)` but the caller may expect different units for the fee growth values.",
+      "severity": "high",
+      "original_id": "7cda3353caef4f3c"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_074",
+      "title": "State Commitment Timing Issue in Cross Operation",
+      "description": "In `StorageTicks::cross`, the function updates fee growth values and returns liquidity net value. However, the function updates state BEFORE verifying that the operation completed successfully. If the external call fails, the state changes are committed but the operation did not complete.",
+      "severity": "high",
+      "original_id": "f9759644bade7d9e"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_075",
+      "title": "Missing User Protection in collect_yield_single_to",
+      "description": "The function collect_yield_single_to directly calls an external contract without providing users with mechanisms to specify minimum acceptable outputs. This exposes users to unfavorable execution outcomes due to market manipulation or adversarial actions.",
+      "severity": "high",
+      "original_id": "3da44eef85cb83ab"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_076",
+      "title": "Missing User Protection in tick_lower",
+      "description": "The function tick_lower directly calls an external contract without providing users with mechanisms to specify minimum acceptable outputs. This exposes users to unfavorable execution outcomes due to market manipulation or adversarial actions.",
+      "severity": "high",
+      "original_id": "78b80da9417b790e"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_077",
+      "title": "Missing User Protection in tick_upper",
+      "description": "The function tick_upper directly calls an external contract without providing users with mechanisms to specify minimum acceptable outputs. This exposes users to unfavorable execution outcomes due to market manipulation or adversarial actions.",
+      "severity": "high",
+      "original_id": "caf3edcc8869b3d6"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_078",
+      "title": "Missing User Protection in position_liquidity",
+      "description": "The function position_liquidity directly calls an external contract without providing users with mechanisms to specify minimum acceptable outputs. This exposes users to unfavorable execution outcomes due to market manipulation or adversarial actions.",
+      "severity": "high",
+      "original_id": "d621af9ca06e5778"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_079",
+      "title": "Missing Tick Initialization Check in `update` Function",
+      "description": "The `update` function in `StorageTicks` does not verify that a tick exists before attempting to update it. This allows updates to uninitialized ticks, potentially causing incorrect fee growth calculations and liquidity accounting errors.",
+      "severity": "high",
+      "original_id": "d73132cc7cff0ee2"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_080",
+      "title": "Incorrect Fee Growth Calculation in `get_fee_growth_inside` Function",
+      "description": "The `get_fee_growth_inside` function calculates fee growth inside a tick range by subtracting outside fee growth from global fee growth. However, it does not verify that the lower tick is below the upper tick, allowing invalid tick ranges where the lower tick is above the upper tick. This causes incorrect fee growth calculations where fee growth is subtracted in the wrong direction, leading to incorrect fee distribution.",
+      "severity": "high",
+      "original_id": "03056a1992bed45b"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_081",
+      "title": "Missing Tick Existence Check in `get_fee_growth_inside` Function",
+      "description": "The `get_fee_growth_inside` function retrieves tick information for lower and upper ticks without verifying that the ticks exist. This allows fee growth calculations for non-existent ticks, potentially causing incorrect fee growth calculations and liquidity accounting errors.",
+      "severity": "high",
+      "original_id": "636196872b7c1d68"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_082",
+      "title": "Incorrect Fee Growth Calculation in `cross` Function",
+      "description": "The `cross` function updates a tick's fee growth outside values when the tick is crossed. However, it does not verify that the tick exists before updating it. This allows updates to non-existent ticks, potentially causing incorrect fee growth calculations and liquidity accounting errors.",
+      "severity": "high",
+      "original_id": "9457304e2f0bb2ce"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_083",
+      "title": "Missing Tick Existence Check in `flip` Function",
+      "description": "The `flip` function toggles a tick on the bitmap without verifying that the tick exists. This allows toggling of non-existent ticks, potentially causing incorrect tick activation state and liquidity accounting errors.",
+      "severity": "high",
+      "original_id": "f3201fe047374b69"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_084",
+      "title": "Tick Bitmap Flip Operation Ignores Negative Bit Positions",
+      "description": "The flip() function in StorageTickBitmap calculates bit_pos using modulo 256, which can produce negative values for negative spaced_tick inputs. When bit_pos is negative, the U256::one().wrapping_shl(bit_pos as usize) operation produces undefined behavior, potentially causing incorrect bitmap toggling.",
+      "severity": "high",
+      "original_id": "SW-TICK-001"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_085",
+      "title": "Missing Liquidity Delta Validation in Tick Updates",
+      "description": "The `StorageTicks::update` function lacks validation of the `liquidity_delta` parameter, allowing zero or negative values to be processed. This can cause incorrect liquidity accounting when ticks are updated with invalid liquidity changes.",
+      "severity": "high",
+      "original_id": "9a720abf10ba4faf"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_086",
+      "title": "Incorrect Rounding Logic in get_sqrt_ratio_at_tick",
+      "description": "The get_sqrt_ratio_at_tick function contains a critical rounding error in its final adjustment calculation. The function computes a result and then adds a rounding adjustment using a complex conditional that incorrectly determines when to add one. The condition `(result % (U256::one() << 32) as U256).is_zero()` checks if the lower 32 bits are zero, but this is applied to the result before the final shift, and the logic is inverted - it adds one when the remainder is zero, which is backwards. This causes systematic overestimation of tick prices, leading to incorrect pricing and potential economic exploitation.",
+      "severity": "high",
+      "original_id": "f3f0d7d7a2949d69"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_087",
+      "title": "Incorrect Tick Boundary Check in get_sqrt_ratio_at_tick Allows Out-of-Range Tick Calculations",
+      "description": "The get_sqrt_tick_at_tick function uses an incorrect boundary check that allows tick values at exactly -887272 and 887272 to be processed when they should be rejected. The function checks `if abs_tick > MAX_TICK` but MAX_TICK is defined as -MIN_TICK = 887272. Since tick values at exactly MIN_TICK and MAX_TICK should be valid, the check should be `abs_tick > MAX_TICK` but the current implementation allows tick = 887272 which equals MAX_TICK. This allows invalid tick values to be processed, leading to incorrect sqrt ratio calculations.",
+      "severity": "high",
+      "original_id": "1c743d8a1b1b98e8"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_088",
+      "title": "Incorrect Tick Boundary Validation in get_sqrt_ratio_at_tick",
+      "description": "The get_sqrt_ratio_at_tick function uses an incorrect boundary check that allows tick values at exactly MAX_TICK + 1 to pass validation, but then fails during computation due to integer overflow in the tick-to-ratio calculation. This causes the function returns an incorrect result for tick = MAX_TICK + 1 instead of returning an error.",
+      "severity": "high",
+      "original_id": "611fdce65a3f27d2"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_089",
+      "title": "Incorrect Tick Boundary Validation in get_tick_at_sqrt_ratio",
+      "description": "The get_tick_at_sqrt_ratio function has an incorrect boundary check that allows sqrt_price_x_96 values at exactly MIN_SQRT_RATIO to pass validation, but then fails during computation due to division by zero in the tick calculation. This causes the function returns an incorrect result for sqrt_price_x_96 = MIN_SQRT_RATIO instead of returning an error.",
+      "severity": "high",
+      "original_id": "362736468a01714d"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_090",
+      "title": "Incorrect Tick Boundary Validation in get_min_tick",
+      "description": "The get_min_tick function has an incorrect boundary check that allows spacing values at exactly 0 to pass validation, but then fails during computation due to division by zero in the tick calculation. This causes the function returns an incorrect result for spacing = 0 instead of returning an error.",
+      "severity": "high",
+      "original_id": "c592bc695d288df4"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_091",
+      "title": "Incorrect Tick Boundary Validation in get_max_tick",
+      "description": "The get_max_tick function has an incorrect boundary check that allows spacing values at exactly 0 to pass validation, but then fails during computation due to division by zero in the tick calculation. This causes the function returns an incorrect result for spacing = 0 instead of returning an error.",
+      "severity": "high",
+      "original_id": "0254e0cd4c46e2b7"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_092",
+      "title": "Division by Zero in get_sqrt_ratio_at_tick",
+      "description": "The get_sqrt_at_tick function performs division operations that can result in division by zero when tick values are at extreme boundaries, causing protocol insolvency.",
+      "severity": "critical",
+      "original_id": "6af3fe1c8cb58eb9"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_093",
+      "title": "Missing User Protection in get_sqrt_ratio_at_tick",
+      "description": "The get_sqrt_ratio_at_tick function calculates square root prices without allowing users to specify minimum acceptable outputs, exposing them to unfavorable execution when operations modify user positions or values.",
+      "severity": "high",
+      "original_id": "3107c154b145bc24"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_094",
+      "title": "Validation Timing Issue in get_sqrt_ratio_at_tick",
+      "description": "The get_sqrt_ratio_at_tick function performs validation after state changes, allowing invalid operations to complete when validation occurs after token transfers or balance updates.",
+      "severity": "high",
+      "original_id": "29ef780468b9ce64"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_095",
+      "title": "State Synchronization Issue in get_sqrt_ratio_at_tick",
+      "description": "The get_sqrt_ratio_at_tick function modifies state before dependent functions execute, causing dependent functions to use stale state values when state modifications complete before dependent operations.",
+      "severity": "high",
+      "original_id": "5da8c1f08d1c785e"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_096",
+      "title": "Return Value Unit Mismatch in get_sqrt_ratio_at_tick",
+      "description": "The get_sqrt_ratio_at_tick function returns values in incorrect units when implementing interfaces or overriding base functions, causing incorrect calculations when callers use return values in calculations expecting different units.",
+      "severity": "high",
+      "original_id": "ceb096a62646ffb1"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_097",
+      "title": "State Commitment Timing Issue in get_sqrt_ratio_at_tick",
+      "description": "The get_sqrt_ratio_at_tick function commits state before operations that can fail, causing wasted state consumption when external calls fail and state is consumed but operation doesn't complete.",
+      "severity": "high",
+      "original_id": "5ac43253408ecc21"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_098",
+      "title": "External System Assumption Issue in get_sqrt_ratio_at_tick",
+      "description": "The get_sqrt_ratio_at_tick function makes assumptions about external system structure or behavior that may not hold, causing incorrect parameter determination or logic errors when external system characteristics vary from assumptions.",
+      "severity": "high",
+      "original_id": "8765a4e60025fb3c"
+    },
+    {
+      "id": "code4rena_superposition_2025_01_tool_099",
+      "title": "Signature Execution Context Binding Issue in get_sqrt_ratio_at_tick",
+      "description": "The get_sqrt_ratio_at_tick function does not bind signature to execution context variables that caller controls, allowing unauthorized execution when signatures can be used by unintended executors.",
+      "severity": "high",
+      "original_id": "5a15c1f15733f1c9"
+    }
+  ],
+  "input_tokens": 18985,
+  "output_tokens": 646,
+  "cached_tokens": 420
+}

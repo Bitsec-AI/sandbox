@@ -1,0 +1,734 @@
+{
+  "project": "sherlock_idle-finance_2024_12",
+  "agent": "agent794",
+  "status": "success",
+  "timestamp": "2026-04-06T15:30:01.424709",
+  "elapsed_seconds": 143.3,
+  "total_expected": 2,
+  "total_found": 100,
+  "true_positives": 2,
+  "false_negatives": 0,
+  "false_positives": 98,
+  "detection_rate": 1.0,
+  "precision": 0.02,
+  "f1_score": 0.0392156862745098,
+  "matched_findings": [
+    {
+      "id": "sherlock_idle-finance_2024_12_expected_000",
+      "expected": "Asingledepositorcangriefother",
+      "matched": "Instant Withdrawal Timing Attack via allowInstantWithdraw and instantWithdrawDeadline",
+      "confidence": 0.8,
+      "justification": "The expected vulnerability describes a timing issue where withdrawal requests can be claimed before the first epoch ends due to a flawed condition in claimWithdrawRequest. Finding 6 describes a similar timing attack where allowInstantWithdraw is set to true immediately after startEpoch, allowing attackers to claim instant withdrawals before the 3-day delay passes. Both involve the instant withdrawal mechanism allowing early claims when there should be a delay. The main difference is the expected vulnerability focuses on post-initialization period while finding 6 focuses on post-epoch start, but both capture the core issue of premature withdrawal claims due to timing logic flaws.",
+      "severity": "high",
+      "expected_description": "Source: https://github.com/sherlock-audit/2024-12-idle-finance-judging/issues/52\n\n**Summary:**\nAfterthe CDOisinitialized, depositsareallowedtoprovidetheliquiditythatwillbeused forthefirstepoch. Duringthissameperiod, beforethefirstepochisstarted, withdrawals arealsoallowed (theyareenabledwhenthecontractisinitialized), thismakessense, a depositorcouldrequestawithdrawalthatwouldbewithdrawableassoonasthefirst epochisover, thisdepositormayhaveintentionstoonlyseedliquidityforasingleepoch, pointis, depositorsareallowedtorequestawithdrawal. Theproblemthatallowstheexploitisthattherequestedwithdrawalscanactuallybe claimedrightaway, the Idle Credit Vault.claim Withdraw Request () reliesonacondition thatdoesn'tpreventwithdrawalrequeststobeclaimedbeforethefirstepochends. function claim Withdraw Request (address _user) external returns (uint 256 amount){ ... //@audit-issue => Before the first epoch is started, `epoch End Date is 0`. //@audit-issue => Because `epoch End Date == 0`, it does not matter if the last Withdraw Request was made on the current epoch. (`false && whatever` will always evaluate to false),\u2192 ,\u2192 //@audit-issue => This allows withdraw requests before the first epoch ends to be claimed without needing to wait for finalization of the first epoch ,\u2192 if (IIdle CDOEpoch Variant (idle CDO).epoch End Date ()!=0&&(epoch Number <= last Withdraw Request [_user])){ ,\u2192 revert Not Allowed (); } ... } Thisflawallowsfortheattackdescribedonthe Attack Pathsectiontobepossible, causingtoallthedepositor'sliquiditytobestolen. Asdemonstratedonthecoded Po Cprovidedonthe Po Csection, asingledepositorcan continouslydeposit, requestawithdrawandclaimtherequestedwithdrawbeforethe firstepochstarts. 4 \u2022Therequestedwithdrawclaimstheintereststhatwould'vebeenearntduringthe firstepoch, but, withoutneedingtowaitforthefirstepochtoend. \u2013Thatextraclaimedamountcomesfromthedepositsoftheotherdepositors. Sincealldepositsaresentdirectlytothe Credit Vault, alltheextraliquidity takenbythegrieffercomesfromtheliquidityoftheotherdepositors. Root Cause Initilizationofthe CDOcontractsetsthecontract'sstateinsuchawaythatitallows depositorstoclaimnormalrequestedwithdrawalswithoutneedingtowaituntilthefirst epochisover. Internal Pre-conditions Noepochhasstartedonthe CDO. Liquidity (deposits) tostartthefirstepochisbeing collectedbeforestartingthefirstepoch. External Pre-conditions None. Attack Path 1. Depositorsprovidesliquidityonthe CDOcontractbeforethefirstepochstarts. 2. Adepositorrequestawithdrawforallhisdeposits. 3. Depositorclaimsrightawaytherequestedwithdraw. 4. Thedepositorreceiveshisprincipal+theinterestitwouldearnduringthefirst epoch. 5.rinse&&repeatsteptocontinuedrainingtheprincipaloftheotherdepositors.\n\n**Impact:**\nDepositsmadebeforethefirstepochcanbestolen Po C Addthenext Po Conthe Idle Credit Vault.t.soltestfile: function test_deposits Befor First Epoch Starts Can Be Stolen Po C () external { uint 256 deposit Amount =10000*ONE_SCALE ; Idle CDOEpoch Variant CDO=Idle CDOEpoch Variant (address (idle CDO)); 5 assert Eq (CDO.paused (), false,\"Pause is True\" ); assert Eq (CDO.epoch End Date (),0,\"epoch End Date != 0\" ); Idle Credit Vault strategy =Idle Credit Vault (CDO.strategy ()); assert (strategy .get Apr ()!=0); address underlying Token =CDO.token (); address Tranch Token AA =CDO. AATranche (); address user 1=make Addr (\"user 1\"); address user 2=make Addr (\"user 2\"); address user 3=make Addr (\"user 3\"); { deal (underlying Token , user 1, deposit Amount ); deal (underlying Token , user 2, deposit Amount ); deal (underlying Token , user 3, deposit Amount ); vm.start Prank (user 1); IERC 20 (underlying Token ).approve (address (CDO), type (uint 256).max); CDO.deposit AA (deposit Amount ); vm.stop Prank (); vm.start Prank (user 2); IERC 20 (underlying Token ).approve (address (CDO), type (uint 256).max); CDO.deposit AA (deposit Amount ); vm.stop Prank (); vm.start Prank (user 3); IERC 20 (underlying Token ).approve (address (CDO), type (uint 256).max); CDO.deposit AA (deposit Amount ); vm.stop Prank (); } uint 256 initial Strategy Underling Balance =3*deposit Amount ; uint 256 strategy Underlying Balance_before = IERC 20 (underlying Token ).balance Of (address (strategy )); ,\u2192 assert Eq (strategy Underlying Balance_before , initial Strategy Underling Balance ); //@audit-info => User 3 has 0 underlying balance because he depositted everything on the CDO! ,\u2192 uint 256 user 3 Underlying Balance_before = IERC 20 (underlying Token ).balance Of (address (user 3)); ,\u2192 assert Eq (user 3 Underlying Balance_before ,0); { vm.start Prank (user 3); CDO.request Withdraw (0, Tranch Token AA ); CDO.claim Withdraw Request (); CDO.deposit AA (IERC 20 (underlying Token ).balance Of (address (user 3))); 6 CDO.request Withdraw (0, Tranch Token AA ); CDO.claim Withdraw Request (); CDO.deposit AA (IERC 20 (underlying Token ).balance Of (address (user 3))); CDO.request Withdraw (0, Tranch Token AA ); CDO.claim Withdraw Request (); vm.stop Prank (); } //@audit-info => User 3 has more balance than what he deposited because when he claim the withdraw request, he claimed the interests as if the epoch would have ended!,\u2192 ,\u2192 uint 256 user 3 Underlying Balanc_after = IERC 20 (underlying Token ).balance Of (address (user 3)); ,\u2192 assert Gt (user 3 Underlying Balanc_after , deposit Amount ); //@audit-info => Credit Vault has less than the 2 deposits made by user 1 and user 2. //@audit-info => All the `interest` extracted by user 3 came from the Principal of User 1 and User 2 ,\u2192 uint 256 strategy Underlying Balance_after = IERC 20 (underlying Token ).balance Of (address (strategy )); ,\u2192 assert Lt (strategy Underlying Balance_after ,2*deposit Amount ); } Runtheprevious Po Cwiththenextcommand: forge test --match-test test_deposits Befor First Epoch Starts Can Be Stolen Po C -vvvv Mitigation Themoststraightforwardmitigationisto initializethe epoch End Date to block.timestamp whenthe CDOisinitialized. \u2022Thiswillmakethatthevalidationonthe Idle Credit Vault.claim Withdraw Request () tocorrectlypreventclaimingwithdrawalrequestsbeforethefirstepochends. Idle CDOEpoch Variant._additional Init () function _additional Init () internal virtual override { ... + epoch End Date = block.timestamp; }",
+      "found_description": "The function startEpoch sets allowInstantWithdraw = true immediately after transferring funds to the strategy for instant withdrawals, but instantWithdrawDeadline is set to block.timestamp + instantWithdrawDelay. This creates a window where allowInstantWithdraw is true before the deadline has passed. An attacker can call claimInstantWithdrawRequest immediately after startEpoch, even before the 3-day delay, and receive funds. The protocol assumes the delay is enforced by instantWithdrawDeadline, but allowInstantWithdraw is set unconditionally. This allows attackers to bypass the 3-day delay and claim instant withdrawals immediately after epoch start, even if the borrower has not yet transferred funds. The attacker gains early access to funds that should be locked for 3 days, while the protocol risks borrower default on the delayed transfer.",
+      "found_id": "340482f742996e28",
+      "tool_finding_index": 70
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_expected_001",
+      "expected": "Depositingto Idle CDOisvulner-",
+      "matched": "Mixed Fund Sources Leading to TVL Inflation and Tranche Dilution",
+      "confidence": 0.8,
+      "justification": "Finding 5 (Mixed Fund Sources Leading to TVL Inflation and Tranche Dilution) describes the same vulnerability as the expected finding - an inflation attack where an attacker donates assets directly to the contract, causing the share price to inflate and existing tranche holders to be diluted. The expected vulnerability describes donating assets to inflate share price and cause losses to depositors, while Finding 5 describes how sending native tokens directly to the contract incorrectly inflates the token balance used for NAV calculations, leading to overvaluation and dilution. Both describe the same core inflation attack vector affecting the Idle CDO contract.",
+      "severity": "high",
+      "expected_description": "Source: https://github.com/sherlock-audit/2024-12-idle-finance-judging/issues/59\n\n**Summary:**\nDepositingto Idle CDOisvulnerabletoin\ufb02ationattacks. Attackercaninflatetheshare pricetoaverybigvaluebydonatingassetsintocontractandthenuser'swouldlosetheir assetswhiledepositingassetsincontract. Root Cause https://github.com/sherlock-audit/2024-12-idle-finance/blob/main/idle-tranches/cont racts/Idle CDO.sol#L 128 https://github.com/sherlock-audit/2024-12-idle-finance/blob/ main/idle-tranches/contracts/Idle CDO.sol#L 270 https://github.com/sherlock-audit/2024-12-idle-finance-Mhttps://github.com/sherlock- audit/2024-12-idle-finance/blob/main/idle-tranches/contracts/Idle CDO.sol#L 188 D-Yas h Shah 1923/blob/main/idle-tranches/contracts/Idle CDO.sol#L 315 Internal Pre-conditions No response External Pre-conditions Total Supplyof LPtokenshouldbe Zero Attack Path \u2022Whentotalsupplyiszeroanattackergoesaheadandexecutesthefollowingsteps: \u2013Depositafewassets (1 wei) through deposit AA () or deposit BB () \u2013Since Attackeristhefirstdepositor (total Supplyis 0&&total Assetsis 0), attackergetsminted 1 weiofashare \u2013Afterwardstheattackerwouldwaitforuserwhowantstodepositsome numberofassets. 9 \u2013Let'ssuppose Bobwantstodeposit 10 e 18 underlyingasset. \u2013Nowattackerwouldseethetransactioninmempoolandfrontrunthe Bob's transactionanddonates 100 e 18 underlyingassetstocontractthusinflating thetotalassetsincontract. \u2013Nowwhenattackertransactiongetsexecutedhewouldbeminted 0 sharesin againstofproviding 10 e 18 duetoinflationofsharesincontractsoatotalloss of 10 e 18 touser. \u2013Afterthatattackerclaimshis 1 shareworthof 110 e 18+1 ofunderlyingassets. \u2013Letmedigmoredeeperwhythiswouldhappen. \u2013During Depositthrough deposit AA () or deposit BB () _deposit () getscalled wherefirstwetransferunderlyingtokento Idle CDOEpoch Variant (Idle CDO) contract. function _deposit (uint 256 _amount, address _tranche , address _referral ) internal virtual when Not Paused returns (uint 256 _minted){ ,\u2192 if (_amount ==0){ return_minted; } // check that we are not depositing more than the contract available limit _guarded (_amount); // set _last Caller Block hash _update Caller Block (); // check if _strategy Price decreased _check Default (); // interest accrued since last deposit XX/withdraw XX/harvest is splitted between AA and BB ,\u2192 // according to tranche APRSplit Ratio. NAVs of AA and BB are updated and tranche ,\u2192 // prices adjusted accordingly _update Accounting (); // check if depositor has enough stk IDLE for the amount to be deposited _check Stk IDLEBal (_tranche ,_amount); // get underlyings from sender address _token=token; uint 256 _pre Bal =_contract Token Balance (_token); IERC 20 Detailed (_token).safe Transfer From (msg.sender , address (this), _amount); ,\u2192 // mint tranche tokens according to the current tranche price _minted =_mint Shares (_contract Token Balance (_token)-_pre Bal, msg.sender , _tranche ); ,\u2192 // update tranche APRSplit Ratio _update Split Ratio (_get AARatio (true)); if (direct Deposit ){ IIdle CDOStrategy (strategy ).deposit (_amount); } 10 if (_referral !=address (0)){ emit Referral (_amount,_referral ); } } \u2013Afterthat _mint Shares () getscalledwiththeamountofassetswehave passed. \u2013Inside_mint Shareswehavetoinflatetranche Pricesothatuserwouldgetmint zeroshares. function _tranche Price (address _tranche ) internal viewreturns (uint 256){ if (Idle CDOTranche (_tranche ).total Supply ()==0){ returnone Token ; } return_tranche ==AATranche ?price AA : price BB; } \u2013Wehavetoinflateprice AAorprice BBaacordingtothetranche. \u2013Thispricehavebeenupdatedin _update Accounting () function _update Accounting () internal virtual { uint 256 _last NAVAA =last NAVAA ; uint 256 _last NAVBB =last NAVBB ; uint 256 _last NAV =_last NAVAA +_last NAVBB ; uint 256 nav=get Contract Value (); uint 256 _apr Split Ratio =tranche APRSplit Ratio ; // If gain is > 0, then collect some fees in `unclaimed Fees` if (nav>_last NAV ){ unclaimed Fees +=(nav-_last NAV )*fee/FULL_ALLOC ; } @>(uint 256 _price AA , int 256_total AAGain )=_virtual Price Aux (AATranche , nav, _last NAV ,_last NAVAA ,_apr Split Ratio ); ,\u2192 (uint 256 _price BB , int 256_total BBGain )=_virtual Price Aux (BBTranche , nav, _last NAV ,_last NAVBB ,_apr Split Ratio ); ,\u2192 last NAVAA =uint 256 (int 256 (_last NAVAA )+_total AAGain ); // if we have a loss and it's gte last junior NAV we trigger a default if (_total BBGain <0&&-_total BBGain >=int 256 (_last NAVBB )){ // revert with 'default' error (4) if skip Default Check is false, as seniors will have a loss too not covered. ,\u2192 // `update Accounting` should be manually called to distribute loss require (skip Default Check ,\"4\"); // This path will be called when a default happens and guardian calls // `update Accounting` after setting skip Default Check or when skip Default Check is already set to true ,\u2192 last NAVBB =0; // if skip Default Check is set to true prior a default (eg because AA is used as collateral and needs to be liquid), ,\u2192 11 // emergency Shutdown won't prevent the current deposit/redeem (the one that called this _update Accounting) and is ,\u2192 // still correct because: // - deposit BB will revert as price BB is 0 // - deposit AA won't revert (unless the loss is 100% of TVL) and user will get ,\u2192 // correct number of share at a price AA already post junior default // - withdraw BB will redeem 0 and burn BB tokens because price BB is 0 // - withdraw AA will redeem the correct amount of underlyings post junior default ,\u2192 // We pass true as we still want AA to be redeemable in any case even after a junior default ,\u2192 _emergency Shutdown (true); }else{ // we add the gain to last saved NAV last NAVBB =uint 256 (int 256 (_last NAVBB )+_total BBGain ); } price AA =_price AA ; price BB =_price BB ; } \u2013Theprice AAandprice BBgetsupdatedin _virtual Price Aux andthemainroot causeisthatwhilecalculating_virtual Price Auxnavgetscalculatedusing balance Of (address (this)) whichiswherethemainproblemis. uint 256 nav = get Contract Value (); function _contract Token Balance (address _token) internal viewreturns (uint 256){ ,\u2192 return IERC 20 Detailed (_token).balance Of (address (this)); } \u2013Duetothisattackercaninflatethesharepricebydonating.\n\n**Impact:**\n\u2022Thisattackhastwoimplications: Implicitminimum Amountandfundslostdueto roundingerrors \u2013Ifanattackerissuccessfulinmaking 1 shareworthzassetsandausertriesto mintsharesusingk*zassetsthen, *Ifk<1, thentheusergetszeroshareandtheyloosealloftheirtokenstothe attacker *Ifk>1, thenusersstillgetsomesharesbuttheylose (k-floor (k))*z) ofassets whichgetproportionallydividedbetweenexistingshareholders (including theattacker) duetoroundingerrors. *Thismeansthatforuserstonotlosevalue, theyhavetomakesurethatkis 12 aninteger. Po C \u2022Addthistestinside Idle Credit Vault.t.solandchange USDCaadressto DAIaddress 0 x 6 B 175474 E 89094 C 44 Da 98 b 954 Eede AC 495271 d 0 F address internal constant USDC = 0 x 6 B 175474 E 89094 C 44 Da 98 b 954 Eede AC 495271 d 0 F; function test Share Inflation Via Donating () external { // Attacker deposits 1 wei of Underlying Token uint 256 amount=1; vm.start Prank (address (attacker )); // Approving assets underlying .approve (address (idle CDO), type (uint).max); // Depositing to AA tranche idle CDO.deposit AA (amount); assert Eq (Idle Credit Vault (address (strategy )).tot Epoch Deposits (), amount, \"tot Epoch Deposits after AA deposit\" ); ,\u2192 // Attacker then donating 100 e 18 underlying asset IERC 20 Detailed (USDC).transfer (address (idle CDO),100 e 18); vm.stop Prank (); // Now Users transaction gets executed vm.start Prank (address (user)); // approving tokens underlying .approve (address (idle CDO), type (uint).max); // User deposits 10 e 18 assets idle CDO.deposit AA (10 e 18); vm.stop Prank (); assert Eq (idle CDO.get Contract Value (),110000000000000000001 ); //User gets minted 0 shares assert Eq (IERC 20 (AAtranche ).balance Of (address (user)),0); assert Eq (IERC 20 (AAtranche ).balance Of (address (attacker )),1); } Mitigation\n\n**Recommendation:**\n\u2022Ilikehow Balancer V 2 and Uniswap V 2 doit. some MINIMUMamountofsharesget burntwhenthefirstminthappens. 13",
+      "found_description": "The contract's getContractValue() function sums _contractTokenBalance(token) (the underlying ERC20 token) with the value of strategyToken. However, it does not validate the source of funds in _contractTokenBalance(token). If an attacker sends ETH (or any native token) directly to the contract, it increases the balance of the contract's ETH balance, which is then incorrectly interpreted as additional underlying token (e.g., DAI, USDC) balance. Since the contract uses _contractTokenBalance(token) to calculate NAV and tranche prices, this inflation causes all tranche holders to be overvalued. When users withdraw, they receive the inflated balance, but the protocol has no mechanism to account for the fact that the additional balance is not from user deposits. This leads to permanent dilution of tranche token value and loss of funds for legitimate users.",
+      "found_id": "f63a3c73fd990019",
+      "tool_finding_index": 33
+    }
+  ],
+  "missed_findings": [],
+  "undecided_findings": [],
+  "extra_findings": [
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_000",
+      "title": "Incorrect APR Calculation in _getApr Due to Unit Mismatch and Division Rounding",
+      "description": "The _getApr function calculates tranche APRs using a formula that incorrectly applies the trancheAPRSplitRatio and AATrancheSplitRatio, leading to severe underestimation of BB tranche APR and overestimation of AA tranche APR. The core issue is that the function uses trancheAPRSplitRatio (which is dynamically updated by _updateSplitRatio) as if it were a fixed percentage of the total yield, but _updateSplitRatio actually multiplies the TVL ratio by itself, creating a quadratic distortion. This causes the BB tranche to receive far less yield than intended, while AA receives disproportionately more. The mathematical error compounds over time, leading to massive yield misallocation and potential insolvency of the BB tranche. The function also lacks proper bounds checking on the denominator (FULL_ALLOC - _AATrancheSplitRatio), risking division by zero if AA ratio reaches 100%.",
+      "severity": "critical",
+      "original_id": "b2e2d2dfd3006773"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_001",
+      "title": "Automatic Processing of Withdrawal Funds via Harvest Trigger",
+      "description": "The contract's harvest() function, which is called by external keepers, triggers _updateAccounting() that updates tranche prices and NAVs. If an attacker sends ETH or tokens directly to the contract during a withdrawal request, the subsequent harvest() call will process these funds as new deposits, mixing them with withdrawal proceeds. This causes withdrawal funds to be involuntarily reinvested, preventing users from collecting their redeemed assets. The contract cannot distinguish between user deposits and system-returned funds, leading to fund mixing and withdrawal failure.",
+      "severity": "high",
+      "original_id": "2e76d6303e07ecdf"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_002",
+      "title": "State Commitment Before Operation Verification in _withdraw",
+      "description": "In _withdraw(), the tranche tokens are burned and NAVs are decremented (lastNAVAA/lastNAVBB updated) before the underlying tokens are actually transferred to the user. If the _transferUnderlyings() call fails (e.g., due to a reentrancy attack or external contract failure), the state changes (burning tokens and reducing NAV) are already committed, but the user does not receive their funds. This results in permanent loss of user assets without compensation, as the protocol state reflects a withdrawal that never completed.",
+      "severity": "high",
+      "original_id": "e150c6eefe1061ec"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_003",
+      "title": "Mixed Fund Sources in _updateAccounting and _liquidate",
+      "description": "The _updateAccounting() function calculates the contract's total value (getContractValue()) by summing unlent balance, strategyToken balance, and subtracting lockedRewards and unclaimedFees. However, when _liquidate() is called (e.g., during harvest), it redeems underlying tokens from the strategy and adds them to the contract's balance. These redeemed tokens are indistinguishable from user deposits. When a user later withdraws, the protocol uses the mixed balance to calculate redemption amounts, causing users to receive a portion of system-redeemed funds as if they were their own deposits. This inflates the perceived TVL and dilutes user redemption value.",
+      "severity": "high",
+      "original_id": "121ac0aba525c01e"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_004",
+      "title": "Insecure Withdrawal Flow Due to _updateAccounting() Reentrancy",
+      "description": "The _withdraw() function calls _updateAccounting() before transferring funds. _updateAccounting() internally calls getContractValue(), which may trigger external calls to IIdleCDOStrategy.price() and IERC20Detailed.balanceOf(). If a malicious strategy contract reenters _withdraw() during this call, an attacker can trigger multiple withdrawals using the same tranche tokens before the first withdrawal completes. This allows the attacker to drain the contract's underlying balance by exploiting the reentrant state where tranche tokens have not yet been burned and NAVs have not been updated.",
+      "severity": "high",
+      "original_id": "b5e2f2c468a8f7af"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_005",
+      "title": "Double Funding Risk in _liquidate() with Rounding Tolerance",
+      "description": "In _liquidate(), if the strategy redeems more than requested (_redeemedTokens > _amount), the function caps the return at _amount. However, the excess tokens remain in the contract's balance. Later, during harvest(), these excess tokens are included in the contract's total balance and used to calculate getContractValue(). When users withdraw, they receive value based on this inflated balance. The protocol effectively returns the excess redeemed amount twice: once as an unintended surplus in the contract, and again as part of the user's withdrawal calculation. This creates a double funding vulnerability where users receive more than their proportional share.",
+      "severity": "high",
+      "original_id": "222130b4d3c38e82"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_006",
+      "title": "Unrestricted CDO Deployment Allows Arbitrary Proxy Creation and Fund Theft",
+      "description": "The deployCDO function allows any caller to deploy a TransparentUpgradeableProxy with an arbitrary implementation address, admin, and initialization data. Since the proxy is created with full upgradeability and no restrictions, an attacker can deploy a malicious implementation that steals all funds deposited into the proxy or reclaims admin rights to drain assets. The function lacks access control, input validation, and any safeguard against deploying non-compliant or malicious contracts. This enables direct theft of user funds or protocol insolvency by allowing arbitrary code execution via proxy deployment.",
+      "severity": "critical",
+      "original_id": "30978efda98055bf"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_007",
+      "title": "Unrestricted CDO Deployment Allows Arbitrary Contract Deployment",
+      "description": "The deployCDO function allows any user to deploy a TransparentUpgradeableProxy to any implementation address with arbitrary initialization data, enabling attackers to deploy malicious or non-compliant CDO contracts that can drain funds, manipulate protocol logic, or lock assets permanently. There is no access control, validation, or whitelisting of allowed implementations.",
+      "severity": "critical",
+      "original_id": "aaf227a06d26e004"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_008",
+      "title": "Unprotected _updateAccounting Allows Fee Manipulation via Timing Attack",
+      "description": "The _updateAccounting() function is called during deposit/withdraw operations and updates critical economic state variables including unclaimedFees, priceAA, priceBB, lastNAVAA, and lastNAVBB. However, it is not protected by access control and can be called by any user. An attacker can repeatedly call depositAA or depositBB to trigger _updateAccounting() before the legitimate rebalancer calls harvest(), manipulating the fee calculation by forcing fee accrual at inopportune times. This allows the attacker to dilute the fees collected by the feeReceiver by artificially inflating the NAV before the harvest, causing the fee to be calculated on a higher base than intended, while the actual underlying value remains unchanged. The attacker gains an unfair advantage by reducing the fee paid to the protocol treasury.",
+      "severity": "high",
+      "original_id": "1027cb82035331a5"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_009",
+      "title": "Unit Mismatch in _virtualPriceAux Returns Causes Incorrect Tranche Price and Fee Dilution",
+      "description": "The _virtualPriceAux() function returns a tranche price in raw underlying units (1e18 scaled) but the caller _mintShares() expects this price to be in the same scale as ONE_TRANCHE_TOKEN (1e18). However, the calculation in _virtualPriceAux() for _virtualPrice uses: _virtualPrice = uint256(int256(_lastTrancheNAV) + _totalTrancheGain) * ONE_TRANCHE_TOKEN / trancheSupply. This is correct. However, the issue arises in _getApr() which uses trancheAPRSplitRatio and _AATrancheSplitRatio (both scaled to FULL_ALLOC=10000) to compute APR. The problem is that _getApr() assumes the tranche price is stable and proportional to NAV, but _virtualPriceAux() can return a price that is not aligned with the actual underlying value due to integer truncation in the gain distribution. This causes a cascading error: when the AA tranche's virtual price is miscalculated due to truncation in _totalTrancheGain, the _getAARatio() function computes an incorrect AA ratio, which is then used in _getApr() to compute an incorrect APR for both tranches. This leads to users depositing or withdrawing based on false price signals, causing misallocation of fees and interest. For example, if the true NAV is 1000000, but due to truncation in _totalTrancheGain, the AA tranche's virtual price is calculated as 1.000000000000000001e18 instead of 1e18, then _getAARatio() will overstate the AA ratio by 1e-18, which when multiplied by FULL_ALLOC=10000, causes a 0.0001% error in APR. Over time, this compounds and results in millions of dollars in misallocated fees.",
+      "severity": "high",
+      "original_id": "929272640b69d488"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_010",
+      "title": "Desynchronized Loop in _sellAllRewards() Causes Reward Token Omission",
+      "description": "The _sellAllRewards() function iterates over reward tokens returned by _strategy.getRewardTokens() using a for loop with index i. However, the _extraData parameter is decoded into _paths, which is expected to have the same length as _rewards. If the external strategy returns a different number of reward tokens than the number of paths provided in _extraData, the loop will either access out-of-bounds memory (if _extraData is too short) or ignore valid reward tokens (if _extraData is too long). This is a critical data access integrity violation. For example, if the strategy returns 3 reward tokens but _extraData contains only 2 paths, the third reward token will be sold using an empty path (0x), which will cause the _sellReward() function to default to Uniswap V2 with a hardcoded path [reward, WETH, token]. This may be acceptable, but if the strategy expects a direct swap path for the third token (e.g., reward -> USDC), the default path will result in a suboptimal swap and loss of value. Conversely, if _extraData has 4 paths but only 3 rewards, the fourth path is unused, but the loop does not check for this and proceeds normally, silently ignoring the extra path. This desynchronization leads to financial loss for the protocol as rewards are not optimally converted. The impact is direct: if a $10,000 reward token is swapped using a suboptimal path due to missing path data, the protocol loses $200 in slippage. The attacker can exploit this by deploying a malicious strategy that returns a different number of reward tokens than expected, causing the protocol to lose funds on every harvest.",
+      "severity": "high",
+      "original_id": "838b8d3cbe1eb3c9"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_011",
+      "title": "Precision Loss in Tranche Price Calculation Due to Integer Division",
+      "description": "The _virtualPriceAux function calculates tranche prices using integer division without proper rounding or precision preservation. When calculating _virtualPrice = (lastTrancheNAV + totalTrancheGain) * ONE_TRANCHE_TOKEN / trancheSupply, the multiplication by ONE_TRANCHE_TOKEN occurs after integer division truncation, leading to systematic underestimation of tranche prices. This causes users to receive fewer underlying tokens upon withdrawal than mathematically expected, with losses accumulating over time.",
+      "severity": "high",
+      "original_id": "7745c93903665d67"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_012",
+      "title": "State Commitment Before External Call in _withdraw",
+      "description": "In _withdraw, the function updates lastNAVAA/lastNAVBB (state commitment) before calling _transferUnderlyings (external call). If the external transfer fails (e.g., due to reentrancy, token hook revert, or gas limit), the state changes (NAV reduction) are not reverted, but the user does not receive their underlying tokens. This results in permanent loss of user funds without corresponding token burn, creating accounting imbalance.",
+      "severity": "critical",
+      "original_id": "6419022abcf3c25c"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_013",
+      "title": "Inconsistent APR Calculation Due to Unbound _AATrancheSplitRatio",
+      "description": "The _getApr function uses _AATrancheSplitRatio as a parameter but does not validate it against the actual trancheAPRSplitRatio or current TVL ratio. This allows external callers to pass arbitrary values (e.g., 0) to _getApr, causing incorrect APR calculations. When _AATrancheSplitRatio is 0, AA tranche APR is set to 0 regardless of actual TVL, misleading users and potentially enabling front-running of yield strategies.",
+      "severity": "high",
+      "original_id": "ecb5d454fcae919c"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_014",
+      "title": "Harvest Rewards Not Properly Accounted in TVL During Partial Redemption",
+      "description": "The getContractValue() function excludes harvested rewards that are still locked (_lockedRewards). However, during _liquidate or _withdraw, if the contract redeems underlying from the strategy, the redeemed amount is added to the underlying balance but the locked rewards are not subtracted from the TVL calculation. This creates a double-counting vulnerability: locked rewards are excluded from TVL but their underlying equivalents are included via redemption, inflating TVL and mispricing tranches.",
+      "severity": "high",
+      "original_id": "22ac08fe02d8a07a"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_015",
+      "title": "Reentrancy Vulnerability in _transferUnderlyings During Withdraw",
+      "description": "The _withdraw function calls _transferUnderlyings at the end, after burning tokens and updating NAVs. If the recipient is a malicious contract with a fallback function that calls withdrawAA/withdrawBB again, reentrancy can occur. Since lastNAVAA/lastNAVBB have already been decremented, the second withdrawal can drain additional funds beyond the user's balance, effectively allowing unlimited withdrawal attacks.",
+      "severity": "critical",
+      "original_id": "5889e6fa14ccf065"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_016",
+      "title": "Fork Behavioral Divergence in Uniswap V3 Router Address Hardcoding",
+      "description": "The contract hardcodes the Uniswap V3 router address as 0xE592427A0AEce92De3Edee1F18E0157C05861564. This address is specific to Ethereum mainnet. On forks (e.g., Arbitrum, Optimism), this address is invalid or points to a different contract. The _sellReward function will revert on these chains, preventing reward harvesting and causing yield to be permanently stuck in the contract, resulting in total loss of reward tokens.",
+      "severity": "critical",
+      "original_id": "ef52e28b4c2ce912"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_017",
+      "title": "Integer Underflow in _updateAccounting When BB Loss Exceeds LastNAVBB",
+      "description": "In _updateAccounting, when _totalBBGain is negative and -_totalBBGain >= int256(_lastNAVBB), the code sets lastNAVBB = 0. However, the calculation int256(_lastNAVBB) + _totalBBGain may underflow if _lastNAVBB is small and _totalBBGain is a large negative number. This causes lastNAVBB to wrap to a huge positive value, leading to incorrect tranche pricing and enabling attackers to withdraw more than the contract holds.",
+      "severity": "critical",
+      "original_id": "e22c6aad2dc90a80"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_018",
+      "title": "Authorization Context Binding Failure in harvest Function",
+      "description": "The harvest function allows any whitelisted rebalancer or owner to call it with arbitrary _skipReward, _minAmount, and _sellAmounts arrays. These parameters are not bound to a specific transaction context or signature. An attacker can front-run a legitimate harvest call by submitting a malicious harvest with _skipReward[0] = true and _sellAmounts[0] = 0, causing the contract to skip selling a high-value reward token and instead keep it locked, enabling permanent theft of rewards.",
+      "severity": "high",
+      "original_id": "fae4ba1715eebc55"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_019",
+      "title": "IdleCDOFactory Accepts Ether Without Handling - Funds Can Be Permanently Locked",
+      "description": "The IdleCDOFactory contract has no fallback or receive function, but it can receive Ether via direct transfers (e.g., from a deployed proxy or external contract). Since the contract has no logic to handle or reject Ether, any Ether sent to it becomes permanently locked. This includes Ether accidentally sent by users, or Ether returned from external contracts during proxy deployment or upgrade operations. The contract is designed solely to deploy proxies and has no mechanism to withdraw or manage native currency, leading to irreversible fund loss.",
+      "severity": "high",
+      "original_id": "24f2e3467e52adbc"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_020",
+      "title": "Unrestricted CDO Deployment Allows Protocol Takeover",
+      "description": "The deployCDO function is publicly callable without any access control, allowing any user to deploy a new TransparentUpgradeableProxy pointing to an arbitrary implementation contract. Since the factory does not track or validate the deployed proxies, an attacker can deploy a malicious implementation that steals funds from any CDO instance or manipulates the protocol's economic state. This violates access control boundaries because the function updates the protocol's state (by creating new on-chain entities that interact with user funds) without restriction, enabling a complete protocol compromise.",
+      "severity": "critical",
+      "original_id": "ee8d89ab9e8cf7b6"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_021",
+      "title": "Incorrect Unit Handling in _virtualPricesAux Leads to Understated Tranche Prices and Fee Theft",
+      "description": "The function _virtualPricesAux calculates tranche prices and gains using a formula that incorrectly assumes the tranche supply is in the same unit as ONE_TRANCHE_TOKEN, but the actual tranche token supply is scaled by 18 decimals while ONE_TRANCHE_TOKEN is defined as 1e18. This causes the virtual price to be calculated as (lastTrancheNAV + totalTrancheGain) * ONE_TRANCHE_TOKEN / trancheSupply, which effectively divides by 1e18 twice \u2014 once implicitly in the supply and once explicitly via ONE_TRANCHE_TOKEN. This results in tranche prices being 1e18 times smaller than they should be. Consequently, when users deposit or withdraw, they receive far fewer tranche tokens than they should, and the protocol collects fees on the full underlying value while only minting a fraction of the correct tranche supply. This leads to permanent loss of user funds and theft of fees by the protocol.",
+      "severity": "critical",
+      "original_id": "05f78ac67aae493d"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_022",
+      "title": "No Validation on Implementation Address in CDO Deployment",
+      "description": "The deployCDO function accepts any address as the implementation contract without validating that it is a valid, non-zero, and non-system address. This allows deployment of zero-addresses, self-destructed contracts, or non-CDO contracts, leading to irrecoverable funds or broken protocol logic.",
+      "severity": "critical",
+      "original_id": "70def5dee2abf58d"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_023",
+      "title": "Admin Address Not Validated \u2014 Risk of Zero-Address Admin",
+      "description": "The deployCDO function accepts an admin address without validation. If admin is set to address(0), the TransparentUpgradeableProxy becomes unupgradable and unmanageable, effectively freezing the CDO contract permanently. This is a critical operational failure with no recovery path.",
+      "severity": "critical",
+      "original_id": "1bd8c0bf12e23205"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_024",
+      "title": "No Protection Against Reentrancy or Malicious Implementation",
+      "description": "The deployCDO function immediately deploys and emits an event without verifying that the implementation contract is not malicious or reentrant. A malicious implementation could execute arbitrary code during proxy construction (via constructor or initializer), potentially draining funds or corrupting state before the event is even emitted.",
+      "severity": "high",
+      "original_id": "e457f0649df16195"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_025",
+      "title": "State Commitment Before Implementation Validation",
+      "description": "The proxy deployment (state change) occurs before any validation of the implementation or admin addresses. If the deployment reverts due to invalid data or constructor failure, the proxy contract is still created and deployed on-chain, consuming gas and leaving a dead contract. This is a state commitment before operation success.",
+      "severity": "high",
+      "original_id": "169968925774b70f"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_026",
+      "title": "Data Parameter Not Sanitized \u2014 Risk of Malicious Initialization",
+      "description": "The data parameter passed to TransparentUpgradeableProxy is executed as the initializer calldata on the implementation contract. There is no validation that this data is intended for a CDO contract or that it does not contain malicious initialization logic (e.g., self-destruct, fund transfer). This allows attackers to deploy proxies that immediately steal funds or break functionality.",
+      "severity": "critical",
+      "original_id": "e35caeffb1323823"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_027",
+      "title": "Access Control Bypass on _updateAccounting Allows Fee Manipulation",
+      "description": "The _updateAccounting() function is called internally by _deposit and _withdraw, but it is not protected by access control. An attacker can call _updateAccounting() directly (via a malicious contract) to manipulate the timing of fee accrual and tranche price updates. By calling _updateAccounting() just before a legitimate deposit or withdrawal, the attacker can cause the protocol to incorrectly calculate fees and tranche NAVs, effectively stealing fees that should have been collected from other users. This is a timing attack that exploits the lack of access control on a critical economic state update function.",
+      "severity": "critical",
+      "original_id": "4a6c8d1896bc01f3"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_028",
+      "title": "Unit Mismatch in _virtualPricesAux Causes Incorrect Tranche Price and Fee Calculation",
+      "description": "The _virtualPricesAux function returns a tranche price in raw underlying units (e.g., 1e18 for DAI), but the caller _mintShares expects this price to be in normalized units relative to ONE_TRANCHE_TOKEN (1e12). This mismatch causes the minted tranche tokens to be grossly underestimated. For example, if the tranche price is 1e18 (1 DAI per token), _mintShares calculates _minted = _amount * 1e12 / 1e18 = _amount / 1e6, meaning 1 DAI deposit mints only 0.000001 tranche tokens instead of 1. This error cascades: fee calculations based on lastNAVAA/BB become inaccurate, and users receive far fewer tokens than they should, while the protocol retains excess underlying assets as unclaimed value. The financial impact is a permanent loss of user funds and fee undercollection.",
+      "severity": "critical",
+      "original_id": "3c47236492d02e19"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_029",
+      "title": "Desynchronized Iteration in _updateIncentives Causes Incentive Token Underdistribution",
+      "description": "The _updateIncentives function iterates over incentiveTokens to distribute rewards, but it uses a static snapshot of incentiveTokens taken at the start of the loop. If setIncentiveTokens() is called during the same transaction (e.g., via a flash loan attack that calls setIncentiveTokens() before _updateIncentives() completes), the loop will not process the newly added tokens. This results in newly added incentive tokens being permanently lost to the protocol. For example, if a new token worth 10,000 DAI is added as an incentive, and the function is called in the same tx, 10,000 DAI in rewards are never distributed and are permanently locked in the contract. This is a classic desynchronization between data structure and iteration bound.",
+      "severity": "high",
+      "original_id": "3acde588414fd2b7"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_030",
+      "title": "Harvest Function Allows Reentrancy via _depositFees and _updateIncentives",
+      "description": "The harvest() function calls _depositFees() and _updateIncentives(), both of which call external contracts (StakingRewards.stakeFor and StakingRewards.depositReward). These external calls are not protected against reentrancy. An attacker can deploy a malicious StakingRewards contract that reenters harvest() during stakeFor or depositReward, triggering another harvest() call. This allows the attacker to drain the contract's underlying tokens multiple times in a single transaction. For example, if the contract holds 1,000,000 DAI, the attacker can reenter and withdraw 1,000,000 DAI twice, stealing 1,000,000 DAI. The vulnerability exists because the state updates (unclaimedFees=0, harvestedRewards=1) occur after the external calls.",
+      "severity": "critical",
+      "original_id": "5243d44e18e6e412"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_031",
+      "title": "Incorrect APR Calculation in _getApr When AA Tranche Supply is Zero",
+      "description": "In _getApr, when _AATrancheSplitRatio is 0, the AA tranche APR is set to 0 and BB gets the full strategy APR. However, if the AA tranche has zero supply but non-zero lastNAVAA (e.g., from prior deposits), the tranche price (priceAA) is still non-zero. When a user later deposits into AA, _updateAccounting() uses lastNAVAA (which includes old value) to calculate gains, but the APR calculation in _getApr incorrectly assumes AA has no value. This causes the protocol to underpay AA holders on their first deposit after AA supply was zero. For example, if lastNAVAA = 1000 DAI and a user deposits 1000 DAI, the system calculates gain as 1000 DAI, but the APR used for distribution is 0% for AA, so the user gets no interest on the 1000 DAI they deposited, even though the protocol has 1000 DAI of accrued value. This is a representation boundary issue: the APR function ignores historical NAV state.",
+      "severity": "high",
+      "original_id": "56bf01250ff3d176"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_032",
+      "title": "Automatic Processing of Withdrawal Funds via Default Receive Function",
+      "description": "The IdleCDOPolygon contract has no explicit receive or fallback function, but it can still receive ETH or other native tokens via direct transfers. When native tokens are sent to the contract, they are not rejected or handled explicitly. This allows an attacker to send ETH (or other native tokens) to the contract during a withdrawal operation. The contract's accounting system cannot distinguish between user deposits (ERC20 tokens) and native token transfers. During the next harvest or withdrawal, the contract's total value (getContractValue) includes these native tokens as part of the underlying balance, causing inflation of the TVL and diluting the value of all tranche tokens. This results in users receiving less underlying value than expected when withdrawing, effectively stealing value from legitimate users.",
+      "severity": "critical",
+      "original_id": "eb6482cdc6551fad"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_034",
+      "title": "State Commitment Before Operation Verification in _liquidate()",
+      "description": "In the _liquidate() function, the contract calls IIdleCDOStrategy(strategy).redeemUnderlying(_amount) and then checks if the returned amount is sufficient. However, the state variables lastNAVAA or lastNAVBB are updated only after the transfer to the user. If the redeemUnderlying() call fails or returns less than expected (e.g., due to slippage or malicious strategy), the contract still transfers the full toRedeem amount to the user and then reduces the NAV. This creates a scenario where the protocol pays out more than it actually redeemed from the lending protocol. The attacker can trigger this by calling withdrawAA/BB with a large amount when the strategy is under stress, causing the strategy to return less than requested. The contract pays out the full amount and then reduces NAV, effectively creating a negative balance in the tranche's NAV, which can be exploited in future harvests to mint free tranche tokens.",
+      "severity": "high",
+      "original_id": "26c34adc6997c42d"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_035",
+      "title": "Double Funding Risk in _virtualPricesAux() Due to Incorrect Gain Handling",
+      "description": "In _virtualPricesAux(), when calculating the gain for a tranche, the function computes totalGain = _nav - _lastNAV, then subtracts the performance fee. It then splits the net gain between AA and BB tranches. However, the function does not verify that the gain is actually realized in the contract's balance. If the strategy's price increases due to market conditions but the contract has not received the corresponding underlying tokens (e.g., due to pending harvest), the gain is still calculated and distributed as if it were real. This leads to minting of tranche tokens that are not backed by real assets. When the harvest eventually occurs and the real underlying tokens are received, the protocol has already distributed more tranche tokens than it should have. Users who withdraw during this window receive both the inflated tranche tokens and the real underlying tokens upon redemption, effectively receiving double value for the same underlying asset.",
+      "severity": "high",
+      "original_id": "3bde74f219e47f06"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_036",
+      "title": "Missing Caller Verification in Harvest Function Leading to Unauthorized Fund Redistribution",
+      "description": "The harvest() function is protected by _checkOnlyOwnerOrRebalancer(), but the function internally calls _updateAccounting(), _depositFees(), and _updateIncentives(). These functions modify critical state variables (lastNAVAA, lastNAVBB, unclaimedFees, harvestedRewards) and transfer funds to feeReceiver and staking contracts. If an attacker can somehow impersonate the rebalancer (e.g., via a compromised key or front-running), they can trigger harvest() and redirect all fees and incentives to a malicious address. The contract does not verify the intent of the caller beyond the initial check, and the harvest() function can be called multiple times in a single block if the rebalancer address is changed between calls. This allows an attacker to drain all accumulated fees and incentive tokens in a single transaction.",
+      "severity": "high",
+      "original_id": "f13ba98cb2d836c9"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_037",
+      "title": "Instant Withdraw Interest Calculation Bypasses Epoch Interest Accrual, Leading to Unfair Gain for Withdrawers",
+      "description": "The _calcInterestWithdrawRequest function incorrectly calculates interest for instant withdraw requests by scaling down the APR to exclude the buffer period, but then uses this scaled-down interest in the normal withdraw path without adjusting for the fact that instant withdraws are meant to be processed at the start of the next epoch \u2014 when the full epoch + buffer period interest should apply. This creates a discrepancy where users requesting instant withdraws receive less interest than they are entitled to, while the protocol retains the difference as unclaimed yield. This is compounded by the fact that the expectedEpochInterest calculation in startEpoch includes the full scaled APR (including buffer), meaning the protocol expects to pay more interest than it actually does for instant withdraws. This results in a systematic underpayment of interest to instant withdrawers and an equivalent overstatement of protocol earnings, effectively stealing user yield.",
+      "severity": "high",
+      "original_id": "d3a3528387d20c1c"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_038",
+      "title": "Precision Loss in Tranche APR Calculation Due to Integer Division",
+      "description": "The _getApr function calculates tranche APR using integer division without ensuring the numerator is large enough to avoid truncation. When trancheAPRSplitRatio is small relative to FULL_ALLOC and the AA ratio is near the boundary, the division truncates, causing the APR to be significantly underestimated. This leads to users receiving less interest than mathematically expected, with no warning or error.",
+      "severity": "high",
+      "original_id": "1312f58a409ad22a"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_039",
+      "title": "State Commitment Before External Call in _liquidate",
+      "description": "The _liquidate function modifies the contract's state (lastStrategyPrice) before verifying the success of the external call to IIdleCDOStrategy.redeemUnderlying. If the external call reverts due to insufficient liquidity or slippage, the state change (lastStrategyPrice update) remains, but the underlying redemption fails. This creates an inconsistent state where the contract believes it has a higher strategy price than reality, leading to incorrect pricing and potential underpayment to users on future withdrawals.",
+      "severity": "high",
+      "original_id": "85ff90b671b607db"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_040",
+      "title": "Inconsistent Tranche Price Update During Withdrawals",
+      "description": "In _withdraw, the tranche price used for redemption is _tranchePrice(_tranche), which returns the last saved price (priceAA/priceBB). However, _updateAccounting() is called immediately before, which updates priceAA/priceBB based on virtual prices. The function then uses the old price to calculate toRedeem, but updates lastNAVAA/lastNAVBB using the new toRedeem value. This creates a mismatch: the user is paid based on outdated pricing, while the contract's NAV is adjusted as if the user received the updated price. This results in a systematic underpayment to users on withdrawals.",
+      "severity": "high",
+      "original_id": "e551674fc7b293d3"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_041",
+      "title": "Fork Behavioral Divergence: Uniswap V2 Router Address Hardcoded for Polygon",
+      "description": "The contract hardcodes the Uniswap V2 router address as 0x1b02dA8Cb0d097eB8D57A175b88c7D8b47997506, which is the Polygon V2 router. However, if the underlying lending protocol (e.g., Aave) migrates its reward tokens to a new AMM (e.g., SushiSwap or QuickSwap), the hardcoded router will fail to route trades correctly. The contract assumes the router supports all reward token pairs, but forks may have moved liquidity to different contracts. This causes _sellAllRewards to fail silently, leaving rewards unclaimed and permanently stuck in the contract.",
+      "severity": "critical",
+      "original_id": "98765dc7102f40d9"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_042",
+      "title": "Incomplete State Restoration in emergencyShutdown",
+      "description": "emergencyShutdown() sets allowAAWithdraw and allowBBWithdraw to false and sets skipDefaultCheck to true, but does not reset the unclaimedFees or harvestedRewards counters. If the contract is later re-enabled (via unpause), the unclaimedFees and harvestedRewards remain accumulated. This allows the owner to claim fees and rewards that were accrued during the shutdown period, even though users were unable to withdraw or deposit. This constitutes a hidden transfer of value from users to the owner.",
+      "severity": "high",
+      "original_id": "cf82f1cb5a3197a0"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_043",
+      "title": "Mathematical Domain Violation in _virtualPricesAux with Zero Supply",
+      "description": "In _virtualPricesAux, when trancheSupply is zero, the function returns (oneToken, 0). However, if _lastTrancheNAV is non-zero (e.g., from a prior deposit), and trancheSupply becomes zero (all tokens burned), the function still returns oneToken as the price. This is mathematically invalid: price = NAV / supply, and division by zero is undefined. The function silently returns a fixed value (oneToken), which is not the correct limit (infinity). This causes incorrect virtualPrice calculations for frontends and leads to users being overcharged or underpaid on subsequent deposits/withdrawals.",
+      "severity": "high",
+      "original_id": "dac1f64714296458"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_044",
+      "title": "Missing User Protection in Withdrawal Functions Allows Slippage Exploitation",
+      "description": "The withdrawal functions (_withdraw, withdrawAA, withdrawBB) do not allow users to specify a minimum acceptable output amount. When a user requests to withdraw a specific amount of tranche tokens, the contract calculates the underlying tokens to redeem based on the current tranche price. However, if the strategy price drops between the time the user initiates the withdrawal and when the liquidation occurs (due to market manipulation or oracle delay), the user may receive significantly less than expected. The contract does not enforce a minimum output threshold, leaving users exposed to front-running and adversarial price manipulation.",
+      "severity": "high",
+      "original_id": "40644b2ce855e797"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_045",
+      "title": "Validation After State Change in _liquidate Allows Invalid Redemptions",
+      "description": "The _liquidate function performs the external call to IIdleCDOStrategy.redeemUnderlying() before validating the result. The function first calls redeemUnderlying() to get _redeemedTokens, then checks if _redeemedTokens + 100 >= _amount. If the external call fails or returns less than expected, the state has already been modified (the contract's underlying balance is reduced by the requested amount, but the actual redemption may be insufficient). This violates the principle of validating before state changes, allowing invalid or partial redemptions to proceed, potentially leading to protocol insolvency if multiple such calls occur.",
+      "severity": "high",
+      "original_id": "5c090f1052076580"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_046",
+      "title": "Inconsistent Accounting in _virtualPricesAux Due to Mixed Use of Requested vs Actual Values",
+      "description": "In _virtualPricesAux, the total gain is calculated as _nav - _lastNAV, which represents the actual contract value increase. However, when splitting this gain between AA and BB tranches, the function uses the requested tranche supply (IdleCDOTranche(_tranche).totalSupply()) to compute the new price. But if a user has just deposited or withdrawn, the tranche supply used in the calculation is the pre-update supply, while the gain is based on the post-update NAV. This creates a mismatch: the gain is computed on the updated total value, but the per-token price is calculated using the old supply. This leads to incorrect tranche pricing and misallocation of gains, causing dilution or over-issuance of tranche tokens over time.",
+      "severity": "high",
+      "original_id": "a2740237aa3e7c63"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_047",
+      "title": "State Synchronization Failure in _updateAccounting Before _mintShares",
+      "description": "In _deposit, the function calls _updateAccounting() to update tranche prices and NAVs, then calls _mintShares() to mint new tokens. However, _mintShares() updates lastNAVAA or lastNAVBB by adding _amount, but _updateAccounting() already used the old lastNAVAA/BB values to compute the new prices. This means the minted tokens are priced based on a NAV that does not include the newly deposited amount, effectively underpricing the new tokens. The state update in _mintShares() happens after the price calculation, so the new deposit is not reflected in the price used for minting, leading to a systematic undervaluation of deposits and over-issuance of tranche tokens.",
+      "severity": "high",
+      "original_id": "57bc8e79a81c24dd"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_048",
+      "title": "Unit Mismatch in _virtualPrice Return Causes Incorrect APR Calculations",
+      "description": "The virtualPrice() function returns a price in underlying tokens per tranche token (scaled by ONE_TRANCHE_TOKEN). However, _getApr() uses this virtualPrice() value indirectly through _virtualBalance(), which computes balance = supply * virtualPrice() / ONE_TRANCHE_TOKEN. But in _getApr(), the APR calculation uses the strategy APR and splits it based on ratios. The issue is that _virtualPrice() is used to compute the current value, but the APR formula assumes the tranche price is stable and proportional to underlying value. However, because virtualPrice() includes accrued but unsplit interest, and _getApr() is called on this inflated price, the APR calculation becomes distorted. The APR should be based on the rate of change of NAV, not the absolute price level. This unit mismatch (price level vs. rate) causes the displayed APR to be inflated and inaccurate, misleading users and potentially affecting incentive distribution.",
+      "severity": "high",
+      "original_id": "9e640ef2b1f22499"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_049",
+      "title": "Partial Execution Risk in harvest() Without Atomicity",
+      "description": "The harvest() function performs multiple critical operations: redeeming rewards, selling rewards via Uniswap, updating accounting, depositing fees, updating incentives, and then depositing remaining funds. If any of the external calls (e.g., Uniswap swap, deposit to strategy) fails after a prior step has succeeded, the state is left in an inconsistent state. For example, if rewards are redeemed and sold, but the final deposit to the strategy fails, the contract has converted rewards to underlying tokens and updated accounting (increasing NAV), but those tokens are not deposited into the lending protocol. This means the contract holds uninvested tokens that are not accounted for in the strategy's balance, leading to a discrepancy between reported TVL and actual invested assets. Users may be charged fees on non-invested assets, and the protocol becomes vulnerable to insolvency if the uninvested balance is drained.",
+      "severity": "critical",
+      "original_id": "e273303af427d97a"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_050",
+      "title": "Replay Protection Bypass via _checkSameTx() Using Block Number",
+      "description": "The _checkSameTx() function uses keccak256(abi.encodePacked(tx.origin, block.number)) to prevent multiple calls in the same block. However, block.number is not unique across transactions in the same block \u2014 multiple transactions from the same sender can have the same block.number. An attacker can submit multiple transactions in the same block with different nonces, and all will pass the _checkSameTx() check because block.number is identical. This allows an attacker to call _deposit or _withdraw multiple times in the same block, potentially draining the contract or minting excessive tokens if the contract has sufficient liquidity. The protection is ineffective and creates a critical vulnerability for front-running and spam attacks.",
+      "severity": "critical",
+      "original_id": "e8b10bf107cb1ffb"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_051",
+      "title": "Automatic Processing of Withdrawal Funds Triggers Unintended Deposit Operations",
+      "description": "The contract's fallback/receive function implicitly accepts ETH or ERC-20 transfers without validation, and these funds are immediately processed as new deposits via the _skimDonatedAssets() function. This allows attackers to send funds to the contract during withdrawal processing, causing withdrawal funds to be mixed with new deposits and permanently locked in the feeReceiver. The contract cannot distinguish between user deposits and system-returned funds, leading to accounting corruption and fund loss.",
+      "severity": "critical",
+      "original_id": "34cba13221334efd"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_052",
+      "title": "Mathematical Domain Violation in Interest Calculation with Zero Denominator",
+      "description": "The _calcInterest and _calcInterestWithdrawRequest functions perform division by _trancheBal (tranche balance) without validating it is non-zero. When tranche balance is zero, division by zero occurs, resulting in undefined behavior (revert in Solidity 0.8+), but the function continues execution as if the result were zero, leading to incorrect interest calculations and potential fund misallocation.",
+      "severity": "high",
+      "original_id": "5b5c9775c2a93314"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_053",
+      "title": "Incomplete State Restoration in Instant Withdraw Cancellation Path",
+      "description": "When a borrower defaults during stopEpoch, the contract sets allowInstantWithdraw = true but does not reset pendingInstantWithdraws() in the strategy contract. This leaves the strategy contract with outstanding instant withdrawal requests that cannot be claimed (since the epoch is stopped and no new epoch starts), effectively locking funds in the strategy contract with no recovery mechanism.",
+      "severity": "high",
+      "original_id": "40e4c0e240a81bb7"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_054",
+      "title": "State Commitment Before External Call Verification in startEpoch",
+      "description": "In startEpoch, the contract sets allowInstantWithdraw = true before verifying that collectInstantWithdrawFunds() succeeds. If the external call to the strategy contract fails (e.g., due to gas limit or reentrancy), the flag is still set to true, allowing users to claim instant withdrawals even though funds were not transferred from the borrower, leading to fraudulent claims.",
+      "severity": "high",
+      "original_id": "24de8ab5b530e448"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_055",
+      "title": "Precision Loss in Interest Calculation Due to Integer Truncation",
+      "description": "The interest calculation in _calcInterest uses integer division with epochDuration / (365 days * ONE_TRANCHE_TOKEN). This truncates fractional interest, especially problematic for small amounts. For example, with 1000 underlyings, 10% APR, and 30-day epoch, expected interest is 821917808219178082 (1000 * 0.1 * 30 / 365), but due to truncation, it becomes 821917808219178080, losing 2 wei per calculation. Over many users, this accumulates to significant unaccounted funds.",
+      "severity": "medium",
+      "original_id": "de185e794fc0ccb9"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_056",
+      "title": "Authorization Context Not Bound in Instant Withdraw Requests",
+      "description": "The requestInstantWithdraw() function in IdleCreditVault is called by requestWithdraw() with msg.sender as the recipient. However, the authorization (signature or permission) is not bound to the specific amount or recipient. An attacker can front-run a legitimate user's requestWithdraw() call, calling requestInstantWithdraw() themselves with the same parameters, consuming the user's withdrawal rights and claiming the funds.",
+      "severity": "high",
+      "original_id": "10b254cdf9862dad"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_057",
+      "title": "Interface Incompatibility with IdleCreditVault's claimInstantWithdrawRequest",
+      "description": "The contract calls claimInstantWithdrawRequest(msg.sender) on IdleCreditVault, but the actual IdleCreditVault implementation (as per common patterns) requires a signature and nonce as parameters. The declared interface in IdleCDOEpochVariant assumes a 1-parameter function, but the real contract expects 2 or more. This causes ABI encoding mismatch and transaction revert, preventing legitimate users from claiming instant withdrawals.",
+      "severity": "critical",
+      "original_id": "fa26e98d2e489a96"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_058",
+      "title": "Mint Price Inflation via stale lastAAPrice/lastBBPrice in _mintShares",
+      "description": "The _mintShares function uses lastAAPrice and lastBBPrice as floor prices for minting, but these values are only updated during harvest() when _res[2].length > 0 (i.e., when rewards are sold). If no rewards are sold during harvest (e.g., due to price slippage or skipped flags), lastAAPrice/lastBBPrice remain stale. This allows attackers to mint tranche tokens at artificially low prices by triggering mint() when the virtual price has increased but lastXXPrice has not been updated, effectively stealing value from the protocol. The flaw is that _mintShares uses lastXXPrice as a floor, but lastXXPrice is not updated on every price increase \u2014 only on harvest with reward sales. This breaks the invariant that minting should occur at the highest available price (current or historical).",
+      "severity": "critical",
+      "original_id": "48d8c2c5888c2294"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_059",
+      "title": "Instant Withdrawal Logic Allows Users to Bypass Epoch Boundaries and Drain Funds",
+      "description": "The `requestWithdraw` function allows users to trigger instant withdrawals when the APR decreases, but it does not validate that the epoch has ended or that the borrower has sufficient funds to cover the withdrawal. This enables users to withdraw funds before the epoch starts and before the borrower has transferred the required underlyings to the strategy, leading to a situation where the protocol cannot fulfill withdrawal requests and users lose access to their funds.",
+      "severity": "critical",
+      "original_id": "268dc444fd202f66"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_060",
+      "title": "State Synchronization Failure in _calcInterestWithdrawRequest Causes Incorrect Interest Accounting",
+      "description": "The `_calcInterestWithdrawRequest` function calculates interest based on `lastNAVAA` or `lastNAVBB`, which are updated only in `_withdrawOps`. However, `_calcInterestWithdrawRequest` is called before `_withdrawOps`, meaning it uses stale NAV values. This results in incorrect interest calculations for withdrawal requests, leading to underpayment or overpayment of interest and misalignment between user expectations and protocol accounting.",
+      "severity": "high",
+      "original_id": "34bf8c1fae718dc3"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_061",
+      "title": "Missing User Protection in Withdrawal Requests Allows Partial Execution and Fund Loss",
+      "description": "The `requestWithdraw` function allows users to request withdrawals without any minimum output protection. If the borrower defaults or the strategy cannot fulfill the request, the user's tranche tokens are burned and the underlyings are not returned. This creates a scenario where users lose their entire position without recourse, violating the principle of user protection in DeFi protocols.",
+      "severity": "critical",
+      "original_id": "66c44484e5df8c08"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_062",
+      "title": "Validation After State Change in getFundsFromBorrower Enables Reentrancy and Fund Theft",
+      "description": "The `getFundsFromBorrower` function performs a `safeTransferFrom` after the caller has already been validated, but it does not validate that the borrower has sufficient balance before initiating the transfer. This allows a malicious borrower to reenter the contract during the transfer and manipulate state, potentially draining funds from the protocol by triggering multiple transfers before the balance is updated.",
+      "severity": "high",
+      "original_id": "be31eaa0e649bccf"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_063",
+      "title": "Incorrect Unit Conversion in _calcInterest Causes Underpayment of Interest",
+      "description": "The `_calcInterest` function calculates interest using the formula `_amount * (_getStrategyApr() / 100) * epochDuration / (365 days * ONE_TRANCHE_TOKEN)`. However, `_getStrategyApr()` returns an unscaled APR (e.g., 10% as 10), but the division by 100 is applied before multiplication, causing the APR to be interpreted as 0.1% instead of 10%. This results in a 100x underpayment of interest to lenders, leading to massive financial loss over time.",
+      "severity": "critical",
+      "original_id": "3e63a2ebf2a6c100"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_064",
+      "title": "State Commitment Before External Call in startEpoch Leads to Replayed Withdrawals",
+      "description": "In `startEpoch`, the contract sets `allowInstantWithdraw = true` and calls `collectInstantWithdrawFunds` before verifying that the external call to `sendFundsToBorrower` succeeds. If the borrower reverts, the state is already committed, allowing users to claim instant withdrawals even though the borrower never transferred the funds. This results in users claiming funds that do not exist, leading to protocol insolvency.",
+      "severity": "high",
+      "original_id": "baf567e73761afb2"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_065",
+      "title": "Inconsistent Use of _tranchePrice in maxWithdrawable vs maxWithdrawableInstant Causes User Fund Locking",
+      "description": "The `maxWithdrawable` function calculates the maximum withdrawable amount using `_tranchePrice`, which includes accrued interest. However, `maxWithdrawableInstant` uses the same `_tranchePrice` but does not account for interest, as it is meant for instant withdrawals. This inconsistency means users cannot accurately determine how much they can withdraw instantly, leading to failed transactions and locked funds.",
+      "severity": "high",
+      "original_id": "0645c9cd9dd8d6f2"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_066",
+      "title": "Access Control Bypass in setEpochParams Allows Unauthorized Epoch Parameter Manipulation",
+      "description": "The `setEpochParams` function checks only if the sender is owner or manager, but the `_checkOnlyOwnerOrManager` function allows the IdleCreditVault manager to call it. However, the IdleCreditVault manager is not a trusted entity and can be set by the borrower. This allows the borrower to manipulate epoch duration and buffer period, leading to incorrect interest calculations and potential fund theft.",
+      "severity": "high",
+      "original_id": "bf924009e18a4418"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_067",
+      "title": "Access Control Bypass on Epoch Interest Calculation via _calcInterestWithdrawRequest",
+      "description": "The function _calcInterestWithdrawRequest calculates interest for withdrawal requests using lastNAVAA and lastNAVBB, which are updated only during _withdrawOps. However, _withdrawOps is only called after the withdrawal request is made, meaning the interest calculation uses stale NAV values from the previous epoch. This allows an attacker to manipulate the timing of withdrawal requests to exploit the mismatch between the calculated interest (based on outdated NAV) and the actual NAV at epoch start. By making a large withdrawal just before startEpoch, the attacker reduces the NAV used in interest calculation for subsequent withdrawals, causing the protocol to underpay interest to other users while the attacker receives full interest based on inflated prior NAV. This results in a direct transfer of value from other lenders to the attacker.",
+      "severity": "critical",
+      "original_id": "23f97aa1981372f8"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_068",
+      "title": "Unit Mismatch in Interest Calculation Between _calcInterest and _calcInterestWithdrawRequest",
+      "description": "The function _calcInterest calculates epoch interest using _getStrategyApr() * epochDuration / (365 days * ONE_TRANCHE_TOKEN), assuming APR is scaled to include buffer period. However, _calcInterestWithdrawRequest scales the interest back down by multiplying by _duration / (_duration + _buffer) to exclude buffer period interest for withdrawals. This creates a representation boundary violation: _calcInterest returns interest including buffer period, while _calcInterestWithdrawRequest expects interest excluding buffer period but uses the same _getStrategyApr() which is already scaled. This causes a systematic undercalculation of interest for withdrawal requests. For example, with epochDuration=30 days, bufferPeriod=5 days, and target APR=10%, _setScaledApr sets strategy APR to 11.67%. _calcInterestWithdrawRequest then calculates interest as 11.67% * 30/35 = 10%, which is correct. But _calcInterest uses the same 11.67% for epoch interest, meaning the total interest accrued during the epoch is 11.67% of principal, not 10%. This means the protocol overpays interest to the borrower during startEpoch (by 1.67%) while underpaying withdrawal requestors by the same amount, creating a net loss to the protocol and a gain to the borrower.",
+      "severity": "high",
+      "original_id": "0aa09ccc7610f998"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_069",
+      "title": "Desynchronized Iteration in Pending Withdrawal Accounting via pendingWithdrawFees",
+      "description": "The state variable pendingWithdrawFees accumulates fees from all withdrawal requests during an epoch. However, when stopEpoch is called, pendingWithdrawFees is transferred to feeReceiver and then reset to 0. But if multiple stopEpoch calls are made (e.g., via stopEpochWithDuration), the pendingWithdrawFees variable is not re-validated against actual withdrawal requests. An attacker can request multiple withdrawals, then trigger stopEpoch, then trigger stopEpochWithDuration (which calls stopEpoch again). The second stopEpoch call will transfer pendingWithdrawFees again, even though it was already transferred and reset. This double-counting allows the feeReceiver to receive fees twice for the same withdrawal requests. For example: 100,000 USDC withdrawn with 1% fee = 1,000 USDC fee. First stopEpoch transfers 1,000 USDC to feeReceiver. stopEpochWithDuration calls stopEpoch again, transferring another 1,000 USDC to feeReceiver \u2014 even though no new withdrawals occurred. The protocol loses 1,000 USDC to the feeReceiver that was never earned.",
+      "severity": "high",
+      "original_id": "790778cba9657ba6"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_071",
+      "title": "Incorrect Interest Calculation for Over/Under Performance in _calcInterestWithdrawRequest",
+      "description": "The function _calcInterestWithdrawRequest calculates interestForOverUnderPerformance using interestWithoutSplitRatio - _interest. However, interestWithoutSplitRatio is calculated as _calcInterest(_amount) * _duration / (_duration + _buffer), which is based on the scaled APR (including buffer). But _interest is calculated using the same scaled APR, meaning the difference is not the true over/under performance due to tranche split ratio \u2014 it's the difference between two scaled values. This causes the interestForOverUnderPerformance to be inflated. For example: if AA has 80% of TVL and trancheAPRSplitRatio=80%, then interestWithoutSplitRatio = 100 * 10% * 30/35 = 8.57, _interest = 80 * 10% * 30/35 = 6.86, diff = 1.71. But true overperformance should be based on unscaled APR: interestWithoutSplitRatio should be 100 * 10% * 30/365 = 8.22, _interest = 80 * 10% * 30/365 = 6.58, diff = 1.64. The 4% inflation in diff causes the protocol to overstate expectedEpochInterest by 4%, leading to overpayment to the borrower during startEpoch and underpayment to lenders during stopEpoch.",
+      "severity": "high",
+      "original_id": "9c19c35063f86180"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_072",
+      "title": "Automatic Processing of Withdrawal Funds via Default Receive Function Leading to Fund Mixing and Accounting Corruption",
+      "description": "The contract has no explicit receive or fallback function, but inherits from IdleCDO which may handle ETH transfers. More critically, the contract's accounting system cannot distinguish between user deposits and system-returned funds (e.g., from harvests or external strategy returns). When external systems (like Euler) return funds to the contract, they are treated identically to new user deposits. This causes the contract's NAV and tranche prices to be inflated by system-generated returns, leading to incorrect minting and withdrawal calculations. Users withdrawing after such returns receive more tokens than they should, while the protocol loses assets permanently.",
+      "severity": "critical",
+      "original_id": "ca77ace574fc0444"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_073",
+      "title": "Mint Price Manipulation via stale lastAAPrice/lastBBPrice in _mintShares",
+      "description": "The _mintShares function calculates the mint price using lastAAPrice or lastBBPrice, which are only updated during harvest or mint events. An attacker can manipulate the mint price by triggering a mint operation immediately after a large withdrawal that reduces the NAV, causing the protocol to mint shares at an artificially inflated price. This results in the protocol giving away more underlying assets than it should, leading to dilution of legitimate holders and loss of protocol funds.",
+      "severity": "critical",
+      "original_id": "e9283bc864128015"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_074",
+      "title": "Harvest Function Bypasses Price Update Logic for AA/BB Prices",
+      "description": "The harvest function updates lastAAPrice and lastBBPrice only if _res[2].length > 0 (i.e., if token sales occurred). However, the virtualPriceMint() function \u2014 which determines the true underlying value for minting \u2014 can increase even without token sales (e.g., due to interest accrual from Euler). This causes lastAAPrice/lastBBPrice to become stale, allowing attackers to mint new shares at outdated, inflated prices. This results in protocol insolvency as new shares are minted against an inflated price while the actual NAV has increased further.",
+      "severity": "critical",
+      "original_id": "4bbf752150a441e7"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_075",
+      "title": "Inconsistent Price Calculation Between getContractValueForMint and getContractValue",
+      "description": "The function getContractValueForMint() uses mintPrice() from the Euler strategy, while getContractValue() (used in _updateAccounting) uses _strategyPrice(). These two values can diverge significantly due to Euler's dynamic pricing model. When _mintShares uses virtualPriceMint() (which relies on getContractValueForMint), but _updateAccounting uses getContractValue(), the protocol's accounting becomes inconsistent. This causes mispricing of tranche tokens during minting vs. yield distribution, leading to systematic under- or over-valuation of user positions and potential fund loss.",
+      "severity": "high",
+      "original_id": "65a4f36f5fbca61f"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_076",
+      "title": "State Synchronization Failure in _updateAccounting and _mintShares",
+      "description": "The _updateAccounting function updates priceAA/priceBB and lastNAVAA/lastNAVBB, but _mintShares uses lastAAPrice/lastBBPrice \u2014 which are only updated in harvest() \u2014 to determine minting price. This creates a critical desynchronization: minting uses stale price data while accounting uses fresh NAV data. An attacker can exploit this by minting immediately after a harvest that increases NAV but before lastAAPrice/lastBBPrice are updated, effectively minting at a lower price than the true value, diluting existing holders. The protocol loses assets because it mints more tokens than the underlying value justifies.",
+      "severity": "high",
+      "original_id": "7b9f82fcb07ab0fb"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_077",
+      "title": "Missing User Protection in _mintShares Against Price Slippage",
+      "description": "The _mintShares function allows users to mint tranche tokens without any slippage tolerance or minimum output parameter. Since the mint price is determined by lastAAPrice/lastBBPrice (which can be manipulated or stale), users have no mechanism to reject execution if the actual price has moved unfavorably. An attacker can front-run a legitimate deposit by triggering a harvest or withdrawal to artificially lower the NAV, then cause a mint at a stale high price \u2014 effectively stealing value from the protocol. Users are exposed to unfavorable execution without any protection.",
+      "severity": "high",
+      "original_id": "d2ef6bdc056fb139"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_078",
+      "title": "Division by Zero Risk in _virtualPriceAuxVariant",
+      "description": "In _virtualPriceAuxVariant, the calculation _virtualPrice = uint256(int256(_lastTrancheNAV) + int256(_totalTrancheGain)) * ONE_TRANCHE_TOKEN / trancheSupply assumes trancheSupply > 0. Although there is a check for trancheSupply == 0, if an attacker can cause trancheSupply to be zero via a flash loan attack or reentrancy that drains all tokens between the check and the division, the division will revert. However, the more critical issue is that if trancheSupply is 1, and the numerator is large, the multiplication may overflow. The code does not use SafeMath or checked arithmetic, risking silent overflow and incorrect pricing.",
+      "severity": "medium",
+      "original_id": "0618651021271f0c"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_079",
+      "title": "Access Control Bypass on lastAAPrice/lastBBPrice Allows Fee Avoidance",
+      "description": "The state variables lastAAPrice and lastBBPrice are updated in _mintShares and harvest without access control, allowing attackers to manipulate the minting price floor. By calling harvest() to inflate lastAAPrice/lastBBPrice before a legitimate deposit, an attacker can cause subsequent mint() calls to use an artificially high price, reducing the number of tranche tokens minted per underlying asset. This effectively allows the attacker to mint fewer tokens than they should, while the protocol still records the full underlying value as deposited. The fee calculation in _updateAccounting is based on the true NAV increase, but the minted tokens are undercounted, leading to a permanent misalignment between underlying assets and tranche supply. This results in fee avoidance for the attacker and dilution of legitimate holders.",
+      "severity": "critical",
+      "original_id": "400e4632ebd412c0"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_080",
+      "title": "Unit Mismatch in getContractValueForMint Causes Understated TVL and Incorrect Minting",
+      "description": "The function getContractValueForMint() calculates TVL using mintPrice from IdleLeveragedEulerStrategy, but divides by 10^(strategyTokenDecimals) to normalize the price. However, the mintPrice returned by the Euler strategy is already in 18-decimal normalized form (as per Euler's standard). This double-normalization causes the price to be scaled down by 10^(strategyTokenDecimals) again, resulting in a price that is 10^18 times too small if strategyTokenDecimals=18. Consequently, _minted = _amount * ONE_TRANCHE_TOKEN / _price becomes 10^18 times too large, causing massive over-minting of tranche tokens. This leads to severe dilution of existing holders and under-collateralization of the tranche, as the protocol mints far more tokens than the underlying value supports. The error propagates to all subsequent calculations including virtualPrice and _updateAccounting, causing systemic accounting failure.",
+      "severity": "critical",
+      "original_id": "4e2efe55485db1d1"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_081",
+      "title": "Desynchronized Iteration in harvest() Causes Missed Price Updates",
+      "description": "The harvest() function updates lastAAPrice and lastBBPrice only if _res[2].length > 0, which assumes that reward sales are the only trigger for price updates. However, the price should be updated whenever the virtual price increases, regardless of whether rewards were sold. This creates a desynchronization: if the strategy generates yield through interest (not via reward sales), harvest() will not update lastAAPrice/lastBBPrice even if virtualPriceMint() has increased. This means subsequent _mintShares() calls will use stale, lower price floors, allowing users to mint tranche tokens at artificially low prices. This results in underpayment for the protocol (users get more tokens than they should for the same underlying) and dilutes existing holders. The attack is stealthy because it requires no reward sales \u2014 just normal yield accrual.",
+      "severity": "high",
+      "original_id": "de1b2514e052483f"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_082",
+      "title": "Fee Calculation Uses Stale lastNAV After Rebalance, Leading to Fee Avoidance and Protocol Insolvency",
+      "description": "The _updateFeeInfo() function calculates fees based on the difference between current NAV and lastNAV, but lastNAV is only updated after fee minting. During rebalance(), _updateFeeInfo() is called before recalculating the pool value, but lastNAV is not updated to reflect the new NAV until after fees are minted. This creates a window where the fee calculation uses outdated lastNAV values, allowing the protocol to avoid collecting fees on gains that occurred during rebalancing. An attacker can trigger a rebalance with a large unrealized gain to permanently avoid fee collection, leading to protocol insolvency over time as fees are systematically undercollected.",
+      "severity": "critical",
+      "original_id": "12dc438a2dac402e"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_083",
+      "title": "Precision Loss in Tranche Price Calculation Due to Integer Division Truncation",
+      "description": "The _virtualPriceAuxVariant function calculates tranche prices using integer division without proper rounding or overflow protection. When computing _virtualPrice = (lastTrancheNAV + totalTrancheGain) * ONE_TRANCHE_TOKEN / trancheSupply, the multiplication may overflow or the division may truncate fractional units, leading to persistent undercounting of tranche values. This causes AA and BB tranche holders to receive less value than mathematically owed over time, with losses compounding across harvests.",
+      "severity": "high",
+      "original_id": "42a0c73519b7e0ba"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_084",
+      "title": "Inconsistent Price Comparison Logic in _mintShares Causes Under-Minting of Tranche Tokens",
+      "description": "In _mintShares, the mint price is chosen as max(_currPrice, _mintPrice), where _mintPrice is lastAAPrice or lastBBPrice. However, _currPrice is computed via _tranchePrice(), which uses getContractValueForMint() \u2014 a function that uses mintPrice() from the Euler strategy, not the actual market price. This creates a mismatch: _currPrice may be artificially inflated by strategy-specific logic, while lastAAPrice/BBPrice reflect historical market prices. When _currPrice is lower than lastAAPrice due to strategy volatility, the system uses lastAAPrice (higher) to mint, causing users to receive fewer tokens than they should for their deposit. This is a semantic value comparison failure: the system compares raw price values without validating their representational consistency.",
+      "severity": "high",
+      "original_id": "3ac01f74743c7339"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_085",
+      "title": "State Commitment Before External Call in harvest() Enables Front-Running and Loss of Fees",
+      "description": "The harvest() function calls super.harvest() first, which may involve external calls to DEX routers or reward contracts. Only after these calls complete does it update lastAAPrice and lastBBPrice based on virtualPriceMint(). If the external call reverts (e.g., due to slippage or price impact), the parent function still succeeds and updates the price variables. However, if the external call fails silently (e.g., due to gas limits or non-reverting calls), the price update may be based on stale or incorrect values. This commits state (lastAAPrice/BBPrice) before verifying the success of the underlying operations, violating operation lifecycle integrity.",
+      "severity": "high",
+      "original_id": "b019b92b8ccdeb90"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_086",
+      "title": "Mathematical Domain Violation in _virtualPriceAuxVariant: Division by Zero on Tranche Supply",
+      "description": "In _virtualPriceAuxVariant, the function computes _virtualPrice = (int256(_lastTrancheNAV) + int256(_totalTrancheGain)) * ONE_TRANCHE_TOKEN / trancheSupply. Although there is a check for trancheSupply == 0, it only returns (oneToken, 0) without preventing the division from being executed in the general case. If trancheSupply is zero due to a race condition or flash loan attack that drains all tokens between the check and the division, the division by zero will cause a revert. This is a domain validation failure: the function assumes trancheSupply > 0 after the check, but does not revalidate it before the critical operation.",
+      "severity": "critical",
+      "original_id": "5bdabdf38b4a6da7"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_087",
+      "title": "Fork Behavioral Divergence: Assumed Euler Strategy mintPrice() Behavior Does Not Match Actual Implementation",
+      "description": "The contract assumes that IdleLeveragedEulerStrategy(strategy).mintPrice() returns a stable, market-referenced price. However, in the actual Euler EulerLeverageStrategy implementation, mintPrice() is a function that returns the ratio of total assets to total shares, which is updated only on deposit/withdraw/harvest. The contract uses mintPrice() in getContractValueForMint() to inflate the perceived price for minting, but if the Euler strategy has been forked (e.g., to a version where mintPrice() is not updated frequently or is pegged to a different asset), the price used for minting becomes inaccurate. This causes users to mint tranche tokens at inflated prices, leading to dilution of existing holders and permanent loss of value.",
+      "severity": "high",
+      "original_id": "8b2efb505944ac43"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_088",
+      "title": "Automatic Processing of Withdrawal Funds Triggers Unintended Rebalancing",
+      "description": "The contract's _redeemProtocolTokens function transfers redeemed underlying tokens back to the contract, which are then immediately subject to rebalancing logic. Since the contract cannot distinguish between user-initiated withdrawals and system-generated returns, these returned funds are treated as new deposits and automatically reallocated through _rebalance(), preventing users from collecting their redeemed funds. This creates a situation where withdrawal requests are never completed because funds are immediately swept into rebalancing operations.",
+      "severity": "critical",
+      "original_id": "5f583fe70e545935"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_089",
+      "title": "Access Control Bypass in _updateFeeInfo Allows Fee Manipulation",
+      "description": "The _updateFeeInfo() function is called during mint and redeem operations without access control, allowing users to trigger fee calculations at arbitrary times. Since lastNAV is updated only after fee calculation, an attacker can manipulate the timing of mint/redeem to cause fee calculations to use outdated lastNAV values, effectively avoiding fees. This creates a timing attack where the attacker can extract value by triggering fee updates when the protocol's NAV is artificially low, causing fees to be miscalculated and underpaid.",
+      "severity": "critical",
+      "original_id": "02bee7f8798cb4ce"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_090",
+      "title": "Unit Mismatch in _tokenPrice() Causes Underestimation of Token Price and Fee Drain",
+      "description": "The _tokenPrice() function calculates token price as (totNav - _calculateFees(totNav)) * ONE_18 / totalSupply(). However, _calculateFees() uses lastNAV (which excludes fees) to compute fees as (currNAV - lastNAV) * fee / FULL_ALLOC. This means fees are subtracted from NAV before price calculation, but the fee amount itself is derived from the difference between NAV including fees and NAV excluding fees \u2014 creating a circular dependency. The result is that token price is systematically underestimated, causing minted tokens to be overvalued and redeemed tokens to be undervalued. This leads to a gradual, compounding drain of protocol assets as users mint more tokens than they should for the same underlying deposit, and redeem fewer underlying tokens than they should for the same token burn.",
+      "severity": "critical",
+      "original_id": "5730dea52768baba"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_091",
+      "title": "Desynchronized Iteration in _rebalance() Causes Incomplete Rebalancing and Asset Lockup",
+      "description": "In _rebalance(), the loop that checks if allocations have changed uses a flawed condition: 'for (uint256 i = 0; i < lastLen || !areAllocationsEqual; i++)'. This loop condition allows i to exceed lastLen if areAllocationsEqual becomes false, leading to out-of-bounds array access. Additionally, when lastAllocations and lastRebalancerAllocations have different lengths (e.g., after setAllAvailableTokensAndWrappers), the equality check fails silently, and rebalancing may not trigger even when needed. This causes protocol allocations to become desynchronized with actual asset distribution, leading to assets being permanently locked in underutilized protocols. For example, if a new protocol is added and allocations are updated, but lastAllocations is not reset properly, the protocol may never rebalance, leaving funds idle and unproductive.",
+      "severity": "high",
+      "original_id": "821f56b23328b5fe"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_092",
+      "title": "Inconsistent Fee Distribution in _updateFeeInfo() Causes Fee Dilution and Protocol Insolvency",
+      "description": "In _updateFeeInfo(), fees are minted as _fees * totalSupply() / (_currNAV - _fees). However, _currNAV includes the fees being calculated, and _fees is derived from the difference between _currNAV and lastNAV. This creates a division by a value that is being inflated by the fee itself, leading to an overestimation of the fee amount. For example, if _currNAV = 1000e18, lastNAV = 900e18, and fee = 15000 (15%), then _fees = 150e18. But the minting formula becomes 150e18 * totalSupply / (1000e18 - 150e18) = 150e18 * totalSupply / 850e18, which is ~17.6% of totalSupply, not 15%. This over-minting of fee tokens dilutes user shares and reduces the protocol's net asset value over time, leading to insolvency as user redemption claims exceed actual underlying assets.",
+      "severity": "critical",
+      "original_id": "f298c167c911345c"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_093",
+      "title": "Redeem Helper Loop May Miss Protocols Due to Early Break Condition",
+      "description": "In _redeemHelper(), the loop breaks when 'redeemedTokens >= _amount - 100 || redeemedTokens > toRedeem'. However, 'toRedeem' is dynamically updated as _amount - redeemedTokens, and the condition 'redeemedTokens > toRedeem' is logically flawed. For example, if _amount = 1000, and after redeeming from first protocol, redeemedTokens = 600, then toRedeem = 400. If the next protocol can only provide 300, redeemedTokens becomes 900, which is not > 400, so the loop continues. But if the next protocol provides 500, redeemedTokens becomes 1100, which is > 400, so it breaks \u2014 even though it has redeemed 100 more than requested. This leads to over-redemption and underpayment to users. Conversely, if the protocol has low liquidity and the condition triggers early, it may break before exhausting all available liquidity, leaving funds locked in protocols that could have been redeemed.",
+      "severity": "high",
+      "original_id": "2ca59fc2b54e097c"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_094",
+      "title": "Fee Calculation Uses Stale lastNAV After Rebalance, Leading to Permanent Fee Loss",
+      "description": "The _updateFeeInfo() function calculates fees based on the difference between current NAV and lastNAV, but lastNAV is updated to the new NAV before fees are minted. This causes fees to be calculated on the full NAV increase, including the fees themselves, leading to an exponential overstatement of fees. However, the more critical issue is that during rebalance(), _updateFeeInfo() is called, then lastAllocations is reset to match lastRebalancerAllocations only if liquidity is sufficient. If liquidity is insufficient (lowLiquidity = true), lastAllocations is NOT updated, but lastNAV is still updated to the new NAV. This creates a permanent desynchronization: future fee calculations use a new lastNAV that includes fees from a rebalance that never completed its allocation update, causing fees to be permanently undercalculated in subsequent periods. The protocol loses fees indefinitely because the fee calculation formula assumes the lastNAV was updated to reflect the true underlying value, but it was not.",
+      "severity": "critical",
+      "original_id": "81fd173ae71a37cd"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_095",
+      "title": "Raw Bit Comparison of Allocation Arrays Causes Rebalance Failure",
+      "description": "The contract compares lastAllocations and lastRebalancerAllocations using raw bit comparison in _rebalance(), but these arrays may have different lengths or padding, causing equal semantic allocations to be deemed unequal. This prevents rebalancing even when allocations are logically identical, leading to funds being stuck in suboptimal positions.",
+      "severity": "high",
+      "original_id": "aff86e57eec382a0"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_096",
+      "title": "Precision Loss in _amountsFromAllocations Causes Underfunding of Protocols",
+      "description": "The _amountsFromAllocations function uses integer division to compute allocations, which truncates fractional wei values. When total is not evenly divisible by FULL_ALLOC, the last allocation receives the remainder, but intermediate allocations lose precision. This causes the sum of minted amounts to be less than total, resulting in underfunded protocols and lost yield.",
+      "severity": "high",
+      "original_id": "eec2593a3e73cfde"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_097",
+      "title": "Mathematical Domain Violation in _tokenPrice() with Zero Supply",
+      "description": "In _tokenPrice(), when totalSupply() is zero, the function returns 10^tokenDecimals. However, this value is then used in _calculateFees() to compute fees as (currNAV - lastNAV) * fee / FULL_ALLOC. If lastNAV is non-zero and currNAV is zero (e.g., after full redemption), the fee calculation becomes negative, but the function ignores the sign and returns zero. This silently corrupts fee accounting and prevents fee collection.",
+      "severity": "high",
+      "original_id": "2fbbd0c30cb45565"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_098",
+      "title": "State Commitment Before Rebalance Completion in _rebalance()",
+      "description": "In _rebalance(), lastAllocations is deleted and overwritten with lastRebalancerAllocations only if lowLiquidity is false. However, if the rebalance fails mid-execution (e.g., due to gas limit or external call revert), lastAllocations may be partially updated or cleared, but the rebalancer's allocations are not rolled back. This breaks the invariant that lastAllocations must reflect the last fully applied state, leading to inconsistent future rebalances.",
+      "severity": "high",
+      "original_id": "d9d33144b0c39652"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_099",
+      "title": "Rebalance Can Be Triggered by Any Caller, Enabling Front-Running and DoS",
+      "description": "The setAllocations() function allows any rebalancer or owner to set allocations, but _rebalance() is called internally without authorization checks. An attacker can call setAllocations() with malicious allocations (e.g., all to one protocol) and trigger a costly rebalance, consuming gas and blocking legitimate rebalances. Since rebalance() is public and can be called by anyone, this enables front-running and DoS.",
+      "severity": "high",
+      "original_id": "b3d8389317818f29"
+    }
+  ],
+  "input_tokens": 15849,
+  "output_tokens": 5019,
+  "cached_tokens": 746
+}

@@ -1,0 +1,90 @@
+{
+  "agent317": {
+    "projects_scored": 4,
+    "avg_detection_rate": 0.19047619047619047,
+    "avg_precision": 0.01675925925925926,
+    "avg_f1": 0.03068535825545171,
+    "total_true_positives": 4,
+    "total_expected": 29,
+    "total_found": 180,
+    "total_false_positives": 176,
+    "per_project": {
+      "code4rena_bakerfi-invitational_2025_02": {
+        "detection_rate": 0.42857142857142855,
+        "precision": 0.03,
+        "f1_score": 0.056074766355140186,
+        "true_positives": 3,
+        "total_expected": 7,
+        "total_found": 100
+      },
+      "code4rena_secondswap_2025_02": {
+        "detection_rate": 0.3333333333333333,
+        "precision": 0.037037037037037035,
+        "f1_score": 0.06666666666666667,
+        "true_positives": 1,
+        "total_expected": 3,
+        "total_found": 27
+      },
+      "sherlock_cork-protocol_2025_01": {
+        "detection_rate": 0.0,
+        "precision": 0.0,
+        "f1_score": 0.0,
+        "true_positives": 0,
+        "total_expected": 11,
+        "total_found": 25
+      },
+      "sherlock_oku_2024_12": {
+        "detection_rate": 0.0,
+        "precision": 0.0,
+        "f1_score": 0.0,
+        "true_positives": 0,
+        "total_expected": 8,
+        "total_found": 28
+      }
+    }
+  },
+  "agent794": {
+    "projects_scored": 4,
+    "avg_detection_rate": 0.32521645021645024,
+    "avg_precision": 0.022551020408163265,
+    "avg_f1": 0.04182381696955584,
+    "total_true_positives": 9,
+    "total_expected": 29,
+    "total_found": 398,
+    "total_false_positives": 389,
+    "per_project": {
+      "code4rena_bakerfi-invitational_2025_02": {
+        "detection_rate": 0.2857142857142857,
+        "precision": 0.02,
+        "f1_score": 0.037383177570093455,
+        "true_positives": 2,
+        "total_expected": 7,
+        "total_found": 100
+      },
+      "code4rena_secondswap_2025_02": {
+        "detection_rate": 0.3333333333333333,
+        "precision": 0.01020408163265306,
+        "f1_score": 0.0198019801980198,
+        "true_positives": 1,
+        "total_expected": 3,
+        "total_found": 98
+      },
+      "sherlock_cork-protocol_2025_01": {
+        "detection_rate": 0.18181818181818182,
+        "precision": 0.02,
+        "f1_score": 0.036036036036036036,
+        "true_positives": 2,
+        "total_expected": 11,
+        "total_found": 100
+      },
+      "sherlock_oku_2024_12": {
+        "detection_rate": 0.5,
+        "precision": 0.04,
+        "f1_score": 0.07407407407407407,
+        "true_positives": 4,
+        "total_expected": 8,
+        "total_found": 100
+      }
+    }
+  }
+}

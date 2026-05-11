@@ -1,0 +1,556 @@
+{
+  "findings": [
+    {
+      "title": "Empty _validateSwap() in SolidlyV3AMO Allows Wrong-Direction Operations",
+      "description": "The validateSwap modifier in MasterAMO is the primary gate on permissionless mintSellFarm() and unfarmBuyBurn(). It calls _validateSwap(bool boostForUsd), which SolidlyV2AMO correctly implements with a reserve ratio check (lines 380-386). However, SolidlyV3AMO overrides it with an empty body: function _validateSwap(bool boostForUsd) internal view override {}. This means NO pre-condition check exists before public functions execute in V3 deployments.",
+      "vulnerability_type": "Missing Access Control",
+      "severity": "high",
+      "confidence": 0.97,
+      "location": "SolidlyV3AMO._validateSwap():339",
+      "file": "SolidlyV3AMO.sol",
+      "id": "a1b2c3d4e5f60001",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-016",
+        "VULN-041"
+      ],
+      "max_economic_impact": "$50K-$500K+ per event"
+    },
+    {
+      "title": "Hardcoded Slippage Min=1 in V3 Public Functions Enable Sandwich Attacks",
+      "description": "All permissionless V3 operations pass hardcoded minimum values of 1 for ALL slippage parameters: minUsdAmountOut, minBoostSpend, minUsdSpend, minBoostRemove, minUsdRemove, minBoostAmountOut. This provides effectively zero slippage protection. Any MEV bot can sandwich every public rebalancing transaction.",
+      "vulnerability_type": "Insufficient Slippage Protection",
+      "severity": "high",
+      "confidence": 0.98,
+      "location": "SolidlyV3AMO:308-313,328-333",
+      "file": "SolidlyV3AMO.sol",
+      "id": "a1b2c3d4e5f60002",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-017",
+        "VULN-042",
+        "VULN-043"
+      ],
+      "max_economic_impact": "10-50% of each rebalancing trade; $10K-$100K+ per event"
+    },
+    {
+      "title": "boostPrice() Uses Flash-Loan Manipulable Spot Price for Critical Branching",
+      "description": "boostPrice() is used for the critical addLiquidity branching decision (MasterAMO line 212) and post-operation price checks (lines 288, 306). V2 uses IPair.getAmountOut() (spot price) and V3 uses slot0().sqrtPriceX96 (spot price) \u2014 both trivially manipulable via flash loans. Notably, the V2 IPair interface exposes a TWAP function current() that is NOT used.",
+      "vulnerability_type": "Oracle Manipulation",
+      "severity": "high",
+      "confidence": 0.96,
+      "location": "MasterAMO:211-212, SolidlyV2AMO:390-393, SolidlyV3AMO:343-355",
+      "file": "MasterAMO.sol",
+      "id": "a1b2c3d4e5f60003",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-024",
+        "VULN-027",
+        "VULN-044"
+      ],
+      "max_economic_impact": "$100K-$1M combined with sandwich"
+    },
+    {
+      "title": "V2 Public Functions Use Spot-Price Params Enabling Sandwich Attacks",
+      "description": "V2 public _mintSellFarm() and _unfarmBuyBurn() compute all parameters from live on-chain reserves. While the swap portion has partial protection (minUsdAmountOut = 1:1 peg floor), the addLiquidity step passes minBoostSpend=1 and minUsdSpend=1 \u2014 effectively zero slippage protection on liquidity provision.",
+      "vulnerability_type": "Insufficient Slippage Protection",
+      "severity": "high",
+      "confidence": 0.95,
+      "location": "SolidlyV2AMO:342-378",
+      "file": "SolidlyV2AMO.sol",
+      "id": "a1b2c3d4e5f60004",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-026",
+        "VULN-032"
+      ],
+      "max_economic_impact": "$50K-$500K per sandwich"
+    },
+    {
+      "title": "V2 _unfarmBuyBurn() Circular Protection From Same Manipulable Reserves",
+      "description": "V2 _unfarmBuyBurn() derives ALL slippage protection parameters from the same pool reserves that a sandwich attacker manipulates. The minBoostRemove, minUsdRemove, and minBoostAmountOut are all calculated from current reserves \u2014 creating a circular dependency where the attacker controls both the attack and the 'protection.'",
+      "vulnerability_type": "Circular Dependency in Slippage Protection",
+      "severity": "high",
+      "confidence": 0.94,
+      "location": "SolidlyV2AMO:358-378",
+      "file": "SolidlyV2AMO.sol",
+      "id": "a1b2c3d4e5f60005",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-033"
+      ],
+      "max_economic_impact": "Full unfarm operation value per transaction"
+    },
+    {
+      "title": "V3 _unfarmBuyBurn() Liquidity Calculation Uses Manipulable Spot Balances",
+      "description": "V3 _unfarmBuyBurn() calculates liquidity to remove using IERC20.balanceOf(pool) spot values. In V3 pools, tokens sent directly to the pool address change balanceOf() but not the pool's internal accounting. An attacker can inflate boostBalance by direct transfer, causing the protocol to remove excessive liquidity. Combined with min=1 slippage (VULN-017), the resulting operations are fully sandwichable.",
+      "vulnerability_type": "Balance Manipulation",
+      "severity": "high",
+      "confidence": 0.93,
+      "location": "SolidlyV3AMO:319-326",
+      "file": "SolidlyV3AMO.sol",
+      "id": "a1b2c3d4e5f60006",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-048"
+      ],
+      "max_economic_impact": "$50K-$500K combined with sandwich"
+    },
+    {
+      "title": "Uncapped BOOST Minting via MINTER_ROLE",
+      "description": "No supply cap on mint(). Compromised MINTER_ROLE can mint unlimited tokens.",
+      "vulnerability_type": "Uncapped Minting",
+      "severity": "medium",
+      "confidence": 0.9,
+      "location": "BoostStablecoin.sol:51-53",
+      "file": "BoostStablecoin.sol",
+      "id": "a1b2c3d4e5f60007",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-001"
+      ]
+    },
+    {
+      "title": "DEFAULT_ADMIN_ROLE Single Point of Failure",
+      "description": "Single address gets full admin control. No on-chain multisig/timelock enforcement.",
+      "vulnerability_type": "Centralization Risk",
+      "severity": "medium",
+      "confidence": 0.92,
+      "location": "BoostStablecoin.sol:34-41",
+      "file": "BoostStablecoin.sol",
+      "id": "a1b2c3d4e5f60008",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-002"
+      ]
+    },
+    {
+      "title": "protocolMint() Has No Supply Cap or Rate Limit",
+      "description": "AMO_ROLE can mint unlimited uncollateralized BOOST. More severe than M-1 since no collateral required.",
+      "vulnerability_type": "Uncapped Minting",
+      "severity": "medium",
+      "confidence": 0.91,
+      "location": "Minter.sol:87-90",
+      "file": "Minter.sol",
+      "id": "a1b2c3d4e5f60009",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-008"
+      ]
+    },
+    {
+      "title": "setTokens() Can Redirect Collateral Flow",
+      "description": "ADMIN_ROLE can change token addresses instantly without timelock. Could redirect collateral to worthless token.",
+      "vulnerability_type": "Centralization Risk",
+      "severity": "medium",
+      "confidence": 0.9,
+      "location": "Minter.sol:62-69",
+      "file": "Minter.sol",
+      "id": "a1b2c3d4e5f6000a",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-009"
+      ]
+    },
+    {
+      "title": "setTreasury() Can Redirect All Funds",
+      "description": "ADMIN_ROLE can instantly redirect treasury address. No timelock or two-step confirmation.",
+      "vulnerability_type": "Centralization Risk",
+      "severity": "medium",
+      "confidence": 0.9,
+      "location": "Minter.sol:71-75",
+      "file": "Minter.sol",
+      "id": "a1b2c3d4e5f6000b",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-010"
+      ]
+    },
+    {
+      "title": "Initializer Front-Running on Proxy Deployment",
+      "description": "Proxy initialization can be front-run if not deployed atomically. Standard proxy pattern risk.",
+      "vulnerability_type": "Front-Running",
+      "severity": "medium",
+      "confidence": 0.85,
+      "location": "Minter.sol:41-52",
+      "file": "Minter.sol",
+      "id": "a1b2c3d4e5f6000c",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-013"
+      ]
+    },
+    {
+      "title": "Post-Operation Price Check Allows Value Extraction",
+      "description": "Post-operation checks use manipulable spot price, not average execution price. Sandwich within permitted band.",
+      "vulnerability_type": "Oracle Manipulation",
+      "severity": "medium",
+      "confidence": 0.88,
+      "location": "MasterAMO.sol:278-309",
+      "file": "MasterAMO.sol",
+      "id": "a1b2c3d4e5f6000d",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-018"
+      ]
+    },
+    {
+      "title": "withdrawERC20 Allows Unrestricted Token Extraction",
+      "description": "WITHDRAWER_ROLE can extract any ERC20 including operational tokens (LP, BOOST, USD).",
+      "vulnerability_type": "Unrestricted Withdrawal",
+      "severity": "medium",
+      "confidence": 0.89,
+      "location": "MasterAMO.sol:312-319",
+      "file": "MasterAMO.sol",
+      "id": "a1b2c3d4e5f6000e",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-021"
+      ]
+    },
+    {
+      "title": "_mintSellFarm Uses Full USD Balance Including Pre-Existing",
+      "description": "Uses full balanceOf(address(this)) for addLiquidity, sweeping pre-existing USD into position.",
+      "vulnerability_type": "Balance Accounting",
+      "severity": "medium",
+      "confidence": 0.87,
+      "location": "MasterAMO.sol:199-216",
+      "file": "MasterAMO.sol",
+      "id": "a1b2c3d4e5f6000f",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-022"
+      ]
+    },
+    {
+      "title": "No Validation on boostLowerPriceSell/boostUpperPriceBuy",
+      "description": "SETTER_ROLE can set extreme price bounds, effectively disabling safety checks.",
+      "vulnerability_type": "Missing Input Validation",
+      "severity": "medium",
+      "confidence": 0.86,
+      "location": "MasterAMO.sol",
+      "file": "MasterAMO.sol",
+      "id": "a1b2c3d4e5f60010",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-025"
+      ]
+    },
+    {
+      "title": "Residual Approval to Router After _mintAndSellBoost",
+      "description": "Router approval not revoked after swap, inconsistent with _addLiquidity which does revoke.",
+      "vulnerability_type": "Residual Approval",
+      "severity": "medium",
+      "confidence": 0.88,
+      "location": "SolidlyV2AMO.sol:165",
+      "file": "SolidlyV2AMO.sol",
+      "id": "a1b2c3d4e5f60011",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-028"
+      ]
+    },
+    {
+      "title": "getReward() Sweeps Entire Balance Not Just Rewards",
+      "description": "Sweeps full balanceOf for each reward token, not just newly claimed rewards. Token overlap risk.",
+      "vulnerability_type": "Balance Accounting",
+      "severity": "medium",
+      "confidence": 0.87,
+      "location": "SolidlyV2AMO.sol:332-336",
+      "file": "SolidlyV2AMO.sol",
+      "id": "a1b2c3d4e5f60012",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-029"
+      ]
+    },
+    {
+      "title": "setParams() Lacks Bounds on 5 of 7 Parameters",
+      "description": "5 parameters have no bounds checking. SETTER_ROLE can disable safety mechanisms.",
+      "vulnerability_type": "Missing Input Validation",
+      "severity": "medium",
+      "confidence": 0.86,
+      "location": "SolidlyV2AMO.sol:118-145",
+      "file": "SolidlyV2AMO.sol",
+      "id": "a1b2c3d4e5f60013",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-030"
+      ]
+    },
+    {
+      "title": "block.timestamp+1 Deadline Provides No MEV Protection",
+      "description": "Deadline always passes since block.timestamp is set at execution time by block producer.",
+      "vulnerability_type": "Ineffective Deadline",
+      "severity": "medium",
+      "confidence": 0.92,
+      "location": "SolidlyV2AMO.sol:352,374",
+      "file": "SolidlyV2AMO.sol",
+      "id": "a1b2c3d4e5f60014",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-031"
+      ]
+    },
+    {
+      "title": "V2 mintSellFarm Uses Entire USD Balance for addLiquidity",
+      "description": "V2-specific variant of M-9. Pre-existing USD swept with min=1 protection.",
+      "vulnerability_type": "Balance Accounting",
+      "severity": "medium",
+      "confidence": 0.87,
+      "location": "SolidlyV2AMO.sol",
+      "file": "SolidlyV2AMO.sol",
+      "id": "a1b2c3d4e5f60015",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-035"
+      ]
+    },
+    {
+      "title": "V2 _validateSwap Uses Spot Reserves Enabling Manipulation",
+      "description": "Flash-loan can manipulate spot reserves to force or block AMO operations.",
+      "vulnerability_type": "Oracle Manipulation",
+      "severity": "medium",
+      "confidence": 0.89,
+      "location": "SolidlyV2AMO.sol:380-386",
+      "file": "SolidlyV2AMO.sol",
+      "id": "a1b2c3d4e5f60016",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-037"
+      ]
+    },
+    {
+      "title": "V3 boostPrice() Manipulable slot0 + Potential Overflow",
+      "description": "V3 variant of H-3. Also has theoretical uint256 overflow for extreme sqrtPriceX96 values.",
+      "vulnerability_type": "Oracle Manipulation",
+      "severity": "medium",
+      "confidence": 0.88,
+      "location": "SolidlyV3AMO.sol:343-355",
+      "file": "SolidlyV3AMO.sol",
+      "id": "a1b2c3d4e5f60017",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-044"
+      ]
+    },
+    {
+      "title": "V3 _addLiquidity Depends on Manipulable Pool Balance",
+      "description": "Liquidity calculation uses balanceOf(pool) which is inflatable via direct token transfer.",
+      "vulnerability_type": "Balance Manipulation",
+      "severity": "medium",
+      "confidence": 0.88,
+      "location": "SolidlyV3AMO.sol:186-194",
+      "file": "SolidlyV3AMO.sol",
+      "id": "a1b2c3d4e5f60018",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-045"
+      ]
+    },
+    {
+      "title": "targetSqrtPriceX96 Has Minimal Validation",
+      "description": "Only validates within MIN/MAX_SQRT_RATIO (near-zero to near-infinite). SETTER_ROLE can set extreme swap limits.",
+      "vulnerability_type": "Missing Input Validation",
+      "severity": "medium",
+      "confidence": 0.85,
+      "location": "SolidlyV3AMO.sol:93-97",
+      "file": "SolidlyV3AMO.sol",
+      "id": "a1b2c3d4e5f60019",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-050"
+      ]
+    },
+    {
+      "title": "V3 setTickBounds() Has Zero Parameter Validation",
+      "description": "setTickBounds() accepts any int24 values with zero validation. No check for tickLower < tickUpper, no tickSpacing alignment, no peg-proximity check. Worse than VULN-050 which at least checks MIN/MAX bounds. Invalid ticks DoS all V3 pool operations.",
+      "vulnerability_type": "Missing Input Validation",
+      "severity": "medium",
+      "confidence": 0.9,
+      "location": "SolidlyV3AMO.sol:86-90",
+      "file": "SolidlyV3AMO.sol",
+      "id": "a1b2c3d4e5f6001a",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-051"
+      ]
+    },
+    {
+      "title": "Pause Can Freeze All Operations With No Guaranteed Unpause",
+      "description": "No on-chain recovery if UNPAUSER_ROLE key is lost.",
+      "vulnerability_type": "Denial of Service",
+      "severity": "low",
+      "confidence": 0.85,
+      "location": "BoostStablecoin.sol:55-57",
+      "file": "BoostStablecoin.sol",
+      "id": "a1b2c3d4e5f6001b",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-003"
+      ]
+    },
+    {
+      "title": "onlyContract Modifier Can Be Bypassed From Constructor",
+      "description": "code.length check is 0 during constructor. Still requires role.",
+      "vulnerability_type": "Access Control Bypass",
+      "severity": "low",
+      "confidence": 0.82,
+      "location": "Minter.sol:31-33",
+      "file": "Minter.sol",
+      "id": "a1b2c3d4e5f6001c",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-007"
+      ]
+    },
+    {
+      "title": "withdrawToken() Has No Token Restrictions",
+      "description": "WITHDRAWER_ROLE can extract any token. Low risk since Minter shouldn't hold tokens normally.",
+      "vulnerability_type": "Unrestricted Withdrawal",
+      "severity": "low",
+      "confidence": 0.83,
+      "location": "Minter.sol:92-94",
+      "file": "Minter.sol",
+      "id": "a1b2c3d4e5f6001d",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-012"
+      ]
+    },
+    {
+      "title": "setTokens() Doesn't Validate MINTER_ROLE on New boostAddress",
+      "description": "After token change, minting may revert if MINTER_ROLE not granted on new token.",
+      "vulnerability_type": "Missing Validation",
+      "severity": "low",
+      "confidence": 0.8,
+      "location": "Minter.sol:62-69",
+      "file": "Minter.sol",
+      "id": "a1b2c3d4e5f6001e",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-015"
+      ]
+    },
+    {
+      "title": "Integer Truncation in boostAmountIn Calculation",
+      "description": "Division before multiplication loses precision. Negligible economic impact.",
+      "vulnerability_type": "Precision Loss",
+      "severity": "low",
+      "confidence": 0.85,
+      "location": "SolidlyV2AMO.sol:345",
+      "file": "SolidlyV2AMO.sol",
+      "id": "a1b2c3d4e5f6001f",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-034"
+      ]
+    },
+    {
+      "title": "getReward passTokens=false Disconnects Gauge Claim From Sweep",
+      "description": "Token mismatch between gauge claim and sweep possible. Stuck tokens recoverable.",
+      "vulnerability_type": "Logic Error",
+      "severity": "low",
+      "confidence": 0.8,
+      "location": "SolidlyV2AMO.sol:326-329",
+      "file": "SolidlyV2AMO.sol",
+      "id": "a1b2c3d4e5f60020",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-038"
+      ]
+    },
+    {
+      "title": "Potential Underflow in _addLiquidity validRange Check",
+      "description": "If validRangeWidth > 100%, subtraction underflows. Requires SETTER_ROLE misconfiguration.",
+      "vulnerability_type": "Integer Underflow",
+      "severity": "low",
+      "confidence": 0.82,
+      "location": "SolidlyV3AMO.sol:207-208",
+      "file": "SolidlyV3AMO.sol",
+      "id": "a1b2c3d4e5f60021",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-047"
+      ]
+    },
+    {
+      "title": "Unsafe int256 to uint256 Cast in _unfarmBuyBurn Swap Result",
+      "description": "No explicit check that swap returned expected direction before negation and cast.",
+      "vulnerability_type": "Unsafe Type Cast",
+      "severity": "low",
+      "confidence": 0.83,
+      "location": "SolidlyV3AMO.sol:270-271",
+      "file": "SolidlyV3AMO.sol",
+      "id": "a1b2c3d4e5f60022",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-049"
+      ]
+    },
+    {
+      "title": "Missing __gap Storage Arrays in All AMO Contracts",
+      "description": "No uint256[N] __gap arrays reserved for upgrade storage. Adding variables to MasterAMO in an upgrade would collide with child contract storage slots.",
+      "vulnerability_type": "Upgradeable Storage Collision",
+      "severity": "low",
+      "confidence": 0.9,
+      "location": "MasterAMO.sol, SolidlyV2AMO.sol, SolidlyV3AMO.sol",
+      "file": "MasterAMO.sol",
+      "id": "a1b2c3d4e5f60023",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-052"
+      ]
+    },
+    {
+      "title": "Raw approve() Used Instead of safeApprove() in All AMO Approval Calls",
+      "description": "Both contracts import SafeERC20Upgradeable and use .safeTransfer() for transfers, but use raw .approve() for all 16 approval calls. Non-standard ERC20 tokens (e.g., USDT) that don't return bool from approve() would cause all AMO operations to revert. Current USDC+BOOST deployment unaffected.",
+      "vulnerability_type": "Unsafe ERC20 Interaction",
+      "severity": "low",
+      "confidence": 0.88,
+      "location": "SolidlyV2AMO.sol (8 calls), SolidlyV3AMO.sol (8 calls)",
+      "file": "SolidlyV2AMO.sol",
+      "id": "a1b2c3d4e5f60024",
+      "reported_by_model": "audit_agent_parallel_discovery",
+      "status": "confirmed",
+      "references": [
+        "VULN-053"
+      ]
+    }
+  ]
+}

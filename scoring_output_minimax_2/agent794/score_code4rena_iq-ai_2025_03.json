@@ -1,0 +1,731 @@
+{
+  "project": "code4rena_iq-ai_2025_03",
+  "agent": "agent794",
+  "status": "success",
+  "timestamp": "2026-04-06T15:19:59.369997",
+  "elapsed_seconds": 230.9,
+  "total_expected": 1,
+  "total_found": 100,
+  "true_positives": 0,
+  "false_negatives": 1,
+  "false_positives": 100,
+  "detection_rate": 0.0,
+  "precision": 0.0,
+  "f1_score": 0.0,
+  "matched_findings": [],
+  "missed_findings": [
+    {
+      "id": "code4rena_iq-ai_2025_03_expected_000",
+      "title": "Adversary can win proposals with voting power as low as 4%",
+      "description": "Submitted by\njuancito\n, also found by\nAtharv\n,\nBanditx0x\n,\nden-sosnowsky\n,\ndobrevaleri\n,\nDoD4uFN\n,\nFalseGenius\n,\nGreed\n,\nhakunamatata\n,\nkomronkh\n,\nKupiaSec\n,\nLonelyWolfDemon\n,\npotatoad-sec\n,\nSamueltroydomi\n,\nshui\n,\nth3_hybrid\n,\nTopmark\n,\nwellbyt3\n,\nwillycode20\n,\nXcrypt\n, and\nzaevlad\n\nhttps://github.com/code-423n4/2025-01-iq-ai/blob/main/src/TokenGovernor.sol#L55\n\nThe expected quorum for proposals is 25% of the voting power.\n\nAn attacker can execute any proposal with as low as 4% of the voting power.\n\nProposals that don\u2019t get enough quorum are expected to fail because of that threshold, but the bug bypasses that protection by a 6.25x lower margin. Deeming High severity as a form of executing malicious proposals against expectations.\n\nThe error is in the\n4\nin the line\nGovernorVotesQuorumFraction(4)\n. It doesn\u2019t represent 1/4th of supply but 4/100 actually.\n\nconstructor\n(\nstring\nmemory\n_name\n,\nIVotes\n_token\n,\nAgent\n_agent\n)\nGovernor\n(\n_name\n)\nGovernorVotes\n(\n_token\n)\n@>\nGovernorVotesQuorumFraction\n(\n4\n)\n// quorum is 25% (1/4th) of supply\n{\nagent\n=\n_agent\n;\n}\n\nRef:\nhttps://github.com/code-423n4/2025-01-iq-ai/blob/main/src/TokenGovernor.sol#L55\n\nThis can be seen in the\nGovernorVotesQuorumFraction\nOpenZeppelin contract that is inherited.\n\nNote how the\nquorumDenominator()\nis\n100\nby default and how the\nquorum()\nis calculated as\nsupply * numerator / denominator\n.\n\nIn other words, 4% for the protocol governor (instead of 25%).\n\n/**\n*\n@dev\nReturns the quorum denominator. Defaults to 100, but may be overridden.\n*/\nfunction\nquorumDenominator\n()\npublic\nview\nvirtual\nreturns\n(\nuint256\n) {\nreturn\n100\n;\n}\n/**\n*\n@dev\nReturns the quorum for a timepoint, in terms of number of votes:\n`supply * numerator / denominator`\n.\n*/\nfunction\nquorum\n(\nuint256\ntimepoint\n)\npublic\nview\nvirtual\noverride\nreturns\n(\nuint256\n) {\nreturn\n(\ntoken\n().\ngetPastTotalSupply\n(\ntimepoint\n) *\nquorumNumerator\n(\ntimepoint\n)) /\nquorumDenominator\n();\n}\n\nRef:\nhttps://github.com/OpenZeppelin/openzeppelin-contracts/blob/v5.2.0/contracts/governance/extensions/GovernorVotesQuorumFraction.sol#L62-L74\n\nCoded Proof of Concept\n\nHere is a coded POC to show that those values are not overriden, and the flawed logic holds as described in the previous section.\n\nAdd the test to\ntest/TokenGovernorTest.sol\nforge test -vv --mt test_AttackLowQuorumThreshold\n\nfunction\ntest_AttackLowQuorumThreshold\n()\npublic\n{\n// Setup agent\nfactory\n.\nsetAgentStage\n(\naddress\n(\nagent\n),\n1\n);\n// Setup an attacker with 4% of voting power\n// Transfer from the whale that has 37% of tokens\nvm\n.\nstartPrank\n(\nwhale\n);\naddress\nattacker\n=\nmakeAddr\n(\n\"attacker\"\n);\nuint256\nfourPercentSupply\n=\ntoken\n.\ntotalSupply\n() *\n4\n/\n100\n;\ntoken\n.\ntransfer\n(\nattacker\n,\nfourPercentSupply\n);\n// Delegate attacker tokens to themselves\nvm\n.\nstartPrank\n(\nattacker\n);\ntoken\n.\ndelegate\n(\nattacker\n);\n// Make a malicious proposal with 4% of votes (0.01% needed)\nvm\n.\nwarp\n(\nblock\n.\ntimestamp\n+\n1\n);\naddress\n[]\nmemory\ntargets\n=\nnew\naddress\n[](\n1\n);\ntargets\n[\n0\n] =\naddress\n(\n666\n);\nuint256\n[]\nmemory\nvalues\n=\nnew\nuint256\n[](\n1\n);\nbytes\n[]\nmemory\ncalldatas\n=\nnew\nbytes\n[](\n1\n);\nstring\nmemory\ndescription\n=\n\"\"\n;\nuint256\nnonce\n=\ngovernor\n.\npropose\n(\ntargets\n,\nvalues\n,\ncalldatas\n,\ndescription\n);\n// Cast vote with 4% voting power\nvm\n.\nwarp\n(\nblock\n.\ntimestamp\n+\ngovernor\n.\nvotingDelay\n() +\n1\n);\ngovernor\n.\ncastVote\n(\nnonce\n,\n1\n);\n// Warp to the end of the voting period\n// It can be assessed that with a total votes of 100 Million, the quorum is only 4 Million\n// The voting power of the attacker can be as low as 4 Million (4%)\nvm\n.\nwarp\n(\nblock\n.\ntimestamp\n+\ngovernor\n.\nvotingPeriod\n());\nconsole\n.\nlog\n();\nconsole\n.\nlog\n(\n\"totalVotes:       \"\n,\ntoken\n.\ngetPastTotalSupply\n(\nblock\n.\ntimestamp\n-\n1\n));\nconsole\n.\nlog\n(\n\"quorum:           \"\n,\ngovernor\n.\nquorum\n(\nblock\n.\ntimestamp\n-\n1\n));\nconsole\n.\nlog\n(\n\"votingPower:      \"\n,\ngovernor\n.\ngetVotes\n(\nattacker\n,\nblock\n.\ntimestamp\n-\n1\n));\n// The proposal succeeds with only 4% of voting power (lower than the expected 25% quorum)\ngovernor\n.\nexecute\n(\ntargets\n,\nvalues\n,\ncalldatas\n,\nkeccak256\n(\nabi\n.\nencodePacked\n(\ndescription\n)));\nconsole\n.\nlog\n(\n\"ATTACK SUCCEEDED WITH ONLY 4% OF VOTES\"\n);\nvm\n.\nstopPrank\n();\n}\n\nThe test shows how an adversary with only 4% of the voting power can successfully execute a malicious proposal.\n\nLogs:\ntotalVotes:        100000000000000000000000000\nquorum:            4000000000000000000000000\nvotingPower:       4000000000000000000000000\nATTACK SUCCEEDED WITH ONLY 4% OF VOTES\n\nSet the 25% quorum correctly:\n\nconstructor(\nstring memory _name,\nIVotes _token,\nAgent _agent\n)\nGovernor(_name)\nGovernorVotes(_token)\n-       GovernorVotesQuorumFraction(4) // quorum is 25% (1/4th) of supply\n+       GovernorVotesQuorumFraction(25) // quorum is 25% (1/4th) of supply\n{\nagent = _agent;\n}\n\ntom2o17 (IQ AI) disputed and commented\n:\n\nSo I think there are two outcomes:\nThe comment is stale in which case this is informational\nThe comment takes precedent over the code, not sure why this would be the case, and I would agree w/ the initial evaluation.\nwrt \u201cthere are no documentation indicating this is a documentation error\u201d, I would argue the code itself suggests its a documentation error.\nI would also be curious as to where is there documentation indicating this is a code error, outside of the stale comment.\nPersonally would lean towards downgrading, but that is because I view all documentation as subservient to the contract functionality not the other way around. Otherwise all documentation errors would be highs.\n\n0xnev (judge) commented\n:\n\nOn secondary reviews and discussions, I believe this issue to be of a genuine documentation error and is of informational severity because 4% is likely appropriate based on various blue-chip defi protocol examples:\nUniswap - 4%\n, see\nquorumVotes\nCompound-4%, see\nquorumVotes\nAs such, I am downgrading to QA, defaulting to invalid per judging risk assessments.\n\nKupiaSec (warden) commented\n:\n\nI agree with 0xnev\u2019s earlier comments that insist 4% is too low.\nAdditionally, if there is no exact documentation regarding this quorum, the comment should be considered the source of truth. I have seen many instances where issues that show inconsistency between code implementation and comments are considered high/medium severity.\nI believe this can be considered H/M.\n\n0xnev (judge) commented\n:\n\nCould you please provide concrete evidence that 4% quorums are not sufficient? I have provided explicit blue-chip DeFi examples above, if you have an example of a governance attack because of such a quorum being low, I will reconsider the issue.\nIf not, I am inclined to maintain as informational, because afaik, C4 has never graded an issue more than QA for differing specs unless the outcome is significant.\n\nMcToady (warden) commented\n:\n\nI think comparing suitable governance quorum percentages for Agent tokens launched through this protocol to blue chip defi tokens is not ideal comparison as we have to consider the following:\nDifferences in overall market cap of the tokens\nAcquiring 4% of Uni/Compound tokens would require a significant amount of capital.\nTokens here will be launched on Fraxtal, a chain with\nsignificantly less TVL\nso it\u2019s safe to assume the market cap of agents will likely be many multiples smaller than any defi blue chip token.\nLikely initial token distributions\nAn early buyer during bootstrap phase could quite easily own 4% of the total supply and potentially purchase across multiple wallets to to conceal this from other investors.\nI think a more apt comparison would be to look at the token distributions of similar AI agent tokens (such as those launched on the\nVirtuals platform\n, where you will find typically multiple holders who each own at least 4% of the total supply.\nWhile the 4 vs 25% may have been a documentation error (and 25% may actually be too high), 4% does indeed seem too low.\n\n0xnev (judge) commented\n:\n\nThank you, I believe this is a fair argument. Based on likely volatility of AI token prices, I believe it is a significant risk to fix the quorum at 4%, especially for low price tokens, and considering all tokens are fixed to 100 million supply as well.\nBased on clarifications in\nS-188\n, I believe the main risk now would be the ownership and mismanagement (The TokenGovernor voting values impact this only) over the Agent contract itself holding the LP tokens. If price of tokens increase significantly this could have a significant impact.\nStill considering between H/M, and happy to take any further comments supporting both severities.\n\n0xnev (judge) commented\n:\n\nWill maintain as High severity, considering the risk of price significantly increasing for tokens and the potential ownership and mismanagement (The TokenGovernor voting values impact this only) over the Agent contract itself holding the LP tokens.",
+      "severity": "high",
+      "reason": "Not found"
+    }
+  ],
+  "undecided_findings": [],
+  "extra_findings": [
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_000",
+      "title": "MintToAgent Setter Uses Incorrect Variable Name Leading to Logic Bypass and Incorrect Token Distribution",
+      "description": "The function setMintToAgent() has a typo in its event emission: it emits MintToAgentSet(mintToAgnet) where the parameter is named 'mintToAgnet' instead of 'mintToAgent'. This is a cosmetic issue, but more critically, the function's logic and state update are correct. However, the event name mismatch is not the core vulnerability. The real vulnerability is in the createAgent() function where mintToDAO and mintToAgent are used to calculate token distribution, but the sum of mintToDAO + mintToAgent can exceed 10,000 (100%) because there is no validation that their sum is <= 10,000. This allows an attacker to set mintToDAO=100 and mintToAgent=2000 (both within their individual limits) and then create an agent, causing the initial liquidity to become negative. This results in the LiquidityManager being initialized with 0 or negative liquidity, which breaks the pool and allows the creator to effectively steal the entire token supply by buying it at a manipulated price. The financial impact is total loss of liquidity and potential theft of all tokens.",
+      "severity": "critical",
+      "original_id": "8d0c0b8dec723bbe"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_001",
+      "title": "Desynchronized Agent Indexing in deployLiquidityManager Causes Liquidity Pool Creation Failure",
+      "description": "The deployLiquidityManager function uses agents.length as a salt for create2 to deploy LiquidityManager contracts. However, agents.length is incremented only after the LiquidityManager is deployed in createAgent(). This creates a race condition: if an attacker calls createAgent() multiple times in a single transaction (via flash loan or reentrancy), the salt used for LiquidityManager deployment will be incorrect, causing the contract to be deployed at a different address than expected. This breaks the agentManager mapping and prevents the Agent from correctly linking to its LiquidityManager, rendering the agent non-functional and locking user liquidity. The issue stems from a data access boundary inconsistency between state mutation and salt generation.",
+      "severity": "critical",
+      "original_id": "eff845f6812be5ca"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_002",
+      "title": "MintToAgent and MintToDAO Percentages Are Not Enforced as a Combined Cap, Enabling Token Dilution Attack",
+      "description": "The setMintToDAO and setMintToAgent functions enforce individual caps (1% and 20% respectively), but there is no combined cap on their sum. An attacker can set mintToDAO = 10000 (100%) and mintToAgent = 2000 (20%), totaling 120%. When createAgent() is called, the total minted tokens exceed 100% of totalSupply, causing the initialLiquidity to become negative. This results in a zero or negative liquidity pool, breaking the BootstrapPool initialization and preventing any trading. The economic impact is total loss of liquidity for all users of that agent. The root cause is a representation boundary failure: the system assumes mintToDAO + mintToAgent \u2264 10000, but this invariant is never enforced.",
+      "severity": "critical",
+      "original_id": "bc166f212ac01be1"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_003",
+      "title": "TradingFee and InitialPrice Are Set Globally, Enabling Front-Running of Agent Creation for Fee Arbitrage",
+      "description": "The tradingFee and initialPrice are global state variables updated by owner-only functions. However, createAgent() uses these global values at the time of execution. An attacker can monitor the blockchain for upcoming owner updates to tradingFee or initialPrice, then submit a createAgent() transaction immediately after the update but before other users. This allows the attacker to deploy agents with artificially low trading fees (e.g., 1 bps instead of 1%) or low initial prices, capturing disproportionate trading volume and fees. The economic impact is fee theft: the attacker gains 99%+ of swap fees that should go to the DAO and liquidity providers. This is an access control boundary violation: global economic parameters are read without being snapshotted at the time of agent creation request.",
+      "severity": "high",
+      "original_id": "ca7c27798c589814"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_004",
+      "title": "Incorrect Event Emission in MintToAgentSet Causes Data Integrity Loss and Audit Failure",
+      "description": "The event MintToAgentSet emits the parameter name 'mintToAgnet' (misspelled) instead of 'mintToAgent'. While this does not break functionality, it breaks external tooling (block explorers, indexers, audit scripts) that rely on event signatures for data extraction. This is a representation boundary failure: the function returns a value in the expected semantic unit (percentage in 1e4), but the event interface misrepresents it by using an incorrect field name. This causes downstream systems to fail to parse the event, leading to incorrect DAO treasury tracking, failed analytics, and audit discrepancies. The impact is not direct fund loss but systemic data corruption that undermines protocol transparency and governance.",
+      "severity": "high",
+      "original_id": "36a2e37976a6d287"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_005",
+      "title": "State Synchronization Failure in deployLiquidityManager Causes Incorrect Liquidity Allocation",
+      "description": "The createAgent function computes initialLiquidity using token.totalSupply() before minting tokens to DAO and Agent, but then performs the mints afterward. This causes the liquidity pool to be initialized with an amount that includes tokens that will later be allocated to DAO and Agent, effectively double-counting those tokens. The LiquidityManager receives initialLiquidity = totalSupply - mintToDAOAmount - mintToAgentAmount, but since mintToDAOAmount and mintToAgentAmount are subtracted from totalSupply before being minted, the pool receives tokens that are supposed to be reserved for DAO and Agent. This results in the protocol minting more tokens than intended and diluting the liquidity pool's value, leading to loss of user funds and protocol insolvency.",
+      "severity": "critical",
+      "original_id": "c230bfb15c7b2fee"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_006",
+      "title": "Missing User Protection in createAgent() Allows Front-Running and Unbounded Slippage",
+      "description": "The createAgent() function executes a buy() operation on the BootstrapPool using msg.sender as the recipient without any slippage tolerance or minimum output parameter. An attacker can front-run the transaction by manipulating the price via a large swap on the pool before the user's buy() executes. Since the user has no control over the minimum amount of tokens they receive, they may receive arbitrarily low token amounts for their deposited currency, resulting in complete loss of funds. This violates Pattern 1 (User Control Over Execution Outcomes) and is a critical vulnerability.",
+      "severity": "critical",
+      "original_id": "edf6dfcee3346d91"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_007",
+      "title": "Incorrect Recipient in setMintToAgent() Event Emission Leads to Accounting Confusion",
+      "description": "The setMintToAgent() function emits an event MintToAgentSet with parameter name 'mintToAgnet' (misspelled) and incorrectly states 'to be sent to DAO' in the event description. While this is a UI/documentation issue, it indicates a systemic lack of validation and consistency in state-tracking logic. More critically, the function's logic and event name mismatch could cause external systems (e.g., indexers, dashboards) to misinterpret the minting allocation, leading to incorrect accounting of token distribution. This could result in DAO or Agent receiving incorrect allocations if automated systems rely on the event data.",
+      "severity": "high",
+      "original_id": "4d953c20a470f6e0"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_008",
+      "title": "Replay Attack Vulnerability via Fixed Salt in create2 Deployments",
+      "description": "The deployAgent, deployGovernor, and deployLiquidityManager functions all use agents.length as the salt for create2 deployments. Since agents.length is incremented only after the deployment completes, an attacker can call createAgent() multiple times in a single transaction (via a malicious contract) to deploy multiple agents with the same salt before agents.length increments. This causes create2 to deploy contracts at the same predictable address, leading to deployment failures or contract address collisions. If an attacker deploys a malicious contract at the intended address first, the factory will revert on subsequent attempts, causing a denial-of-service for legitimate users.",
+      "severity": "high",
+      "original_id": "18312c8711c37523"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_009",
+      "title": "Division by Zero Risk in Token Minting Calculations",
+      "description": "The mintToDAOAmount and mintToAgentAmount are calculated using (token.totalSupply() * mintToDAO) / 10_000. If token.totalSupply() is 0 (e.g., due to a bug in AIToken or if mintToDAO is 0), the calculation is safe, but if mintToDAO or mintToAgent is 0, the division is still safe. However, if the AIToken contract returns 0 for totalSupply() due to a flaw, and mintToDAO or mintToAgent is non-zero, the division by 10,000 is safe. However, if the AIToken contract is malicious and returns a very small value (e.g., 1), and mintToDAO is 10,000, then (1 * 10000) / 10000 = 1, which is correct. But if the AIToken contract returns 0, then both mintToDAOAmount and mintToAgentAmount become 0, and initialLiquidity becomes 0. This is not inherently a vulnerability. However, if the AIToken contract has a bug where totalSupply() returns 0 even after minting, then initialLiquidity becomes 0, and the BootstrapPool is initialized with no liquidity, rendering the agent unusable. This is a risk, but not a direct fund loss. However, if the AIToken contract is upgraded to return 0 totalSupply() after deployment, it could lock funds. This is a medium risk due to dependency on external contract behavior.",
+      "severity": "medium",
+      "original_id": "e7e15c3c972c2844"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_010",
+      "title": "Automatic Processing of User Deposits via Default Receive Function Leading to Fund Lockup",
+      "description": "The AgentFactory contract has no explicit receive or fallback function, but it can receive ETH (or other native tokens) via direct transfers. When ETH is sent directly to the contract, it is not handled by any logic, but the contract holds these funds indefinitely. Crucially, the contract's only mechanism to withdraw funds is the recoverERC20 function, which only supports ERC20 tokens. This means any ETH sent to the contract (e.g., from a user mistakenly sending ETH instead of the currencyToken, or from a system refund) becomes permanently locked, as there is no way to recover native currency. This violates the principle that all funds received by a contract must be recoverable by the owner.",
+      "severity": "high",
+      "original_id": "2dec45c01cfe64f5"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_011",
+      "title": "Integer Division Truncation in Token Minting Causes Permanent Loss of Tokens",
+      "description": "The AgentFactory contract calculates token allocations to DAO and Agent using integer division with 1e4 precision (e.g., (totalSupply * mintToDAO) / 10_000). However, if totalSupply is not divisible by 10,000, the result is truncated, and the remainder tokens are neither allocated to DAO/Agent nor returned to the liquidity pool. This results in permanent loss of tokens from circulation, reducing total supply and potentially diluting value for holders.",
+      "severity": "high",
+      "original_id": "8f3fae294d5686c0"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_012",
+      "title": "LiquidityManager Deployment Salt Collision Risk Due to Non-Unique Salt",
+      "description": "The deployLiquidityManager, deployGovernor, and deployAgent functions all use agents.length as the salt for create2. However, agents.length is incremented only after deployment in createAgent(). This means that if multiple createAgent() calls are made in the same transaction (e.g., via a batcher), they will all use the same salt, causing create2 to revert due to contract address collision. This prevents legitimate deployments and can be exploited to block new agent creation.",
+      "severity": "high",
+      "original_id": "2c6ac4c993bf6e20"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_013",
+      "title": "Unbounded Gas Consumption in createAgent() Enables DoS via Large Token Supply",
+      "description": "The createAgent() function calculates mintToDAOAmount and mintToAgentAmount using multiplication and division on token.totalSupply(). If an attacker deploys a malicious AIToken with an extremely large totalSupply (e.g., 2^256 - 1), the multiplication (totalSupply * mintToDAO) will overflow or consume excessive gas, causing the transaction to revert. This allows an attacker to prevent any new agent creation by forcing gas exhaustion.",
+      "severity": "critical",
+      "original_id": "9c83b35fa7ca59e9"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_014",
+      "title": "Authorization Context Not Bound in createAgent() Enables Front-Running and Misuse",
+      "description": "The createAgent() function uses msg.sender to transfer currencyToken and to specify the recipient of the buy() call. However, the authorization (i.e., the right to create an agent) is not bound to the caller's identity in any signed or immutable way. An attacker can observe a legitimate createAgent() call, front-run it with a higher gas price, and replace msg.sender with their own address, thereby stealing the newly created agent and its associated liquidity pool while the original caller pays the fee.",
+      "severity": "high",
+      "original_id": "04843fe6a681e80e"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_015",
+      "title": "Incorrect Event Parameter Name in MintToAgentSet Event Causes ABI Mismatch",
+      "description": "The event MintToAgentSet is declared with parameter name 'mintToAgnet' (misspelled), but the emit statement correctly passes 'mintToAgent'. This creates an ABI mismatch between the event signature and its emitted data. While this does not break functionality, it breaks tooling (block explorers, indexers, frontend libraries) that rely on event signatures to decode logs, leading to silent data corruption in off-chain systems.",
+      "severity": "medium",
+      "original_id": "75601379a5a60a92"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_016",
+      "title": "Missing User Protection in Proxy Implementation Update",
+      "description": "The setProxyImplementation function allows the owner to change the proxy implementation without any mechanism for users or stakeholders to express acceptable execution bounds or veto rights. This creates a critical risk: an owner could upgrade the proxy to a malicious implementation, draining all funds or altering protocol logic without user consent. Since the proxy delegates all calls to its implementation, this is equivalent to a complete takeover of the protocol's economic logic.",
+      "severity": "critical",
+      "original_id": "ee52302df6bd9134"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_017",
+      "title": "Owner Can Set Token to Zero Address After Initialization, Leading to Permanent Lockup",
+      "description": "The initializeToken function allows the owner to set the token address only if it is currently zero. However, once set, there is no mechanism to verify the token contract's integrity, nor is there any way to change it afterward. If the owner sets the token to a malicious or broken contract (e.g., one that reverts on transfer or has no minting capability), all token-related operations (e.g., rewards, staking, transfers) will fail permanently. Since the Agent contract holds ERC721 tokens and relies on AIToken for economic functionality, this creates a scenario where user assets are locked indefinitely.",
+      "severity": "high",
+      "original_id": "b6c162c30a0ece50"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_018",
+      "title": "Stage Can Be Set to Any Higher Value by Factory, Enabling Unauthorized Protocol Logic Bypass",
+      "description": "The setStage function allows the factory to increment the stage unconditionally (stage = max(stage, _stage)). There is no validation that the new stage corresponds to a known, audited, or approved protocol state. An attacker who compromises the factory can set stage to an arbitrarily high value (e.g., 1000), bypassing all onlyWhenAlive checks and potentially triggering undefined behavior in future upgrades or external integrations that assume stage transitions are controlled and sequential. This could lead to unauthorized access to funds or logic execution in an untested state.",
+      "severity": "high",
+      "original_id": "45cfb32042bed464"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_019",
+      "title": "Proxy Implementation Can Be Set to Non-Deployed or Malicious Address Without Runtime Validation",
+      "description": "The setProxyImplementation function only checks if the address is non-zero and allowed by the factory, but does not verify that the address is a valid contract with expected functions or that it is not aEOA (externally owned account). An attacker could set proxyImplementation to a non-contract address (e.g., a random EOA) or a malicious contract that reverts on delegatecall. Subsequent calls to the Agent proxy will revert with no error message, effectively locking all funds and rendering the protocol unusable. No user or governance mechanism exists to recover from this state.",
+      "severity": "high",
+      "original_id": "fa61826daf7b9bbf"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_020",
+      "title": "Owner Can Set Token URI for Any Token ID, Enabling Phishing or Metadata Manipulation",
+      "description": "The setTokenURI function allows the owner to set the token URI for any tokenId without validation that the tokenId is owned by the caller or is even minted. Since ERC721URIStorage allows any owner to set any token's URI, an attacker who gains owner access can set malicious URIs (e.g., pointing to phishing sites or malware) for all NFTs in the collection. This undermines user trust and can lead to social engineering attacks, even though no direct funds are stolen. The financial impact is reputational and indirect, but severe in DeFi contexts where NFTs represent governance or staking rights.",
+      "severity": "medium",
+      "original_id": "ed12a45375800eea"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_021",
+      "title": "Automatic Processing of Withdrawal Funds via Receive Function",
+      "description": "The Agent contract has a receive() function that accepts native currency transfers without any checks or restrictions. This allows any external system or malicious actor to send funds directly to the contract, which are then indistinguishable from legitimate user deposits. If the AIToken contract or any downstream system returns funds (e.g., from a failed swap, withdrawal refund, or liquidity pool return) to the Agent contract, those funds are automatically absorbed as if they were new deposits. This breaks the accounting model because the protocol cannot distinguish between user-initiated deposits and system-generated returns, leading to inflation of total deposits without corresponding user action.",
+      "severity": "high",
+      "original_id": "990dac69ca955e94"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_022",
+      "title": "Stage Transition Logic Allows Irreversible State Progression Without Reversal",
+      "description": "The setStage function allows stage to only increase, with no mechanism to revert or cancel stage transitions. This creates an irreversible state commitment that cannot be undone, even if the transition was erroneous or malicious. No state restoration logic exists for any prior stage, violating operation lifecycle integrity by failing to provide complete reversal.",
+      "severity": "high",
+      "original_id": "4e27cf5a78e7cdab"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_023",
+      "title": "Token Initialization Allows Single-Use Assignment Without Validation or Reinitialization",
+      "description": "The initializeToken function permits token assignment only once (via zero-address check), but provides no mechanism to correct or replace a misassigned token. If the owner sets an incorrect or malicious token address, the agent becomes permanently non-functional. This is a state commitment failure: the assignment is committed before any validation of the token's actual behavior or compatibility, and cannot be reversed.",
+      "severity": "high",
+      "original_id": "1d318b7b380d0bdd"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_024",
+      "title": "Proxy Implementation Set Without Verification of Contract Compatibility",
+      "description": "The setProxyImplementation function checks only if the address is allowed by the factory and non-zero, but does not verify that the implementation contract actually implements expected functionality (e.g., fallback logic, token interaction, or stage handling). This allows deployment of a malformed or malicious proxy that may silently fail during execution, leading to frozen funds or broken logic without revert.",
+      "severity": "high",
+      "original_id": "e182057174623a70"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_025",
+      "title": "Owner Can Set Token URI for Non-Minted Tokens, Leading to Undefined Behavior",
+      "description": "The setTokenURI function allows any tokenId to be set, even if the token has not been minted. ERC721URIStorage does not validate token existence before setting URI. This creates a state where a non-existent token has a URI, which may cause frontend or indexer errors, or be exploited to misrepresent token metadata. While not directly financial, it breaks expected semantics and can lead to reputational or operational loss.",
+      "severity": "medium",
+      "original_id": "5d64de4ff4f0731b"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_026",
+      "title": "Factory Authorization Bypass via Proxy Ownership",
+      "description": "The contract inherits Ownable with owner set to the factory during construction, but the factory can later transfer ownership. If ownership is transferred away from the factory, the onlyFactory modifier becomes useless, and any owner can call setStage. This breaks authorization context binding: the modifier assumes factory is the only authorized actor, but ownership transfer decouples authorization from the intended context.",
+      "severity": "high",
+      "original_id": "314a2ee367febddc"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_027",
+      "title": "Incorrect getAmountOut Logic for Non-Currency Token Pairs",
+      "description": "The getAmountOut function incorrectly assumes that any non-currency token pair must involve the currency token as one side, and reverts with 'NoCurrencyToken' when both _tokenIn and _tokenOut are non-currency tokens. However, Fraxswap supports arbitrary token pairs. This causes getAmountOut to fail for valid non-currency token swaps, breaking the router's ability to quote prices for any token-to-token exchange that doesn't involve the currency token. This is a critical logic error that prevents legitimate price discovery and user operations.",
+      "severity": "high",
+      "original_id": "47bc5dd1104a93dd"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_028",
+      "title": "Missing Access Control on Token Transfer Logic Enables Unauthorized Fund Drain",
+      "description": "The Agent contract inherits from ERC721URIStorage and implements a token minting mechanism, but it does not enforce any access control on the ERC721 _transferFrom, _safeTransferFrom, or transferFrom functions. Although the contract mints token ID 0 to the factory during construction, any external actor can call transferFrom(0) to steal the token and potentially drain associated funds or governance rights. The contract assumes the token is only used internally, but ERC721 is a standard interface that allows public transfers. Since the token is not restricted by any ownership or stage guard in its transfer logic, an attacker can call transferFrom(address(0), attacker, 0) to take ownership of token ID 0, which may represent governance rights, access to protocol features, or a key to unlock economic value in the AIToken system. This is a critical access control failure because the token is central to the agent's identity and function, yet its transfer is unrestricted.",
+      "severity": "critical",
+      "original_id": "83b2e0f0e574c0cb"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_029",
+      "title": "Stage Initialization Allows Permanent Protocol Lock via Stage=0 State",
+      "description": "The Agent contract uses a stage variable to control functionality, with onlyWhenAlive modifier requiring stage > 0. However, the constructor sets stage = 0 and never increments it automatically. The only function that can increase stage is setStage(), which is restricted to the factory. If the factory fails to call setStage(1) after deployment (due to bug, negligence, or malicious intent), the agent becomes permanently locked in stage=0. All functions requiring onlyWhenAlive (setTokenURI, setProxyImplementation) become unusable. Since the proxyImplementation cannot be set and the token URI cannot be updated, the agent becomes non-functional and cannot be upgraded or configured. This is a protocol-level denial-of-service vulnerability. The financial impact is permanent loss of utility for the agent, which may represent a deployed AI agent with associated capital or governance rights. No funds are stolen, but the entire economic value locked in the agent is frozen indefinitely.",
+      "severity": "high",
+      "original_id": "be41ec4fb6e68e6f"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_030",
+      "title": "initializeToken Allows Reinitialization via Zero Address Bypass",
+      "description": "The initializeToken function checks if token == AIToken(address(0)) before assigning _token. However, if the token is already set to a non-zero address, the function silently does nothing. This creates a logic flaw: if an attacker calls initializeToken with a malicious AIToken address while the current token is still address(0), they can set it. But if the owner later calls initializeToken with a legitimate token, the function does nothing because token != address(0). This means the owner loses the ability to correct a malicious initialization. Worse, if the factory or owner mistakenly calls initializeToken with address(0), it does nothing \u2014 but if the token was previously set by an attacker, it remains compromised. There is no way to reset or change the token after initialization, even by the owner. This is a critical state inconsistency: the function is named 'initialize' but behaves as a one-time set-and-forget with no recovery mechanism. An attacker who calls initializeToken first can permanently bind the agent to a malicious token, and the legitimate owner cannot undo it.",
+      "severity": "high",
+      "original_id": "7b6fbee2d2fa8007"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_031",
+      "title": "Proxy Implementation Can Be Set to Non-Approved Address via Race Condition",
+      "description": "The setProxyImplementation function checks if _proxyImplementation is allowed by the factory via factory.allowedProxyImplementation(_proxyImplementation). However, this check is performed before the state update. An attacker can front-run the transaction by calling setProxyImplementation with a malicious address that is not allowed, causing the transaction to revert. But if the factory later calls setProxyImplementation with an allowed address, the attacker can submit a higher gas transaction that executes first and sets the proxyImplementation to a malicious address before the factory's transaction is mined. Since the factory's allowedProxyImplementation check is not atomic with the state update, a race condition exists. The attacker does not need to be the factory \u2014 they only need to monitor the mempool and submit a transaction with higher gas. Once the proxyImplementation is set to a malicious contract, the entire agent can be hijacked via the proxy mechanism. This is a critical front-running vulnerability because the proxyImplementation controls the logic of the entire agent, and once set, it cannot be changed without owner approval \u2014 which may be compromised.",
+      "severity": "high",
+      "original_id": "1d58019ec123f787"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_032",
+      "title": "Token URI Can Be Set to Invalid or Malicious URI for Any Token ID",
+      "description": "The setTokenURI function allows the owner to set any token URI for any tokenId, with no validation on tokenId bounds. Since the contract mints only token ID 0, any tokenId > 0 is uninitialized. However, ERC721URIStorage allows setting URI for any tokenId, even if not minted. This can lead to bloated storage, gas waste, or malicious URI injection (e.g., phishing links, XSS payloads). While not directly stealing funds, this can be exploited to corrupt the agent's metadata reputation or trigger external system vulnerabilities. More critically, if the AIToken system or any downstream service (e.g., marketplace, UI) assumes token IDs are sequential and minted, they may process invalid token IDs and crash or misbehave. The financial impact is indirect but severe: if the agent's token URI is used for governance voting or asset representation, a malicious URI could mislead users into transferring funds or approving malicious actions. The function lacks bounds checking on tokenId, violating the principle of least surprise and creating a potential attack surface.",
+      "severity": "medium",
+      "original_id": "7cd1d2cc5f48a103"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_033",
+      "title": "Automatic Processing of Withdrawal Funds via Receive/Default Function",
+      "description": "The AgentRouter contract has no explicit receive or fallback function, but it can receive ETH or ERC20 tokens via external transfers (e.g., from Fraxswap swaps or BootstrapPool refunds). Since the contract does not distinguish between user-initiated deposits and system-generated returns (e.g., from swap refunds or bootstrap pool sell operations), an attacker can trigger unintended fund processing by sending tokens directly to the contract. This allows an attacker to bypass the buy/sell flow entirely and force the contract to process funds as if they were legitimate user deposits, potentially draining liquidity or causing accounting desynchronization.",
+      "severity": "high",
+      "original_id": "b301c8f221357a58"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_034",
+      "title": "Double Funding via getAmountOut and buy/sell Mismatch in Bootstrap Pool Logic",
+      "description": "The getAmountOut function returns the amount a user would receive from a swap, but when buy() or sell() is called, the actual execution may consume less than the requested amount due to liquidity constraints or slippage. However, the contract does not verify or adjust the amount transferred based on the actual output. If a user calls buy() with _amountIn = 1000, but the bootstrapPool.buy() only consumes 900 due to internal logic (e.g., fee structure or reserve constraints), the contract still transfers 1000 from the user and receives 900 worth of output. The remaining 100 is left in the contract without being refunded. This creates a silent loss for the user. However, if the BootstrapPool internally refunds unused amounts (e.g., via a return mechanism), and the AgentRouter does not account for this, the user may receive both the output AND the refund, resulting in double funding. The contract assumes full _amountIn is consumed, but if the underlying pool returns unused funds, the user gains extra value.",
+      "severity": "high",
+      "original_id": "bf3ba5a8d1437ca4"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_035",
+      "title": "State Commitment Before External Call Verification in Fraxswap Swaps",
+      "description": "In both buy() and sell() functions, the contract first transfers tokens from the user to the Fraxswap pair (via safeTransferFrom), then calls swap(). If the swap() reverts due to insufficient liquidity, slippage, or malicious manipulation, the token transfer has already occurred and is irreversible. The revert happens after state commitment (transfer), meaning the user loses their tokens without receiving any output, but the contract does not revert the transfer. This violates the principle of 'checks-effects-interactions' and allows attackers to drain funds by triggering swap reverts via front-running or liquidity manipulation.",
+      "severity": "high",
+      "original_id": "d323ec9768816a0a"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_036",
+      "title": "Authorization Bypass in Funds Destination Determination via Caller Override",
+      "description": "The buy() and sell() functions accept a _recipient parameter, allowing the caller to specify any address as the recipient of the output tokens. However, there is no verification that the caller is authorized to act on behalf of the recipient. An attacker can call buy(_agentToken, amount, minOut, attackerAddress) even if they are not the owner of attackerAddress. Since the contract does not validate that msg.sender has permission to send tokens to _recipient, an attacker can force the contract to send tokens to any address, effectively stealing tokens from any user who has approved the AgentRouter to spend their tokens. This is an authorization bypass in funds destination determination.",
+      "severity": "high",
+      "original_id": "94de9f12015e90c6"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_037",
+      "title": "Missing State Reset in Reduction-Triggered Flow in Bootstrap Pool Handling",
+      "description": "When a bootstrap pool is killed, the contract switches to Fraxswap. However, if the bootstrap pool is killed during a multi-step operation (e.g., between getAmountOut and buy()), the state of the pool (killed() == true) is checked only once at the start of buy(). If an attacker kills the bootstrap pool via an external call (e.g., through a governance proposal or admin function) between the getAmountOut call and the buy() call, the buy() function will use Fraxswap, but the amountOut calculated earlier was based on the bootstrap pool's rate. This creates a mismatch: the user expects a certain output based on the bootstrap pool's rate, but receives output based on Fraxswap's rate, which may be significantly lower. The contract does not revalidate the pool state before executing the swap, leading to incorrect accounting and potential user loss.",
+      "severity": "high",
+      "original_id": "29d11f55a11dd1e8"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_038",
+      "title": "Representation Boundary Violation in getAmountOut for Fraxswap Pair",
+      "description": "The getAmountOut function incorrectly assumes that Fraxswap's getAmountOut returns the same unit representation regardless of token order, but Fraxswap's getAmountOut requires the input token to match the first token in the pair. When _tokenIn is token1 and _tokenOut is token0, the function calls getAmountOut(_amountIn, _tokenIn) but Fraxswap expects the input token to be token0. This causes the returned amount to be calculated using the wrong reserve ratio, leading to grossly inflated or deflated output amounts. The error propagates to buy/sell functions that rely on getAmountOut for minAmountOut validation, allowing attackers to bypass slippage protection and drain liquidity.",
+      "severity": "critical",
+      "original_id": "341951c338169514"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_039",
+      "title": "Insufficient Access Control on BootstrapPool Interaction in Buy/Sell",
+      "description": "The buy and sell functions directly interact with BootstrapPool without verifying that the LiquidityManager or BootstrapPool are authorized by the AgentFactory. An attacker can deploy a malicious LiquidityManager that returns a fake BootstrapPool contract with manipulated getAmountOut or buy/sell logic. Since factory.tokenAgent() and factory.agentManager() are publicly readable and the AgentRouter trusts their return values without access control, an attacker can register a fake agent token mapping to a malicious pool, allowing them to mint arbitrary amounts of agent tokens for minimal currency input or drain currency by selling fake tokens. This bypasses all economic safeguards and enables unlimited token inflation or currency theft.",
+      "severity": "critical",
+      "original_id": "e3d0673e9ee9b9a1"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_040",
+      "title": "Fraxswap Pair Token Order Mismatch in Swap Execution",
+      "description": "In the buy and sell functions, when interacting with Fraxswap, the swap() call uses the wrong token order based on a flawed assumption. The code checks if fraxswapPair.token0() == address(currencyToken) to determine swap direction, but then calls swap(0, _amountOut, ...) or swap(_amountOut, 0, ...) without ensuring that the output token matches the second token in the pair. If the Fraxswap pair has token0 as the agent token and token1 as currency, but the code assumes currency is token0, it will call swap(_amountOut, 0, ...) which attempts to swap agent token out for currency in \u2014 but the function signature expects token0 amount first. This results in the swap reverting due to incorrect parameter ordering, causing user funds to be locked in the router without any tokens received. This is a critical failure in external interface compatibility.",
+      "severity": "high",
+      "original_id": "5f43fb32d7a47a26"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_041",
+      "title": "getAmountOut Returns Incorrect Representation for BootstrapPool",
+      "description": "The getAmountOut function calls bootstrapPool.getAmountOut(_amountIn, _tokenIn) but passes _tokenIn as the second parameter. BootstrapPool's getAmountOut likely expects the output token as the second parameter (standard pattern), but here it receives the input token. This causes the bootstrap pool to calculate output based on the wrong reserve pair, returning an amount that is either 0 or wildly inaccurate. Since buy/sell functions rely on getAmountOut to compute _minAmountOut, users will either be denied legitimate swaps or be tricked into accepting near-zero outputs. This is a representation boundary violation: getAmountOut returns a value in a unit that does not match the semantic expectation of its callers.",
+      "severity": "high",
+      "original_id": "fb3e9b34ed796ed9"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_042",
+      "title": "Fork Behavioral Divergence in Fraxswap Pair Integration",
+      "description": "The AgentRouter assumes Fraxswap's getPair() and getAmountOut() functions behave identically to the original Fraxswap v1 implementation, but the deployed Fraxswap factory at 0xE305...67E6 is a fork (likely Fraxswap v2 or later) where fee collection and liquidity provision logic have been moved to separate distributor contracts. The getAmountOut() function returns theoretical output based on outdated pool state, while actual swaps via swap() do not reflect the same pricing due to fee redistribution changes. This causes users to receive less token than expected, with the difference permanently lost to unclaimed fees in the distributor contract.",
+      "severity": "critical",
+      "original_id": "39abecdac37fe71e"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_043",
+      "title": "State Commitment Before External Call Verification",
+      "description": "In both buy() and sell() functions, the currency or agent token is transferred to the contract (and then to the external pair) before the swap() call is executed. If the swap() reverts due to slippage, insufficient liquidity, or malicious manipulation, the token transfer has already occurred and is not refunded. This commits state (token ownership change) before verifying the success of the core operation, leading to irreversible loss of user funds when the swap fails.",
+      "severity": "high",
+      "original_id": "11fb0c4d85bad4a7"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_044",
+      "title": "Mathematical Domain Violation in getAmountOut() with Zero Inputs",
+      "description": "The getAmountOut() function does not validate that _amountIn > 0 before passing it to FraxswapPair.getAmountOut() or BootstrapPool.getAmountOut(). If _amountIn = 0, these functions may return 0 (which is mathematically correct for zero input) but the contract does not enforce domain validity. However, the real issue is that the FraxswapPair.getAmountOut() implementation may internally compute sqrt(k) or logarithmic ratios where 0 input leads to undefined behavior (e.g., division by zero in liquidity calculation). Since the function returns 0 without error, callers are misled into believing the output is valid, enabling front-runners to exploit zero-amount calls to manipulate pool state or trigger reverts in dependent contracts.",
+      "severity": "high",
+      "original_id": "83960d21f9ca79dc"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_045",
+      "title": "Inconsistent Precision Handling in BootstrapPool.getAmoutOut()",
+      "description": "The AgentRouter calls bootstrapPool.getAmountOut() for both buy and sell paths, but BootstrapPool likely uses a fixed-point or packed representation (e.g., 18-decimal fixed) for internal calculations. If the input _amountIn is not normalized (e.g., passed as uint256 without scaling), and the BootstrapPool implementation truncates or rounds differently than Fraxswap\u2019s AMM, the returned _amountOut may be systematically lower than the true market rate. For example, an input of 1e18 (1 token) may yield 0.999e18 output due to internal truncation, while Fraxswap returns 1.001e18 for the same pair. This creates arbitrage opportunities and systematic underpayment to users.",
+      "severity": "high",
+      "original_id": "434b53b6b3e5af38"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_046",
+      "title": "Authorization Context Not Bound in buy()/sell() Calls",
+      "description": "The buy() and sell() functions accept a _recipient parameter, but the authorization context (msg.sender) is not bound to the recipient. An attacker can obtain a signed authorization (e.g., from a user) for buying 100 tokens to address A, then submit the transaction with _recipient = attacker.address, consuming the user's allowance and transferring tokens to the attacker. The signature (if used externally) or approval is not bound to the recipient, allowing front-running and context substitution attacks.",
+      "severity": "high",
+      "original_id": "9305e841eb4cece8"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_047",
+      "title": "Validation of Minimum Output Occurs After Token Transfer and Swap Execution",
+      "description": "In both buy() and sell() functions, the validation of _minAmountOut occurs after the token transfer and external swap execution. This allows an attacker to perform a front-run attack where they manipulate the price via a sandwich attack, causing the user to receive less than the minimum amount specified, while the user's funds are already transferred and the transaction cannot be reverted. The validation check is a late safeguard that does not prevent the loss, only rejects the transaction after damage is done.",
+      "severity": "critical",
+      "original_id": "29729ff3521a56df"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_048",
+      "title": "getAmountOut() Returns Incorrect Values for Non-Currency Token Pairs Due to Misuse of Bootstrap Pool Logic",
+      "description": "The getAmountOut() function incorrectly uses bootstrapPool.getAmountOut(_amountIn, _tokenIn) for both cases where _tokenIn or _tokenOut is the currency token. However, when neither token is the currency token (e.g., tokenA -> tokenB), it reverts with 'NoCurrencyToken()'. This is inconsistent: if the bootstrap pool is used for currency-to-agent swaps, it should not be used for agent-to-agent swaps. But more critically, when _tokenOut is the currency token, the function calls bootstrapPool.getAmountOut(_amountIn, _tokenIn), which is logically incorrect \u2014 the bootstrap pool's getAmountOut should return the amount of agent token received for a given currency input, not the reverse. This causes the function to return an amount that is either meaningless or inverted, leading to incorrect price estimation for users and potential loss if used for trade routing decisions.",
+      "severity": "high",
+      "original_id": "9bc9240644031c7c"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_049",
+      "title": "Fraxswap Pair Swap Parameters Are Reversed in buy() and sell() Functions",
+      "description": "In the buy() function, when currencyToken is token0, the code calls swap(0, _amountOut, _recipient, \"\"). But according to Fraxswap's interface, swap(uint256 amount0Out, uint256 amount1Out, address to, bytes data) requires amount0Out to be the amount of token0 to send out, and amount1Out to be the amount of token1 to receive. If currencyToken is token0 and agentToken is token1, then to buy agentToken, we must send currencyToken (token0) and receive agentToken (token1). Therefore, we must set amount0Out = _amountIn (not 0) and amount1Out = _amountOut (not 0). The current code sets amount0Out = 0 and amount1Out = _amountOut, which means it attempts to send 0 currency and receive _amountOut agent tokens \u2014 which is impossible and will revert. The same bug exists in sell(). This causes all Fraxswap-based swaps to revert, locking user funds in the router contract.",
+      "severity": "critical",
+      "original_id": "8d4e76f7c9bd4927"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_050",
+      "title": "Insufficient Protection Against Partial Execution in Multi-Step Swaps",
+      "description": "The buy() and sell() functions perform multiple state-changing operations: token transfer, approval, and external swap. If the external swap reverts (e.g., due to slippage or liquidity shortage), the token transfer and approval have already occurred. The user's tokens are locked in the router contract, and the transaction reverts only after the loss. There is no mechanism to refund or reclaim the transferred tokens if the swap fails. This creates a scenario where users can lose funds even if the final swap fails, violating the principle of atomicity. The function does not use a pull-over-push pattern or reentrancy guards to prevent this.",
+      "severity": "high",
+      "original_id": "c013413fae41a35b"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_051",
+      "title": "getAmountOut() Uses sync() in a Non-Static Context Despite Documentation Claim",
+      "description": "The getAmountOut() function is documented as requiring a static call because it calls sync(). However, the function is not marked as view or pure, and it is called in non-static contexts (e.g., from buy() or sell() via gas estimation). The sync() call modifies the Fraxswap pair's state (reserves), which is not allowed in static calls. If a frontend or another contract calls getAmountOut() with a staticcall, it will revert. This breaks integration with wallets and DEX aggregators that rely on static calls for price estimation. The function should be marked view and avoid state changes, or the sync() call should be removed if unnecessary.",
+      "severity": "high",
+      "original_id": "67d983128e36d842"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_052",
+      "title": "Division by Zero in getMaxSell Due to Zero Reserves",
+      "description": "The getMaxSell function performs a division by (reserveOut + tokenOut) without checking if this sum is zero. If the AMM has zero reserves for the output token (reserveOut == 0) and the caller attempts to add liquidity (tokenOut > 0), the denominator becomes zero, causing a division-by-zero revert. This can be triggered during moveLiquidity() when Fraxswap pair is newly created and has no prior liquidity, leading to protocol deadlock and inability to complete liquidity migration. The function is called internally by moveLiquidity() and is critical to price alignment before minting LP tokens. This is a critical failure point in the liquidity migration pipeline.",
+      "severity": "critical",
+      "original_id": "0c8604d46ab1cbe1"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_053",
+      "title": "Incorrect Liquidity Amount Calculation Using Stale Price After Bootstrap Kill",
+      "description": "In moveLiquidity(), the price is read from bootstrapPool before calling kill(), but the bootstrapPool is killed immediately after. The price variable is then used to compute liquidityAmount = (currencyAmount * 1e18) / price. However, after kill(), the bootstrapPool's state is finalized and its price may no longer reflect the true market value at the time of kill. The currencyAmount is the balance of the LiquidityManager, which may have been inflated by previous swaps or transfers. The calculation assumes the price from the pre-kill state is valid for post-kill liquidity addition, but the actual market price may have drifted due to time delay or external trades. This leads to under- or over-supply of liquidity, causing slippage and potential loss of funds when the Fraxswap pair is minted with incorrect ratios.",
+      "severity": "high",
+      "original_id": "853259c39d2db4ef"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_054",
+      "title": "Funds Destination Logic Bypasses Access Control via AgentFactory(owner) Calls",
+      "description": "The moveLiquidity() function sends all remaining tokens to address(agent), but the agent is set at construction and not validated against caller identity. However, AgentFactory(owner).setAgentStage(agent, 1) and AgentFactory(owner).targetCCYLiquidity() are called, implying that owner controls the AgentFactory. If an attacker can become owner of AgentFactory (e.g., via governance compromise or front-running), they can set agent to their own address. Since LiquidityManager has no access control on moveLiquidity(), any external actor can call it and trigger transfer of all remaining tokens to the address specified by the compromised AgentFactory. This allows an attacker to steal all remaining currency and agent tokens after liquidity migration, even if they are not the original agent.",
+      "severity": "critical",
+      "original_id": "ee627b00379ffbc9"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_055",
+      "title": "Math.sqrt() Usage in getMaxSell May Return Incorrect Integer Result Due to Truncation",
+      "description": "The getMaxSell function uses Math.sqrt() to compute prod = Math.sqrt(reserveOut * reserveIn) * Math.sqrt((reserveOut + tokenOut) * (reserveIn + tokenIn)). However, Math.sqrt() in Fraxswap's library returns floor(sqrt(x)), not a precise value. This truncation error compounds in the formula: prod - minus may be significantly underestimated, leading to maxSell = 0 even when a positive amount should be sold. For example, if reserveOut=1e18, reserveIn=1e18, tokenOut=1e18, tokenIn=1e18, then prod = sqrt(1e36) * sqrt(4e36) = 1e18 * 2e18 = 2e36, minus = 1e18*1e18 + 1e18*1e18 = 2e36, so maxSell = 0. But the correct solution to (1e18 - y)/(1e18 + x) = (1e18 + y)/(1e18 - x) yields x = 0.5e18. The truncation causes the algorithm to fail to correct price imbalance, leading to permanent mispricing and loss of arbitrage opportunity, and potential user loss when LP is minted with incorrect ratios.",
+      "severity": "high",
+      "original_id": "35a6d8ca5f20aef4"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_056",
+      "title": "BAMM LP Token Minting to Wrong Address (Agent Instead of LiquidityManager)",
+      "description": "In addLiquidityToFraxswap(), the code calculates amountToBamm = (fraxswapPair.balanceOf(address(this)) * AgentFactory(owner).shareToBamm()) / 10_000 and then calls bamm.mint(agent, amountToBamm). This mints BAMM LP tokens to the agent address, not to LiquidityManager. However, the Fraxswap LP tokens are transferred to agent after this mint. This means the agent receives both the Fraxswap LP tokens and the BAMM LP tokens, but the LiquidityManager never holds the BAMM LP tokens. This breaks the expected economic model where LiquidityManager should hold BAMM LP tokens as a claim on the underlying liquidity, and then transfer them to agent. The agent gains double exposure (Fraxswap + BAMM LP) without the protocol accounting for it, while the protocol loses control over BAMM LP distribution. This is a critical accounting error that misallocates protocol-controlled assets.",
+      "severity": "high",
+      "original_id": "8742820f40499655"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_057",
+      "title": "Missing Access Control on initializeBootstrapPool Allows Front-Running and Economic Manipulation",
+      "description": "The initializeBootstrapPool function lacks access control and can be called by any user. This allows an attacker to trigger the initialization of the bootstrap pool before the legitimate owner, thereby manipulating the timing of liquidity deployment and price discovery. Since the initial price and liquidity are immutable and set at construction, an attacker can front-run the initialization to capture the initial price arbitrage opportunity. The attacker can call initializeBootstrapPool immediately after deployment, causing the contract to transfer initialLiquidity to the bootstrap pool. The legitimate owner's intended initialization is then blocked (due to the initialized flag), but the attacker has already captured the initial liquidity at the initialPrice. This results in the attacker gaining free tokens equivalent to initialLiquidity * initialPrice in currency, while the protocol fails to establish the intended liquidity pool. The economic impact is direct theft of the initial liquidity value.",
+      "severity": "critical",
+      "original_id": "df9e9e44f6788b64"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_058",
+      "title": "Unit Mismatch in addLiquidityToFraxswap Causes Incorrect Liquidity Calculation and Underfunded AMM Pools",
+      "description": "The addLiquidityToFraxswap function calculates liquidityAmount as (currencyAmount * 1e18) / price, where price is obtained from bootstrapPool.getPrice(). However, bootstrapPool.getPrice() returns a price in 1e18 scale (as it's derived from reserves in 18-decimal tokens), but the calculation (currencyAmount * 1e18) / price effectively doubles the scaling. This results in liquidityAmount being 1e18 times larger than intended. For example, if currencyAmount = 1000e18 and price = 2e18, the calculation yields (1000e18 * 1e18) / 2e18 = 500e18, but the correct liquidity amount should be 1000e18 / 2e18 = 500. The function then transfers 500e18 agent tokens to the Fraxswap pair, but the Fraxswap pair expects 500 tokens (not 500e18). This causes the liquidity provision to be 1e18 times too large, leading to a massive imbalance in the AMM pool. Subsequent swaps will have distorted prices, and the protocol's liquidity targeting logic fails. The attacker can exploit this by calling moveLiquidity early when currencyAmount is small, causing the pool to be underfunded relative to the intended price, enabling arbitrage against the malformed pool.",
+      "severity": "high",
+      "original_id": "5d8fd4cd034f12c7"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_059",
+      "title": "Desynchronized Iteration in addLiquidityToFraxswap Loop Causes Incomplete Price Correction and Permanent Pool Imbalance",
+      "description": "The for-loop in addLiquidityToFraxswap attempts to correct the price in the Fraxswap pair via three rounds of swaps. However, the loop uses the variables liquidityAmount and currencyAmount as both the target and the remaining balance, but does not update the reserve values after each swap. The getMaxSell function uses the initial reserve values from the first getReserves() call and does not re-query reserves after each swap. This means that after the first swap, the reserves change, but the loop continues using stale reserve values for the next two iterations. As a result, the price correction is incomplete and the final mint uses incorrect amounts. For example, if the initial price is 2e18 but the Fraxswap pair has a price of 1e18, the first swap may correct half the imbalance, but the next two swaps use the original reserves (1e18) instead of the updated ones (e.g., 1.5e18), leading to over- or under-swapping. The final mint then adds liquidity based on incorrect amounts, permanently distorting the pool's price. This causes users to experience slippage and arbitrage opportunities, and the protocol's price discovery mechanism is broken. The financial impact is that the AMM pool is permanently mispriced, allowing attackers to drain liquidity via arbitrage.",
+      "severity": "high",
+      "original_id": "40d9892f8a2fa8f2"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_060",
+      "title": "Incorrect Interface Assumption for Fraxswap Pair's mint() Function Causes Liquidity Token Loss",
+      "description": "The contract assumes that Fraxswap's IFraxswapPair.mint(address) function returns LP tokens to the caller, but in reality, Fraxswap's mint() function mints LP tokens to the caller's address only if the caller is the one providing liquidity. However, in the code, liquidity is transferred to the pair before mint() is called, and mint() is called on address(this). This is correct per Fraxswap's implementation. However, the critical issue is in the BAMM integration: the code calculates amountToBamm as (fraxswapPair.balanceOf(address(this)) * AgentFactory(owner).shareToBamm()) / 10_000. But after mint() is called, the LP tokens are minted to address(this), so balanceOf(address(this)) is correct. However, the problem is that the Fraxswap pair's mint() function does not return the amount minted \u2014 it emits an event. The contract assumes that balanceOf(address(this)) reflects the exact amount of LP tokens minted from the liquidity provided. But in Fraxswap, mint() mints LP tokens proportional to the liquidity provided, and the formula is: LP = sqrt(amount0 * amount1) * 2. The contract does not verify this calculation. If the pair already had liquidity, the balanceOf(address(this)) may include pre-existing LP tokens, leading to over-allocation to BAMM. For example, if the pair already had 1000 LP tokens and the contract adds 1000 LP tokens, balanceOf(address(this)) becomes 2000, but only 1000 were newly minted. If shareToBamm is 50%, the contract sends 1000 LP tokens to BAMM, but only 500 should be sent. This results in 500 LP tokens being stolen by the BAMM protocol, and the agent receives less than intended. The financial impact is permanent loss of LP tokens to the BAMM protocol due to incorrect accounting.",
+      "severity": "high",
+      "original_id": "6ab18795c36cc8ba"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_061",
+      "title": "Automatic Processing of Withdrawal Funds via Default Receive Function",
+      "description": "The LiquidityManager contract has no explicit receive or fallback function, but it can receive ETH or other tokens via direct transfers to its address. When funds are sent to the contract (e.g., from a withdrawal refund, external system return, or malicious transfer), they are not isolated and become part of the contract's balance. During moveLiquidity(), the contract indiscriminately uses currencyToken.balanceOf(address(this)) to determine liquidity to move, mixing any externally sent funds with legitimate protocol funds. This allows an attacker to inject funds that are then used to inflate liquidity calculations, leading to disproportionate LP token minting and eventual theft of agent tokens when the agent claims remaining balances.",
+      "severity": "critical",
+      "original_id": "7d4170d4c7e59e5f"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_062",
+      "title": "Mixed Fund Sources Leading to Accounting Inflation and Theft",
+      "description": "The contract cannot distinguish between user-deposited currency tokens and externally sent currency tokens (e.g., from a failed withdrawal, airdrop, or malicious transfer). In moveLiquidity(), currencyAmount is calculated as currencyToken.balanceOf(address(this)), which includes all tokens held, regardless of origin. This allows an attacker to send a small amount of currencyToken to the contract, triggering moveLiquidity() to use inflated currencyAmount to calculate a much larger liquidityAmount. The attacker then receives a disproportionate share of the agentToken during the final transfer, effectively stealing tokens from the protocol and legitimate users.",
+      "severity": "critical",
+      "original_id": "113a3572d3333fc4"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_063",
+      "title": "State Commitment Before External Call Verification in Swap Loop",
+      "description": "In addLiquidityToFraxswap(), during the 3-round swap loop, the contract first transfers tokens to the Fraxswap pair (state change) and then calls swap(). If the swap reverts due to slippage, insufficient liquidity, or malicious manipulation, the token transfer is not reverted, but the swap operation fails. The contract continues execution, assuming the swap succeeded, and proceeds to mint LP tokens based on incorrect reserve assumptions. This results in minting LP tokens for tokens that were never properly swapped, effectively creating free LP tokens and diluting legitimate LP holders.",
+      "severity": "high",
+      "original_id": "377fdce4c1388639"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_064",
+      "title": "Insecure Final Transfer of Remaining Tokens to Agent",
+      "description": "After processing liquidity, the contract transfers all remaining agentToken and currencyToken to the agent address without verifying that these balances are legitimate protocol proceeds. If an attacker has injected tokens into the contract (e.g., via direct transfer), those tokens are also sent to the agent. Since the agent is controlled by the owner (via AgentFactory), this creates a path for the owner to steal injected funds. More critically, if the agent is compromised or malicious, it can claim all remaining tokens, including those that should belong to the protocol or users.",
+      "severity": "high",
+      "original_id": "53229cbd202c1989"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_065",
+      "title": "Unverified Price Assumption Leading to Incorrect Liquidity Calculation",
+      "description": "The contract uses bootstrapPool.getPrice() to determine the price for converting currencyAmount to liquidityAmount. However, after bootstrapPool.kill(), the price may no longer be valid or may be manipulated if the pool is in an inconsistent state. The contract does not validate that the price is still accurate or within acceptable bounds before using it in the calculation (currencyAmount * 1e18 / price). An attacker can manipulate the bootstrap pool's reserves before killing it to make the price artificially low, causing the contract to mint vastly more LP tokens than intended, diluting legitimate liquidity providers.",
+      "severity": "high",
+      "original_id": "ec1e97cbdb014284"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_066",
+      "title": "Math.sqrt Called on Zero or Negative Values in getMaxSell",
+      "description": "The getMaxSell function uses Math.sqrt on expressions that can evaluate to zero or negative values due to insufficient input validation. Specifically, the expression (reserveOut + tokenOut) * (reserveIn + tokenIn) can be zero if either reserveOut or reserveIn is zero, and the expression (prod - minus) can be negative if reserveIn * tokenOut + reserveOut * reserveIn > prod, leading to Math.sqrt receiving invalid inputs. Math.sqrt in Fraxswap's library reverts on non-positive inputs, causing the entire transaction to fail unexpectedly during liquidity movement.",
+      "severity": "critical",
+      "original_id": "76994282321f859c"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_067",
+      "title": "State Commitment Before External Call Success in moveLiquidity",
+      "description": "In moveLiquidity, the bootstrapPool is killed (state change) before any validation of the subsequent liquidity addition to Fraxswap succeeds. If the Fraxswap pair creation or minting fails (e.g., due to insufficient liquidity, reentrancy, or gas limits), the bootstrapPool is permanently destroyed and cannot be recovered, but the liquidity movement is not completed. This leaves the system in an inconsistent state: the bootstrap pool is dead, but liquidity has not been moved to Fraxswap, and tokens remain trapped in LiquidityManager.",
+      "severity": "high",
+      "original_id": "0e53fe3f319cf34c"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_068",
+      "title": "BAMM Interface Compatibility Mismatch: createBamm Parameter Count",
+      "description": "The contract calls bammFactory.createBamm(address(fraxswapPair)), assuming it takes one parameter. However, the actual Fraxswap BAMM factory's createBamm function (as per public deployments and source) requires two parameters: the Fraxswap pair address and the fee tier. Passing only one parameter causes ABI encoding mismatch, resulting in a silent revert (since the call is made without a return value check). This prevents BAMM LP token minting entirely, causing users to miss out on BAMM rewards and fees.",
+      "severity": "high",
+      "original_id": "c63a5ff193a9491a"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_069",
+      "title": "Incomplete State Restoration in Liquidity Movement Failure",
+      "description": "If the three-round swap loop in addLiquidityToFraxswap fails (e.g., due to slippage or gas exhaustion), the partial token transfers (liquidityAmount / 1_000_000) and mint operations are already committed. The function does not revert or roll back these changes, leaving the Fraxswap pair in a corrupted state with unbalanced reserves and partial liquidity. Subsequent attempts to add liquidity will fail due to price distortion, and the trapped tokens cannot be recovered by the agent or owner.",
+      "severity": "high",
+      "original_id": "2fe1118d4976c7bc"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_070",
+      "title": "Gas Limit Exploitation in Subcall-Dependent Swap Loop",
+      "description": "The three-round swap loop in addLiquidityToFraxswap makes external calls (swap) with the default gas limit (63/64 of remaining gas). An attacker can trigger the function with just enough gas to complete the first two swaps but not the third, causing the third swap to fail silently. Since the function continues and performs the final mint with remaining amounts, the liquidity is added at an incorrect price (not corrected by the third swap), leading to significant slippage. The agent receives fewer tokens than expected, and the protocol loses arbitrage opportunity.",
+      "severity": "high",
+      "original_id": "f76b3540bec9fcab"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_071",
+      "title": "Unbounded Math.sqrt Input in getMaxSell Leads to Revert on Zero Reserves",
+      "description": "The getMaxSell function computes Math.sqrt((reserveOut + tokenOut) * (reserveIn + tokenIn)). If either reserveIn or reserveOut is zero (e.g., new pool with no liquidity), the product becomes zero, and Math.sqrt(0) is valid, but if both reserves are zero and tokenIn/tokenOut are non-zero, the expression (prod - minus) becomes negative, leading to Math.sqrt receiving a negative value. This causes a revert during liquidity movement, preventing any bootstrap-to-Fraxswap transition even when the pool is properly initialized.",
+      "severity": "critical",
+      "original_id": "a530f5c34508c8d4"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_072",
+      "title": "Incorrect Fee Calculation in getAmountOut Leads to Underpayment of Fees and Protocol Insolvency",
+      "description": "The fee calculation in getAmountOut uses the formula _amountIn * fee, but the fee is stored as (10,000 - input_fee), meaning a higher input fee results in a lower fee multiplier. However, the fee is applied as a discount on the input amount, not as a percentage taken from the input. This causes the protocol to collect less fee than intended, leading to permanent undercollection of fees and eventual insolvency when fees are swept. The mathematical error causes the fee to be calculated as a fraction of the input amount using a reduced multiplier, but the intended behavior was to charge a percentage fee on the input. This results in the protocol losing a portion of expected fees on every swap, which compounds over time and leads to insolvency when fees are swept to the LiquidityManager.",
+      "severity": "critical",
+      "original_id": "a187cdf3fb27fa49"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_073",
+      "title": "Missing User Protection in Liquidity Movement - No Minimum Output Boundaries",
+      "description": "The moveLiquidity() function transfers all remaining agent and currency tokens to the agent address without allowing any user or external actor to specify minimum acceptable output bounds. This exposes the protocol to front-running and price manipulation attacks where an attacker can drain liquidity by artificially depressing the token price before the move, causing the final liquidity amount to be drastically reduced while the agent still receives all remaining tokens. There is no mechanism for users to enforce a minimum acceptable liquidity amount or price threshold, violating Pattern 1 (User Control Over Execution Outcomes).",
+      "severity": "critical",
+      "original_id": "3bfcbc6781f63290"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_074",
+      "title": "Validation After State Change in addLiquidityToFraxswap() - Invalid Swaps Can Complete",
+      "description": "In addLiquidityToFraxswap(), the function performs token transfers and swaps (state changes) before validating whether the swap amount is valid or whether the price convergence is achieved. Specifically, agentToken.safeTransfer() and currencyToken.safeTransfer() are called before the getMaxSell() calculation is used to determine the amount to swap. This violates Pattern 2 (Validation Timing). An attacker can trigger a swap with a manipulated reserve state, causing the contract to transfer tokens that are never properly accounted for in the final liquidity addition, leading to loss of protocol liquidity.",
+      "severity": "high",
+      "original_id": "da59dd56e416a861"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_075",
+      "title": "Inconsistent Accounting Between Requested and Actual Liquidity in addLiquidityToFraxswap()",
+      "description": "The function calculates liquidityAmount and currencyAmount based on the bootstrap pool price, but then performs three rounds of swaps that alter the actual reserves and token balances. However, the final mint() call uses the original (requested) liquidityAmount and currencyAmount values, not the actual amounts after swaps. This creates a mismatch: the protocol mints LP tokens based on the original target, but the actual liquidity added is less due to swaps. This violates Pattern 3 (Execution Boundaries and Validation Consistency). For example, if initial liquidityAmount = 1000 and currencyAmount = 5000, but swaps consume 100 agent tokens and 500 currency tokens, the final mint() still uses 1000 and 5000, minting 10% more LP tokens than the actual liquidity deposited. This results in inflation of LP token supply and dilution of legitimate LP holders.",
+      "severity": "high",
+      "original_id": "b1e96590a72a6b72"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_076",
+      "title": "Division by Zero Risk in getMaxSell() Leading to Protocol Insolvency",
+      "description": "The getMaxSell() function computes: (prod - minus) / (reserveOut + tokenOut). If reserveOut + tokenOut == 0, this causes a division by zero, which reverts the transaction. However, if reserveOut and tokenOut are both zero (e.g., a newly created pair with no liquidity), the function returns 0 without reverting due to Solidity's silent overflow/underflow in unchecked contexts. But more critically, if reserveOut + tokenOut is very small (e.g., 1), and (prod - minus) is 1, then (prod - minus) / (reserveOut + tokenOut) = 1, which is correct. However, if (prod - minus) is 0, then maxSell = 0, which is acceptable. The real issue is that the function assumes Math.sqrt() returns a precise integer, but in reality, Math.sqrt() truncates. This causes prod to be underestimated, leading to (prod - minus) being negative, which underflows to a huge number due to uint256 wrapping. This results in maxSell being a massive value, causing the swap to attempt to transfer more tokens than exist, which reverts. But if the swap is partially executed (e.g., via a malicious AMM), the protocol may transfer tokens without proper accounting. This is a mathematical precision flaw that can lead to fund loss. Example: reserveOut=1, reserveIn=1, tokenOut=1, tokenIn=1. Then prod = sqrt(1*1)*sqrt((1+1)*(1+1)) = 1*2 = 2. minus = 1*1 + 1*1 = 2. Then (prod - minus) = 0, so maxSell=0 \u2014 correct. But if reserveOut=2, reserveIn=2, tokenOut=1, tokenIn=1: prod = sqrt(4)*sqrt(9) = 2*3=6, minus=2*1 + 2*2=2+4=6, so maxSell=0. Correct. But if reserveOut=3, reserveIn=3, tokenOut=1, tokenIn=1: prod = sqrt(9)*sqrt(16)=3*4=12, minus=3*1 + 3*3=3+9=12, maxSell=0. Still correct. However, if reserveOut=1000, reserveIn=1000, tokenOut=1, tokenIn=1: prod = sqrt(1000000)*sqrt(1001*1001) = 1000 * 1001 = 1001000, minus = 1000*1 + 1000*1000 = 1000 + 1000000 = 1001000, so maxSell=0. Correct. But if Math.sqrt() truncates, e.g., sqrt(1001*1001)=1000 (if truncated), then prod=1000*1000=1000000, minus=1001000, then (prod - minus) = -1000 \u2192 underflow \u2192 2^256 - 1000, then divided by (1000+1) \u2192 huge number. This causes the swap to attempt to sell an astronomically large amount of tokens, which will revert. But if the AMM allows partial execution (e.g., via a malicious fork), the protocol may transfer a large amount of tokens without minting corresponding LP tokens, leading to permanent loss. This is a critical mathematical flaw.",
+      "severity": "critical",
+      "original_id": "741d31273093766e"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_077",
+      "title": "State Synchronization Failure in addLiquidityToFraxswap() - Stale State Used in Bamm Minting",
+      "description": "After the three rounds of swaps, the function recalculates liquidityAmount and currencyAmount by subtracting the amounts swapped. However, the amountToBamm calculation uses fraxswapPair.balanceOf(address(this)) \u2014 which reflects the LP tokens minted during the initial mini-mint and the final mint \u2014 but the final mint() is called AFTER the amountToBamm calculation. This means amountToBamm is computed before the final liquidity is added and the final mint() occurs. Therefore, amountToBamm is based on an outdated LP token balance, leading to under-minting of BAMM LP tokens. For example, if the initial mini-mint creates 100 LP tokens, and the final mint creates 1000 more, amountToBamm is calculated as (100 * shareToBamm)/10000, not (1100 * shareToBamm)/10000. This violates Pattern 6 (State Synchronization in Function Chains). The agent receives fewer BAMM LP tokens than it should, resulting in lost rewards and protocol underperformance.",
+      "severity": "high",
+      "original_id": "4b37f673b15699a2"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_078",
+      "title": "Interface Compatibility Issue: Fraxswap Pair Interface Mismatch",
+      "description": "The contract uses IFraxswapPair, which is imported from dev-fraxswap, and assumes it has a mint(address) function. However, Fraxswap v1 and v2 have different interfaces. In Fraxswap v1, the mint function is defined as mint(address to) and returns nothing. In v2, it may return uint256. The contract does not check the return value or verify the interface version. If the deployed Fraxswap factory uses a v2 fork where mint() returns a value, the call will revert due to ABI mismatch (expecting 0 return data, but receiving 32 bytes). This violates Pattern 8 (External System Assumptions and Interface Compatibility). The contract will fail to add liquidity if the Fraxswap implementation is incompatible, locking all protocol funds in the bootstrap pool indefinitely.",
+      "severity": "high",
+      "original_id": "9f20fec7735d8ff1"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_079",
+      "title": "Unprotected Critical Function: initializeBootstrapPool() Allows Reentrancy and State Corruption",
+      "description": "The initializeBootstrapPool() function has no reentrancy guard and calls new BootstrapPool() and safeTransfer() without any protection. An attacker can deploy a malicious agentToken that reenters LiquidityManager during the safeTransfer() call, potentially calling initializeBootstrapPool() again. Since initialized is only checked at the start, a reentrant call can set bootstrapPool to a new instance while the first call is still executing, corrupting state. This violates Pattern 6 (State Synchronization) and Pattern 7 (State Commitment Timing). The attacker can drain the initialLiquidity by triggering multiple bootstrap pools and withdrawing funds from each. Example: Attacker deploys a token with onTransfer() that calls initializeBootstrapPool(). First call: initialized=false \u2192 sets initialized=true, creates pool1, transfers 1000 tokens. Reentrant call: initialized=true \u2192 skips, but still calls new BootstrapPool() \u2192 creates pool2, transfers another 1000 tokens. Now two pools exist, both funded. Attacker withdraws from both. Protocol loses 2000 tokens instead of 1000.",
+      "severity": "critical",
+      "original_id": "7226bae0f1d711d5"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_080",
+      "title": "Automatic Processing of Withdrawal Funds via PhantomAmount Logic",
+      "description": "The BootstrapPool contract uses a 'phantomAmount' variable to represent an initial liquidity reserve that is not physically held in the contract. When users withdraw funds via the kill() function, the contract transfers all remaining balances (including fees) to the owner. However, the getReserves() function incorrectly includes phantomAmount in the currency token reserve calculation, which is never physically deposited. This allows an attacker to send currency tokens directly to the contract, which are then treated as legitimate liquidity, enabling them to withdraw more than they deposited by exploiting the phantom reserve accounting.",
+      "severity": "critical",
+      "original_id": "25f0c835e0fe8bf9"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_081",
+      "title": "Insufficient Output Protection in Buy/Sell Functions Allows Front-Running and Slippage Exploitation",
+      "description": "The buy() and sell() functions do not accept a minimum output parameter, allowing attackers to front-run trades and extract value by manipulating the price between the time a transaction is submitted and when it is executed. Since users cannot specify a minimum acceptable output, they are exposed to unfavorable execution outcomes without any protection mechanism. This violates Pattern 1 (User Control Over Execution Outcomes).",
+      "severity": "high",
+      "original_id": "c16b01803f7540fe"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_082",
+      "title": "Validation of Liquidity Occurs After Token Transfer in sell() Function",
+      "description": "In the sell() function, agentToken is transferred from the user to the pool (state change) before the liquidity check (require(currencyToken.balanceOf(address(this)) >= currencyTokenFeeEarned)). This violates Pattern 2 (Validation Timing). An attacker can drain the pool by selling a large amount of agentToken, triggering the transfer before the liquidity check, potentially leaving the pool insolvent and allowing the attacker to withdraw currency tokens even if the pool lacks sufficient reserves.",
+      "severity": "high",
+      "original_id": "79a9d294bb821a86"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_083",
+      "title": "Inconsistent Accounting Between getAmountOut and Fee Calculation in Buy/Sell Functions",
+      "description": "The buy() and sell() functions calculate fees as _amountIn - (_amountIn * fee) / 10_000, but getAmountOut() uses fee in the formula (_amountIn * fee) / 10_000 to compute output. The fee collected is the difference between input and output, but the feeEarned accounting does not match the actual output derived from the AMM formula. This creates a discrepancy: the feeEarned is calculated as if the entire input minus a flat fee was the output, but the actual output is computed via the constant product formula. This violates Pattern 3 (Execution Boundaries and Validation Consistency). For example, with fee=500 (5%), _amountIn=1000, _reserveIn=10000, _reserveOut=1000: getAmountOut returns ~47.62, but feeEarned is set to 1000 - (1000*9500)/10000 = 50. The pool effectively loses 2.38 tokens per swap due to misaligned accounting.",
+      "severity": "high",
+      "original_id": "2fd7c3ff951b238a"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_084",
+      "title": "getAmountIn() Function Contains Division by Zero Risk Due to Fee-Based Denominator",
+      "description": "In getAmountIn(), the denominator is (_reserveOut - _amountOut) * fee. If fee is 0 (which is possible if _fee=10_000 in constructor), or if _reserveOut == _amountOut, the denominator becomes zero, causing a division-by-zero revert. Although the constructor sets fee = 10_000 - _fee, if _fee=10_000, fee=0. The function does not validate that fee > 0 before division. This violates Pattern 3 and Pattern 4 (Input Validation). An attacker can deploy a malicious contract that calls getAmountIn() with _amountOut = _reserveOut and fee=0, causing a revert that can be used to DoS the contract or prevent legitimate users from querying prices.",
+      "severity": "high",
+      "original_id": "ceb0bb0f71a91986"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_085",
+      "title": "maxSwapAmount() Function Returns Incorrect Maximum for AgentToken Due to Missing Return Statement",
+      "description": "The maxSwapAmount() function for agentToken calls getAmountIn() but does not include a return statement. In Solidity, if a function is declared to return a value and does not explicitly return, the behavior is undefined and may return garbage or zero. This violates Pattern 3 and Pattern 5 (Control Flow). When called for agentToken, it returns 0 instead of the correct maximum swap amount, causing any caller relying on this function (e.g., UI or front-end) to believe no swaps are possible, leading to loss of liquidity access. This is a logic error with financial impact: users cannot determine how much agentToken they can sell, potentially locking them out.",
+      "severity": "high",
+      "original_id": "2a04cc55438cbb93"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_086",
+      "title": "sweepFees() Allows Unauthorized Fee Extraction via LiquidityManager(owner) Call",
+      "description": "The _sweepFees() function calls LiquidityManager(owner).owner() to determine the fee recipient. However, if the owner is not a LiquidityManager contract, or if the owner is a contract that does not implement owner() as expected, the call will revert. More critically, if the owner is a malicious contract that returns a different address (e.g., attacker-controlled), the fees are sent to that address. This violates Pattern 5 (Conditional Recipient Selection) and Pattern 8 (External System Assumptions). The contract assumes owner is a LiquidityManager, but no interface validation or type checking is performed. An attacker can become owner and return their own address, stealing all accumulated fees.",
+      "severity": "critical",
+      "original_id": "872d29042d57a32a"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_087",
+      "title": "kill() Function Allows Owner to Drain All Reserves After Sweeping Fees, But Does Not Revert on Insufficient Balance",
+      "description": "The kill() function sweeps fees and then transfers all remaining balances to owner. However, if the fee sweep fails (e.g., due to insufficient balance or malicious LiquidityManager), the function continues and transfers the remaining balances. This violates Pattern 6 (State Synchronization) and Pattern 7 (State Commitment Timing). The state change (killed=true) occurs before the transfers, and if the transfers fail, the pool is permanently killed and users cannot recover funds. Additionally, if the LiquidityManager owner reverts during _sweepFees(), the killed flag is still set, locking all assets permanently. This is a critical failure mode: the protocol becomes unusable and funds are locked.",
+      "severity": "critical",
+      "original_id": "6790ed53f8db2de1"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_088",
+      "title": "Mathematical Domain Violation in getAmountIn Causes Division by Zero",
+      "description": "The getAmountIn function computes _amountIn = (_amountOut * _reserveIn * 10_000) / ((_reserveOut - _amountOut) * fee). If _reserveOut == _amountOut, the denominator becomes zero, causing a division by zero revert. However, the function only checks that _amountOut > 0 and reserves > 0, but does not validate that _reserveOut > _amountOut, which is mathematically required for the formula to be valid. This allows an attacker to trigger a revert in a controlled manner to disrupt operations or cause denial of service.",
+      "severity": "high",
+      "original_id": "7214c0e132893469"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_089",
+      "title": "Precision Loss in PhantomAmount Calculation Due to Integer Division",
+      "description": "The phantomAmount is calculated as (_initialPrice * _bootstrapAmount) / 1e18. Since Solidity uses integer division, if (_initialPrice * _bootstrapAmount) is not divisible by 1e18, the result is truncated. This causes a permanent loss of precision in the initial reserve calculation, leading to incorrect pricing and fee calculations throughout the pool's lifecycle. For example, if _initialPrice = 1e18 and _bootstrapAmount = 1, then phantomAmount = 1. But if _initialPrice = 1e18 + 1 and _bootstrapAmount = 1, then phantomAmount = 1 instead of 1.000000000000000001, losing 1 wei permanently.",
+      "severity": "high",
+      "original_id": "4674d96cc04f66a7"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_090",
+      "title": "State Commitment Before Validation in buy/sell Functions",
+      "description": "In both buy() and sell() functions, fees are added to currencyTokenFeeEarned and agentTokenFeeEarned before the token transfers are executed. If the safeTransferFrom or safeTransfer reverts (e.g., due to insufficient allowance or balance), the fee accumulation state is already committed, but the swap does not complete. This results in fees being permanently collected without any corresponding liquidity change, effectively stealing fees from the protocol. For example, if a user calls buy() with insufficient currencyToken allowance, the fee is still added to currencyTokenFeeEarned, but no tokens are transferred \u2014 the fee is stolen.",
+      "severity": "critical",
+      "original_id": "c6d9512f689538ce"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_091",
+      "title": "Infinite Loop Risk in maxSwapAmount Due to Unbounded Return",
+      "description": "The maxSwapAmount function returns type(uint256).max for currencyToken input, which is 2^256 - 1. This value is then passed to getAmountOut, which performs arithmetic with reserves. If a user calls buy(type(uint256).max), the getAmountOut function will compute _amountInWithFee = type(uint256).max * fee, which overflows (since fee is up to 10,000), causing incorrect or zero output. This can be exploited to drain liquidity by triggering overflow behavior in getAmountOut, which may return 0 or a garbage value, allowing an attacker to withdraw large amounts of tokens for minimal input.",
+      "severity": "high",
+      "original_id": "bc9c21336f7bf7f5"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_092",
+      "title": "Fee Sweeping Allows Front-Running and Double-Spending of Fees",
+      "description": "The _sweepFees() function is called in kill() and sweepFees(), but it does not check if fees have already been swept. An attacker can call sweepFees() multiple times before the pool is killed, draining the fee balances repeatedly. Since currencyTokenFeeEarned and agentTokenFeeEarned are reset to zero after each sweep, but the underlying token balances are not rechecked, an attacker can call sweepFees() multiple times if the fee balances are replenished between calls (e.g., via swaps). This allows the attacker to steal fees multiple times.",
+      "severity": "high",
+      "original_id": "90a8b0c6a98d5810"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_093",
+      "title": "Incorrect Reserve Calculation Leads to Undercollateralization and Theft",
+      "description": "The getReserves() function calculates _reserveCurrencyToken = phantomAmount + currencyToken.balanceOf(address(this)) - currencyTokenFeeEarned. However, phantomAmount is an initial value that should represent the initial liquidity, but it is never updated. If the pool receives additional currencyToken via external transfers (e.g., accidental or malicious), phantomAmount remains static, causing the reserve to be inflated. This allows an attacker to sell agentToken for more currencyToken than they should be entitled to, because the reserveIn is artificially inflated. For example, if phantomAmount = 1000 and 500 extra currencyToken is sent to the contract, the reserve becomes 1500 + balance - fees, but the actual liquidity is only balance + 1000, leading to overpayment on sells.",
+      "severity": "critical",
+      "original_id": "6ebf7ed93cbea8ab"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_094",
+      "title": "Proposal Threshold Calculation Uses Stale Supply Snapshot Due to Time Offset",
+      "description": "The proposalThreshold() function calculates the proposal threshold using token().getPastTotalSupply(Time.timestamp() - 1), which retrieves the total supply from one second ago. However, the OpenZeppelin IVotes interface's getPastTotalSupply(blockNumber) expects a block number, not a timestamp. This causes the function to pass a timestamp (e.g., 1717000000) as if it were a block number, leading to an incorrect and potentially zero supply value being used. Since block numbers are typically in the millions (e.g., 20M+), a timestamp like 1.7B is far beyond any existing block number, causing getPastTotalSupply to return 0. This results in proposalThreshold() returning 0, effectively disabling proposal creation unless agent.stage() == 0. This is a critical logic error because the function is intended to require 0.01% of supply, but due to the unit mismatch, it requires 0% of supply, allowing any user to create proposals without meeting any threshold.",
+      "severity": "critical",
+      "original_id": "2f49528871c72f4a"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_095",
+      "title": "Access Control Violation on Fee Accumulation State Variables",
+      "description": "The state variables currencyTokenFeeEarned and agentTokenFeeEarned are updated in public functions buy() and sell() without any access control, allowing any user to manipulate fee accumulation timing. These variables are later swept by the owner via _sweepFees() and used in reserve calculations via getReserves(). An attacker can call buy() or sell() with a small amount to increment feeEarned, then trigger a sweep before the owner does, stealing the accumulated fees. This creates a front-running opportunity where the attacker captures fees intended for the LiquidityManager owner.",
+      "severity": "high",
+      "original_id": "8ec4490adac9d54a"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_096",
+      "title": "Unit Representation Mismatch in getAmountOut and getAmountIn Calculations",
+      "description": "The getAmountOut and getAmountIn functions use fee = 10,000 - _fee, where _fee is expected to be in 1e18 scale (e.g., 500 for 0.05%). However, the fee is stored as a raw integer (e.g., 9950 for 0.5% fee) and used directly in multiplications without scaling. In getAmountOut, _amountInWithFee = _amountIn * fee; then _numerator = _amountInWithFee * _reserveOut; _denominator = (_reserveIn * 10_000) + _amountInWithFee. This assumes fee is in 1e4 scale, but if _fee was passed as 500 (meaning 5% fee), then fee = 9500, which is correct for 0.5% swap fee. However, the formula is mathematically inconsistent: the standard constant product formula requires fee to be applied as a multiplier of (1 - fee/10000), but here fee is used as (10000 - fee) and then multiplied directly. This causes incorrect price slippage calculations. For example, with _fee = 500 (0.5% fee), fee = 9500. If _amountIn = 1000, _reserveIn = 1000000, _reserveOut = 1000000, then _amountInWithFee = 9,500,000, _numerator = 9,500,000 * 1,000,000 = 9.5e12, _denominator = (1e6 * 10000) + 9.5e6 = 10,009,500,000, so _amountOut = 9.5e12 / 10,009,500,000 \u2248 949.07. But correct calculation should be: amountOut = amountIn * (1 - fee/10000) * reserveOut / (reserveIn + amountIn * (1 - fee/10000)) = 1000 * 0.995 * 1e6 / (1e6 + 1000 * 0.995) = 995000 / 1000995 \u2248 994.02. The current formula underestimates output by ~4.95%, causing users to receive less than expected and the protocol to collect more fees than intended. This is a representation boundary violation: the fee parameter is interpreted as a raw 1e4 scale value but used in a formula that assumes it's a 1e18 scale value subtracted from 10000, creating inconsistent scaling.",
+      "severity": "high",
+      "original_id": "f27121c038943e94"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_097",
+      "title": "Desynchronized Reserve Calculation Due to PhantomAmount and Fee Earned Mismatch",
+      "description": "The getReserves() function calculates reserves as: _reserveCurrencyToken = phantomAmount + currencyToken.balanceOf(address(this)) - currencyTokenFeeEarned; _reserveAgentToken = agentToken.balanceOf(address(this)) - agentTokenFeeEarned. However, phantomAmount is initialized as (_initialPrice * _bootstrapAmount) / 1e18, which represents the initial liquidity provided by the deployer. But when buy() or sell() is called, the actual token balances change, and feeEarned accumulates. The problem is that phantomAmount is never adjusted when fees are swept or when liquidity is added/removed. If the owner calls sweepFees(), currencyTokenFeeEarned is reset to 0, but phantomAmount remains unchanged. This means the reserve calculation becomes: phantomAmount + currentBalance - 0, which overstates the true reserve by the amount of swept fees. For example: initial phantomAmount = 1000 ETH, initial currencyToken balance = 1000 ETH, feeEarned = 10 ETH. After sweep, feeEarned = 0, balance = 990 ETH. Reserve = 1000 + 990 - 0 = 1990 ETH, but true reserve is 990 ETH. This causes getAmountOut to overestimate available liquidity, allowing attackers to drain the pool. An attacker can call buy() with a large amount when feeEarned is high (e.g., 100 ETH), then wait for owner to sweep fees (resetting feeEarned to 0). The next buy() will use reserve = phantomAmount + balance - 0, which is inflated by 100 ETH, allowing the attacker to extract more tokens than the actual liquidity supports. Mathematical proof: Assume phantomAmount = 1000, currencyToken.balance = 900, feeEarned = 100. True reserve = 900. After sweep: feeEarned = 0, balance = 900. getReserves() returns 1000 + 900 - 0 = 1900. Attacker calls buy(1000 ETH). getAmountOut: _reserveIn = 1900, _reserveOut = agentReserve (say 1000), fee = 9500. _amountInWithFee = 1000 * 9500 = 9.5e6. _numerator = 9.5e6 * 1000 = 9.5e9. _denominator = (1900 * 10000) + 9.5e6 = 19e6 + 9.5e6 = 28.5e6. _amountOut = 9.5e9 / 28.5e6 = 333.33 agent tokens. But actual currencyToken available is only 900. Attacker receives 333.33 agent tokens for 1000 ETH, while the pool only had 900 ETH. This is a 111% overdraw. The attacker gains 333.33 agent tokens, while the protocol loses 100 ETH in liquidity (the swept fees) and the owner loses the remaining 800 ETH in reserves.",
+      "severity": "critical",
+      "original_id": "b203abf8ea1b184d"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_098",
+      "title": "Proposal Threshold Can Be Set to Zero via Underflow, Enabling Any User to Propose",
+      "description": "The setProposalThresholdPercentage function allows setting the proposal threshold to any uint32 value, but lacks a minimum bound check. Since the proposal threshold is calculated as (supply * percentage) / 10,000, setting the percentage to 0 results in a threshold of 0. This allows any user with any amount of tokens to create a proposal, bypassing the intended economic barrier. The function only checks an upper bound (1000 = 10%), but ignores the lower bound, enabling a critical bypass of governance security.",
+      "severity": "critical",
+      "original_id": "42539c8e327ee3f7"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_099",
+      "title": "Proposal Threshold Uses Past Supply with Timestamp - 1, Leading to Inconsistent and Manipulable Thresholds",
+      "description": "The proposalThreshold() function uses token().getPastTotalSupply(Time.timestamp() - 1) to compute the threshold. This creates a 1-second window of uncertainty where the supply value is not aligned with the current block's state. An attacker can time a proposal creation to exploit the difference between the current supply and the supply from one second ago. If the supply increases during that second (e.g., via a flash loan or token transfer), the threshold becomes artificially lower than intended, enabling low-balance users to propose. This is a state inconsistency vulnerability that breaks the economic assumption of the threshold.",
+      "severity": "high",
+      "original_id": "2971250b8c9bdc47"
+    }
+  ],
+  "input_tokens": 27756,
+  "output_tokens": 5877,
+  "cached_tokens": 2639
+}

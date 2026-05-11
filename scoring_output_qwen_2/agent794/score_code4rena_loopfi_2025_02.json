@@ -1,0 +1,675 @@
+{
+  "project": "code4rena_loopfi_2025_02",
+  "agent": "agent794",
+  "status": "success",
+  "timestamp": "2026-04-09T13:05:10.639090",
+  "elapsed_seconds": 182.9,
+  "total_expected": 2,
+  "total_found": 91,
+  "true_positives": 0,
+  "false_negatives": 2,
+  "false_positives": 91,
+  "detection_rate": 0.0,
+  "precision": 0.0,
+  "f1_score": 0.0,
+  "matched_findings": [],
+  "missed_findings": [
+    {
+      "id": "code4rena_loopfi_2025_02_expected_000",
+      "title": "Rewards might be lost due to the error that_updateRewardIndex()might advancelastBalancewithout advancing index for a token",
+      "description": "Submitted by\nchaduke\n, also found by\nEvo\n\nThe function\n_updateRewardIndex()\nis used to update the\nlastBalance\nand\nindex\nof each reward token. This function will be called when a user deposits, withdraws collateral or claims rewards.\n\nHowever, the function might not advance\nindex\nwhen\naccrued.divDown(totalShares) = 0\n. This might happen when\ntotalShares\nis too big and\naccrued\nis too small. One case is that the number of decimals for the reward token is too small.\n\nhttps://github.com/code-423n4/2024-10-loopfi/blob/d219f0132005b00a68f505edc22b34f9a8b49766/src/pendle-rewards/RewardManager.sol#L74\n\nFor example, the USDC token only has 6 decimals.\n\nSuppose\naccrued\n=\n$100 = 100*10**6\n, and\ntotalShares\n= 200M = 200 * 10** 6 * 10**18\n; then we have\naccrued.divDown(totalShares) = 0\n.\n\nFurthermore, if function\n_updateRewardIndex()\nis called more frequently, either because a malicious user keeps calling\ngetRewards()\n(the gas fee is low on Arbitrum) or simply because the community is large so there is a high chance that for each block (per 12 seconds on Ethereum), there is someone who calls a\nwithdraw\n/\ndeposit\n/\ngetRewards\nfunction. As a result,\naccrued\ncould be small, leading to\naccrued.divDown(totalShares) = 0\n. Meanwhile,\n_updateRewardIndex()\nalways advances\nlastBalance\nwhen\naccrued !=0\n:\n\nhttps://github.com/code-423n4/2024-10-loopfi/blob/d219f0132005b00a68f505edc22b34f9a8b49766/src/pendle-rewards/RewardManager.sol#L78\n\nThis means the accrued rewards are lost! Nobody will receive the rewards since index has not changed.\n\nMore importantly, due to the rounding down error for\naccrued.divDown(totalShares)\n, there is always a slight loss for the rewards, which is accumulative over time.\n\nThe fix is simple. Calculate\ndeltaIndex = accrued.divDown(totalShares)\nand advance\nlastBalance\nby\ndeltaIndex.mulDown(totalShares)\n. In this way,\nindex\nand\nlastBalance\nwill always advance in the same pace; in particular if index does not advance, then\nlastBalance\nwill not advance either. The rounding down error is eliminated too since the\nlastBalance\nwill not be\naccrued\nbut by\ndeltaIndex.mulDown(totalShares)\n.\n\nMath\n\n0xtj24 (LoopFi) confirmed\n\n0xAlix2 (warden) commented\n:\n\n@Koolex - I agree that this is an issue; however, the audit\ndocs\nstates that the ERC20s that are used by the protocol are WETH and PendleLPs which are both 18 decimals.\nERC20 used by the protocol | WETH, PendleLPs\nBut I\u2019m not sure if that should be considered valid in this context.\n\nKoolex (judge) commented\n:\n\nThere is another issue here.\nmalicious user keeps calling\ngetRewards()",
+      "severity": "high",
+      "reason": "Not found"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_expected_001",
+      "title": "CDPVault.sol#liquidatePositionBadDebt()doesn\u2019t correctly handle profit and loss",
+      "description": "Submitted by\npkqs90\n, also found by\n0xAlix2\n\nhttps://github.com/code-423n4/2024-10-loopfi/blob/main/src/CDPVault.sol#L702\n\nhttps://github.com/code-423n4/2024-10-loopfi/blob/main/src/PoolV3.sol#L593\n\nWhen liquidating bad debt, the profit and loss is not correctly handled. This will cause incorrect accounting to lpETH stakers.\n\nNote: This is based on the 2024-07 Loopfi audit\nH-12\nissue. This protocol team applied a fix, but the fix is incomplete.\n\nThere are two issues that needs to be fixed in the new codebase:\n\nThe\nprofit\nthat is passed in\npool.repayCreditAccount(debtData.debt, profit, loss);\nshould actually use\ndebtData.accruedInterest\n. This is because we should first \u201cassume\u201d full debt and interest is paid off, and calculate the loss part independently.\nThe\nloss\nis correctly calculated in\nPoolV3#repayCreditAccount\n, but the if-else branch is incorrectly implemented. Currently, it can\u2019t handle the case where both profit and loss is non-zero. This would cause a issue that the loss will not be accounted, and will ultimately cause loss to lpETH holders (loss will be implicitly added to the users who hold lpETH) instead of lpETH stakers.\n\nThe second fix was also suggested in the original issue, but it isn\u2019t applied.\n\nCDPVault.sol:\n\ntakeCollateral\n=\nposition\n.\ncollateral\n;\nrepayAmount\n=\nwmul\n(\ntakeCollateral\n,\ndiscountedPrice\n);\nuint256\nloss\n=\ncalcTotalDebt\n(\ndebtData\n) -\nrepayAmount\n;\nuint256\nprofit\n;\nif\n(\nrepayAmount\n>\ndebtData\n.\ndebt\n) {\n@>\nprofit\n=\nrepayAmount\n-\ndebtData\n.\ndebt\n;\n}\n...\n@>\npool\n.\nrepayCreditAccount\n(\ndebtData\n.\ndebt\n,\nprofit\n,\nloss\n);\n// U:[CM-11]\n// transfer the collateral amount from the vault to the liquidator\ntoken\n.\nsafeTransfer\n(\nmsg\n.\nsender\n,\ntakeCollateral\n);\n\nPoolV3.sol:\n\nfunction\nrepayCreditAccount\n(\nuint256\nrepaidAmount\n,\nuint256\nprofit\n,\nuint256\nloss\n)\nexternal\noverride\ncreditManagerOnly\n// U:[LP-2C]\nwhenNotPaused\n// U:[LP-2A]\nnonReentrant\n// U:[LP-2B]\n{\n...\nif\n(\nprofit\n>\n0\n) {\n_mint\n(\ntreasury\n,\n_convertToShares\n(\nprofit\n));\n// U:[LP-14B]\n@>      }\nelse\nif\n(\nloss\n>\n0\n) {\naddress\ntreasury_\n=\ntreasury\n;\nuint256\nsharesInTreasury\n=\nbalanceOf\n(\ntreasury_\n);\nuint256\nsharesToBurn\n=\n_convertToShares\n(\nloss\n);\nif\n(\nsharesToBurn\n>\nsharesInTreasury\n) {\nunchecked\n{\nemit\nIncurUncoveredLoss\n({\ncreditManager:\nmsg\n.\nsender\n,\nloss:\n_convertToAssets\n(\nsharesToBurn\n-\nsharesInTreasury\n)\n});\n// U:[LP-14D]\n}\nsharesToBurn\n=\nsharesInTreasury\n;\n}\n_burn\n(\ntreasury_\n,\nsharesToBurn\n);\n// U:[LP-14C,14D]\n}\n...\n}\n\nIn CDPVault, change to\npool.repayCreditAccount(debtData.debt, debtData.accruedInterest, loss)\n.\n\nIn PoolV3:\n\nif\n(\nprofit\n>\n0\n) {\n_mint\n(\ntreasury\n,\nconvertToShares\n(\nprofit\n));\n// U:[LP-14B]\n+       }\n+\nif\n(\nloss\n>\n0\n)\n-       }\nelse\nif\n(\nloss\n>\n0\n) {\n...\n}\n\n0xtj24 (LoopFi) confirmed\n\nKoolex (judge) commented\n:\n\nWhy Profit should be\ndebtData.accruedInterest\n?\nFor the second part, could you please provide a case where profit and loss are non-zero in PJQA?\n\npkqs90 (warden) commented\n:\n\n@Koolex - Here\u2019s an example scenario:\nUser originally taken out a debt of 100, and interest grows to 50, so\ndebtData.debt = 100, debtData.accruedInterest = 50, calcTotalDebt(debtData) = 150)\n.\nUser collateral is only 100, and after multiplying\ndiscountPrice\n, the\nrepayAmount\nis only 90. Bad debt occurs.\nloss = calcTotalDebt(debtData) - repayAmount\nis equal to\n150 - 90 = 60\n.\nSince\nrepayAmount < debtData.debt\n, we would have\nprofit = 0\n.\nThis means for\nPoolV3#repayCreditAccount\n, 60 shares would be burned from the treasury, while instead it should be 10 (because original debt was 100, repaid is 90,\n100 - 90 = 10\n).\nYou can also see that if\nrepayAmount\nwas 101, we would calculate\nprofit = 1\n, and in\nPoolV3#repayCreditAccount\nwe would mint 1 share instead. This means there is a 61 (\n1 - (-60) = 61\n) gap in treasury shares when the repaid amount diff is only 11 (\n101 - 90 = 11\n), which does not make any sense.\nfunction\ncalcTotalDebt\n(\nDebtData\nmemory\ndebtData\n)\ninternal\npure\nreturns\n(\nuint256\n) {\nreturn\ndebtData\n.\ndebt\n+\ndebtData\n.\naccruedInterest\n;\n//+ debtData.accruedFees;\n}\nfunction\nliquidatePositionBadDebt\n(\naddress\nowner\n,\nuint256\nrepayAmount\n)\nexternal\nwhenNotPaused\n{\n...\ntakeCollateral\n=\nposition\n.\ncollateral\n;\nrepayAmount\n=\nwmul\n(\ntakeCollateral\n,\ndiscountedPrice\n);\n@>\nuint256\nloss\n=\ncalcTotalDebt\n(\ndebtData\n) -\nrepayAmount\n;\nuint256\nprofit\n;\nif\n(\nrepayAmount\n>\ndebtData\n.\ndebt\n) {\n@>\nprofit\n=\nrepayAmount\n-\ndebtData\n.\ndebt\n;\n}\n...\n@>\npool\n.\nrepayCreditAccount\n(\ndebtData\n.\ndebt\n,\nprofit\n,\nloss\n);\n// U:[CM-11]\n// transfer the collateral amount from the vault to the liquidator\ntoken\n.\nsafeTransfer\n(\nmsg\n.\nsender\n,\ntakeCollateral\n);\n}\nPoolV3.sol:\nfunction\nrepayCreditAccount\n(\nuint256\nrepaidAmount\n,\nuint256\nprofit\n,\nuint256\nloss\n)\nexternal\noverride\ncreditManagerOnly\n// U:[LP-2C]\nwhenNotPaused\n// U:[LP-2A]\nnonReentrant\n// U:[LP-2B]\n{\nuint128\nrepaidAmountU128\n=\nrepaidAmount\n.\ntoUint128\n();\nDebtParams\nstorage\ncmDebt\n=\n_creditManagerDebt\n[\nmsg\n.\nsender\n];\nuint128\ncmBorrowed\n=\ncmDebt\n.\nborrowed\n;\nif\n(\ncmBorrowed\n==\n0\n) {\nrevert\nCallerNotCreditManagerException\n();\n// U:[LP-2C,14A]\n}\nif\n(\nprofit\n>\n0\n) {\n_mint\n(\ntreasury\n,\n_convertToShares\n(\nprofit\n));\n// U:[LP-14B]\n}\nelse\nif\n(\nloss\n>\n0\n) {\naddress\ntreasury_\n=\ntreasury\n;\nuint256\nsharesInTreasury\n=\nbalanceOf\n(\ntreasury_\n);\nuint256\nsharesToBurn\n=\n_convertToShares\n(\nloss\n);\nif\n(\nsharesToBurn\n>\nsharesInTreasury\n) {\nunchecked\n{\nemit\nIncurUncoveredLoss\n({\ncreditManager:\nmsg\n.\nsender\n,\nloss:\n_convertToAssets\n(\nsharesToBurn\n-\nsharesInTreasury\n)\n});\n// U:[LP-14D]\n}\nsharesToBurn\n=\nsharesInTreasury\n;\n}\n_burn\n(\ntreasury_\n,\nsharesToBurn\n);\n// U:[LP-14C,14D]\n}...\n}\n\nKoolex (judge) commented\n:\n\n@pkqs90 - Could you please point out the incomplete fix? This is important, since if there is no indication that the sponsor intended to fix it, it would be out of scope (according to this\nannouncement\n).\n\npkqs90 (warden) commented\n:\n\n@Koolex - The 2024-07 code had\npool.repayCreditAccount(debtData.debt, 0, loss);\nhttps://github.com/code-423n4/2024-07-loopfi/blob/main/src/CDPVault.sol#L624\n, and was later fixed to\npool.repayCreditAccount(debtData.debt, profit, loss);\nhttps://github.com/code-423n4/2024-10-loopfi/blob/main/src/CDPVault.sol#L702\n.\nThe suggested fix was also mentioned the original report for\nH-12\n.",
+      "severity": "high",
+      "reason": "Not found"
+    }
+  ],
+  "undecided_findings": [],
+  "extra_findings": [
+    {
+      "id": "code4rena_loopfi_2025_02_tool_000",
+      "title": "Missing Access Control on `increaseLever` and `decreaseLever` Functions Allows Unauthorized Leverage Manipulation",
+      "description": "The `increaseLever` and `decreaseLever` functions lack proper access control, allowing any caller to manipulate position leverage without authorization. This enables unauthorized leverage changes that can drain vault assets.",
+      "severity": "high",
+      "original_id": "VULN-001"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_001",
+      "title": "Critical: Validation Timing Issue in cooldownAssets and cooldownShares Functions",
+      "description": "The cooldownAssets and cooldownShares functions execute state changes before validation, allowing invalid operations to complete.",
+      "severity": "critical",
+      "original_id": "VULN-002"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_002",
+      "title": "Type System Integrity: Precision Loss in Debt Parameter Conversion",
+      "description": "The contract uses uint128 for DebtParams (borrowed and limit) but performs arithmetic operations that can silently truncate values when converting between uint256 and uint128. This causes precision loss for large debt values, leading to incorrect debt tracking and potential fund loss.",
+      "severity": "high",
+      "original_id": "LP-13B"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_003",
+      "title": "Critical: Missing User Protection in `lendCreditAccount` Allows Adverse Selection",
+      "description": "The `lendCreditAccount` function allows credit managers to borrow funds without requiring users to specify minimum acceptable outputs. This exposes users to adverse selection and unfavorable execution without any mechanism to protect against manipulation.",
+      "severity": "critical",
+      "original_id": "1c283e9c9d335067"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_004",
+      "title": "High: Validation Timing in `lendCreditAccount",
+      "description": "The `lendCreditAccount` function validates the credit manager's request AFTER the state changes have occurred. This allows invalid operations to complete because validation occurs after state changes instead of before.",
+      "severity": "high",
+      "original_id": "34b9e71c48573744"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_005",
+      "title": "Missing User Protection in Withdrawal Functions",
+      "description": "The withdraw() and individualEarlyExit() functions reduce user positions and withdraw assets without allowing users to specify minimum acceptable outputs. This exposes users to unfavorable execution due to market conditions or adversarial actions.",
+      "severity": "high",
+      "original_id": "a53f798875555495"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_006",
+      "title": "Validation Timing Issue in vestTokens()",
+      "description": "The vestTokens() function performs state changes (balance updates) before validation of parameters. This allows invalid operations to complete.",
+      "severity": "high",
+      "original_id": "b0b8d56327dce22a"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_007",
+      "title": "Execution Boundaries Issue in _stake()",
+      "description": "The _stake() function may execute differently than initially requested without maintaining consistency between expected and actual execution. Validation, accounting, and state updates may not align with what actually occurred.",
+      "severity": "high",
+      "original_id": "0fbeabb2e327a87b"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_008",
+      "title": "Access Control Issue in _withdrawTokens()",
+      "description": "The _withdrawTokens() function is internal but performs critical operations (token transfers) without access control. This allows unauthorized access to user funds.",
+      "severity": "high",
+      "original_id": "41aa8333a73d7fed"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_009",
+      "title": "State Synchronization Issue in _ieeWithdrawableBalance()",
+      "description": "The _ieeWithdrawableBalance() function may read stale state values when called from dependent functions. State modifications may not complete before dependent functions execute.",
+      "severity": "high",
+      "original_id": "c9119ee47899fbeb"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_010",
+      "title": "Return Value Unit Inconsistency in _earned()",
+      "description": "The _earned() function returns values in different units than expected by callers. When used in calculations, unit mismatches cause incorrect accounting.",
+      "severity": "high",
+      "original_id": "5d1f2162bf166311"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_011",
+      "title": "State Commitment Timing Issue in _notifyReward()",
+      "description": "The _notifyReward() function commits state (balance updates) before operations that can fail. If external calls fail, state is consumed but operation doesn't complete.",
+      "severity": "high",
+      "original_id": "0a5d92ff2a9155ab"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_012",
+      "title": "External System Assumption Issue in _earned()",
+      "description": "The _earned() function makes assumptions about external system behavior (reward calculation) that may not hold. When external systems change, calculations become incorrect.",
+      "severity": "high",
+      "original_id": "657c38ab7f2fb0de"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_013",
+      "title": "Signature Execution Context Binding Issue in _ieeWithdrawableBalance()",
+      "description": "The _ieeWithdrawableBalance() function uses signatures for authorization but doesn't bind the intended executor/submitter address in the signed digest. This allows anyone can submit signatures.",
+      "severity": "high",
+      "original_id": "64c53f2532e6d5ab"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_014",
+      "title": "Critical: Missing Access Control on _notifyReward Function Enables Fee Manipulation",
+      "description": "The _notifyReward function updates critical economic state variables (rewardPerSecond, periodFinish, balance) without access control. This allows any user to manipulate reward distribution timing and amounts, enabling fee avoidance and unfair advantage.",
+      "severity": "critical",
+      "original_id": "1cbde46ba9ea9623"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_015",
+      "title": "High: Unit Mismatch in _earned Function Causes Incorrect Reward Calculations",
+      "description": "The _earned function receives balance in raw units but performs calculations expecting normalized units, causing reward calculations to be off by 10^18 factor.",
+      "severity": "high",
+      "original_id": "98be2c3deae151ee"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_016",
+      "title": "High: Data Access Desynchronization in _ieeWithdrawableBalance Function Causes Data Loss",
+      "description": "The _ieeWithdrawableBalance function accesses _userEarnings collection using index that can become desynchronized from actual data storage, causing valid data to be skipped during iteration.",
+      "severity": "high",
+      "original_id": "530060ee5feed313"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_017",
+      "title": "Critical: Incorrect Reward Calculation in _earned Function",
+      "description": "The _earned function contains a critical mathematical error in the reward calculation formula. The function incorrectly calculates earned rewards by adding the existing rewards value to the new calculation, when it should only return the new calculation result. This causes rewards are counted twice, leading to massive overpayment of rewards and protocol insolvency.",
+      "severity": "critical",
+      "original_id": "3065271a09971abb"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_018",
+      "title": "Missing Access Control on `_modifyPosition` Allows Fee Manipulation",
+      "description": "The internal function `_modifyPosition` updates critical economic state variables (totalDebt, position.debt, position.collateral, position.cumulativeIndexLastUpdate, position.cumulativeQuotaIndexLU, position.cumulativeQuotaInterest) without any access control. Since this function is called by `modifyCollateralAndDebt` (public) and `liquidatePosition` (public), and directly modifies state used in fee calculations, an attacker can manipulate the timing of these updates to avoid fees.",
+      "severity": "high",
+      "original_id": "vuln-001"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_019",
+      "title": "Incorrect Unit Handling in `deposit` and `withdraw` Functions",
+      "description": "The `deposit` and `withdraw` functions convert amounts using `wdiv(amount, tokenScale)` but the underlying `modifyCollateralAndDebt` function expects values in wad units. This mismatch causes incorrect collateral and debt calculations when users deposit or withdraw, leading to incorrect fee calculations and potential loss of funds.",
+      "severity": "high",
+      "original_id": "vuln-002"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_020",
+      "title": "Data Access Integrity Issue in `_calcDebt` Function",
+      "description": "The `_calcDebt` function accesses state variables (position.debt, position.cumulativeIndexLastUpdate, position.cumulativeQuotaIndexLU) without verifying the integrity of the data structure. The function assumes the data is consistent, but if an attacker can manipulate the state between operations, they can cause incorrect debt calculations.",
+      "severity": "high",
+      "original_id": "vuln-003"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_021",
+      "title": "Critical: Division by Zero in `calcDecrease` function",
+      "description": "The `calcDecrease` function performs division operations that can result in division by zero when `debt` equals zero, causing the function to revert and preventing legitimate operations.",
+      "severity": "critical",
+      "original_id": "5e50297c50c843fa"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_022",
+      "title": "Type System Integrity: Raw Bit Comparison for LockedBalance Equality",
+      "description": "The contract uses LockedBalance structures to track locked tokens with unlock times. When comparing LockedBalance instances for equality (e.g., in _ieeWithdrawableBalance), the comparison is performed on raw storage slots without decoding or normalization. This can cause equal logical values with different storage representations to compare as unequal, leading to incorrect state access and potential fund loss.",
+      "severity": "high",
+      "original_id": "TYPE-001"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_023",
+      "title": "Operation Lifecycle: Incomplete State Restoration on Cancel",
+      "description": "The contract allows users to stake tokens and earn rewards. When users withdraw earned tokens, the contract decrements the earned balance. However, when users cancel their withdrawal request, the contract does not restore the earned balance, leaving the user's balance permanently reduced.",
+      "severity": "critical",
+      "original_id": "LIFECYCLE-001"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_024",
+      "title": "Operation Lifecycle: State Commitment Before Operation Verification",
+      "description": "The contract allows users to stake tokens and earn rewards. When users withdraw earned tokens, the contract decrements the earned balance. However, the contract commits state changes before verifying all intended operations succeeded, leaving state consumed but operation incomplete.",
+      "severity": "high",
+      "original_id": "LIFECYCLE-002"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_025",
+      "title": "Operation Lifecycle: Resource-Controlled Failures",
+      "description": "The contract allows users to stake tokens and earn rewards. When users withdraw earned tokens, the contract decrements the earned balance. However, the contract does not handle resource-controlled failures, allowing attackers to craft transactions that consume resources while failing silently.",
+      "severity": "high",
+      "original_id": "LIFECYCLE-003"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_026",
+      "title": "Operation Lifecycle: Authorization Context Binding",
+      "description": "The contract allows users to stake tokens and earn rewards. When users withdraw earned tokens, the contract decrements the earned balance. However, the contract does not bind authorization context, allowing attackers to use stolen authorizations with different contexts.",
+      "severity": "high",
+      "original_id": "LIFECYCLE-004"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_027",
+      "title": "Missing Caller Verification in Automatic Return Handler",
+      "description": "The `getRewards` function lacks verification of the caller's identity before processing reward returns. This allows any external account to trigger reward processing, potentially diverting funds intended for users.",
+      "severity": "high",
+      "original_id": "20ce8d4198dab805"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_028",
+      "title": "Precision Loss in Debt Calculation During Repayment",
+      "description": "The calcDecrease function in CDPVault.sol performs debt repayment calculations that can silently truncate values due to insufficient precision handling. When repaying debt, the function calculates new debt principal but does not account for the full precision requirements of the underlying protocol. This causes the new debt value to be lower than mathematically correct, resulting in the protocol losing the difference.",
+      "severity": "high",
+      "original_id": "edea42a222d3daee"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_029",
+      "title": "Authorization Context Not Bound to Execution Parameters",
+      "description": "The modifyCollateralAndDebt function in CDPVault.sol does not bind the caller's authorization context to the specific execution parameters. This allows an attacker to front-run a legitimate transaction by capturing the authorization context and executing with hostile parameters. The function checks permissions but does not tie the authorization to the specific operation parameters.",
+      "severity": "high",
+      "original_id": "7a938ab2e6f8f7ba"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_030",
+      "title": "State Commitment Before Operation Verification",
+      "description": "The modifyCollateralAndDebt function in CDPVault.sol commits state changes before verifying all intended operations succeeded. This allows an attacker to cause a failure after state commitment, leaving state consumed but operation incomplete. The function updates position state before verifying the operation succeeded, allowing an attacker to cause a failure after state commitment.",
+      "severity": "high",
+      "original_id": "88a772a98f36df4a"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_031",
+      "title": "Resource-Controlled Execution Failure",
+      "description": "The modifyCollateralAndDebt function in CDPVault.sol can fail due to resource limits while the parent function succeeds. This allows an attacker to cause a failure after state commitment, leaving state consumed but operation incomplete. The function updates position state before verifying the operation succeeded, allowing an attacker to cause a failure after state commitment.",
+      "severity": "medium",
+      "original_id": "4100b2425b59ff89"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_032",
+      "title": "Missing User Execution Bounds in modifyCollateralAndDebt",
+      "description": "The modifyCollateralAndDebt function allows users to decrease their positions without providing minimum acceptable output bounds, exposing them to unfavorable execution.",
+      "severity": "high",
+      "original_id": "5721e8e87dc30c0f"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_033",
+      "title": "Validation Timing Issue in modifyCollateralAndDebt",
+      "description": "The modifyCollaltAndDebt function performs validation checks after state changes, allowing invalid operations to complete.",
+      "severity": "high",
+      "original_id": "fa7a087fab45034b"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_034",
+      "title": "State Synchronization Issue in _modifyPosition",
+      "description": "The _modifyPosition function updates state before dependent operations, causing dependent operations to use stale state values.",
+      "severity": "high",
+      "original_id": "03d200ee3fb2e04f"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_035",
+      "title": "Return Value Unit Mismatch in calcDecrease",
+      "description": "The calcDecrease function returns values in different units than expected by callers, causing incorrect calculations.",
+      "severity": "high",
+      "original_id": "72def1dd0204c735"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_036",
+      "title": "Missing Access Control on withdraw() Allows Unauthorized lpETH Theft",
+      "description": "The withdraw() function lacks proper access control. While it uses the onlyStakingVault modifier, this modifier only checks that msg.sender equals STAKING_VAULT, but does not validate that the caller is authorized to withdraw funds. An attacker could potentially call this function directly if they can impersonate the staking vault address or exploit address reuse patterns, leading to unauthorized withdrawal of lpETH tokens.",
+      "severity": "high",
+      "original_id": "819fbb7b260b6d13"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_037",
+      "title": "No Validation of 'to' Parameter in withdraw() Allows Funds Sent to Zero Address",
+      "description": "The withdraw() function does not validate the 'to' parameter. If an attacker passes address(0) as the 'to' parameter, funds will be sent to the zero address, resulting in permanent loss of lpETH tokens. The function should validate that 'to' is not the zero address before executing the transfer.",
+      "severity": "high",
+      "original_id": "72c37054164f5e6c"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_038",
+      "title": "No Validation of 'amount' Parameter in withdraw() Allows Integer Overflow/Underflow",
+      "description": "The withdraw() function does not validate the 'amount' parameter. If an attacker passes a value larger than the contract's lpETH balance, the transfer will fail, but the function does not revert with a descriptive error. If the amount is zero, the function executes without effect, but no validation prevents this. The function should validate that 'amount' is greater than zero and does not exceed the contract's lpETH balance.",
+      "severity": "medium",
+      "original_id": "b61a5377d8ae918f"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_039",
+      "title": "Missing Access Control on Withdraw Function Enables Unauthorized lpETH Drain",
+      "description": "The `withdraw` function in Silo.sol lacks access control beyond the `onlyStakingVault` modifier, but the modifier only checks `msg.sender != STAKING_VAULT`. Since the function directly transfers lpETH to arbitrary addresses, and no further authorization is required, any entity that can impersonate the staking vault (e.g., via flash loan attack, governance takeover, or compromised validator) can drain the contract's entire lpETH balance to arbitrary addresses. The vulnerability is exacerbated because the function is `external` and has no reentrancy protection.",
+      "severity": "critical",
+      "original_id": "5d9fb283dce3ec2d"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_040",
+      "title": "Missing User Protection in Withdrawal Function",
+      "description": "The `withdraw` function allows the staking vault to transfer lpETH to any address without requiring the caller to specify minimum acceptable output amounts or validate the destination. This exposes users to potential loss of funds if the destination is invalid or malicious, as there are no mechanisms for users to express acceptable execution bounds.",
+      "severity": "high",
+      "original_id": "0eb57fad598d96c4"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_041",
+      "title": "Validation Timing Issue in Withdraw Function",
+      "description": "The `withdraw` function executes the token transfer before any validation of the `to` address or `amount` parameters. The transfer occurs unconditionally, and if the transfer fails (e.g., due to an invalid address or insufficient balance), the function will revert, but the lack of pre-validation means invalid operations can proceed to execution before validation would have caught the error.",
+      "severity": "high",
+      "original_id": "32495aa747bd6340"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_042",
+      "title": "Missing Access Control in Interface",
+      "description": "The `withdraw` function is marked `external` and performs a critical operation (token transfer) but lacks access control indicators in its interface declaration. While the function has a modifier, the interface declaration does not indicate restrictions, which should reflect security expectations for critical functions.",
+      "severity": "high",
+      "original_id": "1"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_043",
+      "title": "Missing Caller Verification in Automatic Funds Handling",
+      "description": "The Silo contract has a critical vulnerability where the `withdraw` function, while restricted to STAKING_VAULT, does not verify the origin of the funds being withdrawn. If the STAKING_VAULT is compromised or acts maliciously, it can drain the contract's lpETH balance without any checks on the withdrawal purpose or recipient. The `withdraw` function has no validation of the `to` parameter or the `amount` against any stored state, allowing arbitrary transfers.",
+      "severity": "high",
+      "original_id": "3b91fd7696ddf798"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_044",
+      "title": "Missing Authorization Check in withdraw Function",
+      "description": "The withdraw function uses the onlyStakingVault modifier but does not validate the 'to' parameter, allowing the staking vault to transfer lpETH to arbitrary addresses.",
+      "severity": "critical",
+      "original_id": "74cb4ce9677335d8"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_045",
+      "title": "Critical: Division by Zero in `_newRewards`",
+      "description": "The `_newRewards` function performs division by `pool.totalSupply` without checking if it is zero. When `totalSupply` is zero, this division causes a division-by-zero error, reverting the transaction. This can be triggered when a pool has no liquidity but still has allocation points, causing the entire reward distribution system to fail.",
+      "severity": "critical",
+      "original_id": "6b3e92fc1485c509"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_046",
+      "title": "High: Missing Access Control on `claim` Function",
+      "description": "The `claim` function allows any user to claim rewards for any other user by passing their address. There is no check ensuring the caller is the user themselves or an authorized delegate. This allows attackers to front-run legitimate claims and drain all pending rewards for any user by calling `claim(attackerAddress, tokens)`. The function should restrict claims to the user themselves or require explicit delegation.",
+      "severity": "high",
+      "original_id": "0766a63a91674fb4"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_047",
+      "title": "High: State Desynchronization in `handleActionAfter`",
+      "description": "In `handleActionAfter`, when a user becomes ineligible, `_processEligibility` is called, which calls `stopEmissionsFor`. However, `stopEmissionsFor` calls `_handleActionAfterForToken` with balance=0, but this function updates `pool.totalSupply` and `user.amount` in a way that doesn't properly account for the user's current position. If a user has a non-zero balance, this causes `pool.totalSupply` to be decremented twice (once in `handleActionAfter` and once in `stopEmissionsFor`), leading to permanent supply accounting errors.",
+      "severity": "high",
+      "original_id": "97cb37a7a7fd0faf"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_048",
+      "title": "High: Incorrect Unit Conversion in `claim` Return Values",
+      "description": "The `claim` function calculates pending rewards using `pending = userBaseClaimable[_user]` and then adds to it, but `pending` is initialized to `userBaseClaimable[_user]` which is a base balance, while the calculation `claimable[i]` in `pendingRewards` returns values in a different unit scale. The `pending` variable is used in `_vestTokens` which expects a specific unit scale. If `pending` is in a different unit scale than what `_vestTokens` expects, the vesting amount will be incorrect, leading to incorrect reward distribution.",
+      "severity": "high",
+      "original_id": "98ea82e802df9a2d"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_049",
+      "title": "High: Reentrancy in `claim` Function",
+      "description": "The `claim` function calls `eligibleDataProvider.updatePrice()` after processing rewards. If `eligibleDataProvider` is a contract that performs external calls or state changes, this could allow reentrancy attacks. The function should ensure no external calls are made after state changes that could be exploited.",
+      "severity": "high",
+      "original_id": "a160ad55d53ebf2e"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_050",
+      "title": "High: Missing Validation in `claim` Parameters",
+      "description": "The `claim` function does not validate the `_tokens` array for duplicates or invalid values. An attacker could pass duplicate tokens in the array, causing the same pool to be processed multiple times in the loop, leading to incorrect reward calculations and potential fund loss.",
+      "severity": "high",
+      "original_id": "b1087dc07d2efcf2"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_051",
+      "title": "Critical: Missing Access Control on handleActionAfter Enables Fee Manipulation",
+      "description": "The handleActionAfter function lacks access control, allowing any caller to manipulate balance snapshots used in reward calculations. This enables users to avoid fees by triggering updates at inopportune times, specifically when reward rates are high or pool balances are low.",
+      "severity": "critical",
+      "original_id": "CHEF-001"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_052",
+      "title": "Critical: State Desynchronization in `_setQuotaRevenue` and `_updateBaseInterest`",
+      "description": "The function `_setQuotaRevenue` updates `_quotaRevenue` but fails to update `_expectedLiquidityLU` when called directly, causing `_quotaRevenue` and `_expectedLiquidityLU` to become desynchronized. This desynchronization allows an attacker to manipulate `_quotaRevenue` without affecting `_expectedLiquidityLU`, breaking the economic invariant that `_expectedLiquidityLU` should include all accrued revenue.",
+      "severity": "critical",
+      "original_id": "POOLV3-001"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_053",
+      "title": "High: Missing Access Control on `setQuotaRevenue` and `updateQuotaRevenue`",
+      "description": "The functions `setQuotaRevenue` and `updateQuotaRevenue` lack proper access control. `setQuotaRevenue` is restricted to `poolQuotaKeeperOnly`, but `updateQuotaRevenue` is restricted to `creditManagerOnly`. This allows credit managers to call `updateQuotaRevenue`, but credit managers should not be able to update quota revenue directly. The access control should be reversed: `setQuotaRevenue` should be restricted to `poolQuotaKeeperOnly`, and `updateQuotaRevenue` should be restricted to `poolQuotaKeeperOnly`.",
+      "severity": "high",
+      "original_id": "POOLV3-002"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_054",
+      "title": "Precision Loss in Reward Calculation Due to Integer Division",
+      "description": "The ChefIncentivesController contract performs reward calculations using integer arithmetic with a fixed ACC_REWARD_PRECISION constant (1e12). When calculating new rewards in _newRewards, the contract divides rawReward * pool.allocPoint by totalAllocPoint. If pool.allocPoint is small relative to totalAllocPoint, this division can truncate to zero, causing reward accumulation to stall for pools with low allocation points.",
+      "severity": "high",
+      "original_id": "8d79285bc7c3ac84"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_055",
+      "title": "Authorization Bypass in handleActionAfter",
+      "description": "The handleActionAfter function allows any caller to trigger pool updates for arbitrary tokens. The function checks if msg.sender is a valid rToken or the MFD contract, but does not verify that the caller is authorized to update the pool state. This allows any caller to trigger pool updates, potentially leading to front-running or denial-of-service attacks.",
+      "severity": "high",
+      "original_id": "d2a5839db5c7b3a4"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_056",
+      "title": "Reentrancy in _vestTokens",
+      "description": "The _vestTokens function calls mfd.vestTokens, which may trigger external calls to user-controlled contracts. The function does not use a reentrancy guard, allowing attackers to reenter the function and drain funds.",
+      "severity": "critical",
+      "original_id": "4bd56b952a9713d6"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_057",
+      "title": "Critical: State Synchronization Failure in cooldownAssets and cooldownShares",
+      "description": "The cooldownAssets and cooldownShares functions update two state variables (cooldownEnd and underlyingAmount) but do so in separate statements. When cooldownAssets completes successfully but cooldownShares reverts (e.g., due to insufficient shares), the cooldownEnd timestamp is updated but underlyingAmount is not reset, causing permanent loss of the underlying assets.",
+      "severity": "critical",
+      "original_id": "130ae4d9e3de0e37"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_058",
+      "title": "High: Missing Access Control on unstake Function",
+      "description": "The unstake function lacks access control restrictions, allowing any address to call it. Combined with the state synchronization failure, an attacker can call unstake after cooldownEnd timestamp has been updated but underlyingAmount has not been reset, draining the protocol's underlying assets.",
+      "severity": "high",
+      "original_id": "4205f6bc26682a9c"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_059",
+      "title": "High: Incorrect Unit Conversion in cooldownAssets and cooldownShares",
+      "description": "The cooldownAssets and cooldownShares functions convert between assets and shares using previewWithdraw and previewRedeem, but the conversion uses uint152 casting which truncates values. For large values (e.g., 10^18), this truncation causes significant loss of value. For example, converting 10^18 assets to shares and back results in 10^18 - 10^15 assets lost per transaction.",
+      "severity": "high",
+      "original_id": "9e93955b59ad0945"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_060",
+      "title": "Medium: Division by Zero Risk in _checkMinShares",
+      "description": "The _checkMinShares function checks if totalSupply < MIN_SHARES, but if totalSupply is 0, the condition _totalSupply > 0 fails, but if totalSupply is 1 wei, the check passes but MIN_SHARES is 0.01 ether (10^16 wei), so 1 < 10^16 passes, but the protocol may have 0 assets while allowing the check passes. If totalSupply is 1 wei and MIN_SHARES is 10^16 wei, the check passes but the protocol has 0 assets, allowing donation attacks.",
+      "severity": "medium",
+      "original_id": "eb8ae42b80fa0f89"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_061",
+      "title": "State Synchronization Issue in _handleActionAfterForToken",
+      "description": "The _handleActionAfterForToken() function updates user balances and pool state without ensuring synchronization between related state variables. The function updates user.amount and user.rewardDebt but does not ensure pool.totalSupply is consistent with the sum of user amounts across all users.",
+      "severity": "high",
+      "original_id": "VULN-003"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_062",
+      "title": "Return Value Unit Mismatch in pendingRewards",
+      "description": "The pendingRewards() function returns reward values in a unit that does not match the expected unit used by callers in calculations. The function calculates rewards as (user.amount * accRewardPerShare) / ACC_REWARD_PRECISION - user.rewardDebt, but the caller expects the result in a different unit.",
+      "severity": "medium",
+      "original_id": "VULN-004"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_063",
+      "title": "State Commitment Timing Issue in _updatePool",
+      "description": "The _updatePool() function commits state changes before verifying that all intended operations succeeded. The function updates pool.accRewardPerShare and pool.lastRewardTime before verifying that the pool is valid and operations succeeded.",
+      "severity": "medium",
+      "original_id": "VULN-005"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_064",
+      "title": "Critical: Cooldown State Manipulation via Unrestricted `cooldownAssets` and `cooldownShares`",
+      "description": "The `cooldownAssets` and `cooldownShares` functions lack access control on critical state updates, enabling users to manipulate cooldown timing to avoid fees or gain unfair advantage.",
+      "severity": "critical",
+      "original_id": "bd8556fcfe4848da"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_065",
+      "title": "Critical Type System Violation: Silent Precision Loss in Packed uint104 and uint152 Conversions",
+      "description": "The StakingLPEth contract uses packed struct types with uint104 and uint152 fields, but performs arithmetic and comparisons on these values without proper precision handling. When values exceed the maximum representable value for the target type, silent truncation occurs, leading to incorrect state values and potential loss of user funds.",
+      "severity": "critical",
+      "original_id": "50b27d33ab2e2dd7"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_066",
+      "title": "Cooldown State Not Reset on Unstake Failure",
+      "description": "The unstake function fails to reset the cooldown state when the unstake operation is interrupted or fails, allowing users to claim assets multiple times.",
+      "severity": "high",
+      "original_id": "c58c7c5f8dad02c8"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_067",
+      "title": "Missing Caller Verification in Automatic Flash Loan Callbacks",
+      "description": "The PositionAction contract has automatic flash loan callbacks (onFlashLoan and onCreditFlashLoan) that do not verify the caller identity before executing operations. These callbacks can be triggered by system operations (withdrawals, external system returns) and can process funds through unintended paths.",
+      "severity": "high",
+      "original_id": "871bedf73f3829d5"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_068",
+      "title": "Automatic Processing of Withdrawal Funds Through Unintended Paths",
+      "description": "The PositionAction contract has automatic processing of withdrawal funds through unintended paths. When withdrawal funds are returned from external systems, they can be automatically processed through unintended paths, causing users to be unable to withdraw funds.",
+      "severity": "high",
+      "original_id": "3c70f7700ae011fd"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_069",
+      "title": "Missing Caller Verification in Signature-Based Operations",
+      "description": "The PositionAction contract has signature-based operations that do not verify the submitter identity before executing operations. These operations can be triggered by anyone with a valid signature, allowing unauthorized operations.",
+      "severity": "high",
+      "original_id": "ee09a50bae991813"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_070",
+      "title": "Missing Access Control on `_onDeposit` and `_onWithdraw` Functions",
+      "description": "The internal virtual functions `_onDeposit` and `_onWithdraw` lack access control despite updating critical economic state variables used in CDP operations. These functions are called by public entry points like `deposit`, `withdraw`, `borrow`, and `repay`, and directly modify CDPVault state via `modifyCollateralAndDebt`. Since these functions are internal and virtual, they can be overridden by child contracts, but the base implementation has no access control to prevent unauthorized state modifications. This allows attackers who can call these entry points to manipulate the timing and values of collateral and debt updates, potentially avoiding fees or gaining unfair advantages.",
+      "severity": "high",
+      "original_id": "155ad29c8ec73135"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_071",
+      "title": "Inconsistent Unit Handling in `_onDeposit` and `_onWithdraw`",
+      "description": "The functions `_onDeposit` and `_onWithdraw` have inconsistent unit handling between their internal representation and the representation expected by the CDPVault interface. The `amount` parameter is documented as being in CDPVault.tokenScale() for deposits and WAD for withdrawals, but the actual implementation does not perform unit conversion before calling the vault's modifyCollateralAndDebt. This mismatch can cause incorrect collateral and debt calculations when the vault's token scale differs from WAD, leading to incorrect position accounting.",
+      "severity": "high",
+      "original_id": "d416240259ee2b40"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_072",
+      "title": "Data Access Integrity Issue in `_deposit` and `_withdraw`",
+      "description": "The `_deposit` and `_withdraw` functions have a data access integrity issue where the `amount` variable is reassigned after calling `_onDeposit` or `_onWithdraw`, but the return value from these functions is not used to update the amount passed to the vault. This creates a desynchronization between the amount returned by the vault operation and the amount used in the vault's modifyCollateralAndDebt call. The vault may return a different amount than what was passed in, but the function continues with the original amount value, leading to incorrect accounting.",
+      "severity": "high",
+      "original_id": "7a0ec815963ac4de"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_073",
+      "title": "Authorization Context Binding Vulnerability in increaseLever and decreaseLever",
+      "description": "The increaseLever and decreaseLever functions in PositionAction.sol do not bind the caller's address to the authorization context. This allows any actor who obtains a valid authorization (signature or permit) to execute the operation with a different context than intended by the original authorizer.",
+      "severity": "high",
+      "original_id": "60692f4298b97178"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_074",
+      "title": "Division by Zero in Rate Calculation",
+      "description": "In the getRates() function, when total votes is zero, the code correctly returns minRate. However, when votes are present but votesLpSide and votesCaSide are both zero (e.g., due to rounding errors or state corruption), the division operation (0 / 0) occurs, resulting in a division by zero error.",
+      "severity": "high",
+      "original_id": "d4a48b05a07487df"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_075",
+      "title": "Missing User Protection in Vote/Unvote Functions Allows Front-Running and Manipulation",
+      "description": "The vote() and unvote() functions lack user-controlled minimum output parameters, allowing malicious actors to manipulate vote values through front-running or sandwich attacks. Without user-defined minimum acceptable outputs, users cannot protect against unfavorable execution outcomes.",
+      "severity": "high",
+      "original_id": "b17db6a33072ea44"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_076",
+      "title": "Missing User Protection in decreaseLever Function",
+      "description": "The decreaseLever function allows users to decrease their position leverage by withdrawing collateral and taking out a flash loan, but provides no mechanism for users to specify minimum acceptable outputs or execution bounds. This exposes users to unfavorable execution when market conditions change between transaction submission and execution.",
+      "severity": "high",
+      "original_id": "82dbf10b535db7bd"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_077",
+      "title": "Validation Timing Issue in _deposit Function",
+      "description": "The _deposit function performs token transfers and state changes before validating the auxSwap parameters. This allows invalid operations to complete if validation fails after state changes have occurred.",
+      "severity": "high",
+      "original_id": "875bcbd44ebf58be"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_078",
+      "title": "State Synchronization Issue in _deposit Function",
+      "description": "The _deposit function modifies state (token transfers) before validating the auxSwap parameters. This creates a window where state changes occur before validation, potentially leading to inconsistent state if validation fails after state changes have occurred.",
+      "severity": "high",
+      "original_id": "9c565ac6f8b1dbce"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_079",
+      "title": "Type System Integrity: Precision Loss in Rate Calculation",
+      "description": "The `getRates` function calculates weighted average rates using integer arithmetic that can silently truncate precision, producing mathematically invalid results for certain vote distributions.",
+      "severity": "high",
+      "original_id": "GA-001"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_080",
+      "title": "Missing Access Control on Critical State Updates",
+      "description": "The `flashLoan()` and `creditFlashLoan()` functions lack access control on critical state updates. Specifically, the `pool.mintProfit(fee)` call in both functions allows any caller to mint protocol profit, which can be exploited to drain the protocol's profit reserves.",
+      "severity": "high",
+      "original_id": "59d824e867483bd5"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_081",
+      "title": "Incorrect Fee Calculation in flashFee() Function",
+      "description": "The `flashFee()` function calculates the fee as `wmul(amount, protocolFee)`, but this is incorrect because `wmul` performs weighted multiplication with WAD precision (10^18), and `protocolFee` is expected to be a percentage value. If `protocolFee` is not properly scaled (e.g., if it's passed as a percentage like 0.001 for 0.1%, it should be scaled to 10^16 for 0.1% in WAD units), the fee calculation will be wrong, leading to incorrect fee collection.",
+      "severity": "high",
+      "original_id": "e954e40a825cc4b6"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_082",
+      "title": "State Synchronization Issue in flashLoan() Function",
+      "description": "In the `flashLoan()` function, the state variables `amount` and `fee` are used in calculations, but the order of operations is incorrect. Specifically, `pool.lendCreditAccount(amount, address(receiver))` is called before the fee calculation, but the fee is calculated using `wmul(amount, protocolFee)`. If the `amount` value changes between these operations due to external factors (e.g., reentrancy or state manipulation), the fee calculation will be incorrect, leading to incorrect fee collection.",
+      "severity": "high",
+      "original_id": "026d51277aeda3df"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_083",
+      "title": "Missing Input Validation in flashLoan() Function",
+      "description": "The `flashLoan()` function lacks input validation for the `amount` parameter. If the `amount` parameter is set to an extremely large value (e.g., 2^256-1), the calculation `uint256 total = amount + fee` will overflow, causing the transaction to revert. However, if the overflow check is not properly implemented, this could be exploited to cause a denial of service.",
+      "severity": "high",
+      "original_id": "18fedcb33d4b7082"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_084",
+      "title": "Incorrect Return Value in maxFlashLoan() Function",
+      "description": "The `maxFlashLoan()` function returns `max = wdiv(pool.creditManagerBorrowable(address(this)), WAD + protocolFee)`, but this is incorrect because `wdiv` performs weighted division with WAD precision (10^18), and the division `WAD + protocolFee` is not properly scaled. If `protocolFee` is not properly scaled (e.g., if it's passed as a percentage like 0.001 for 0.1%, it should be scaled to 10^16 for 0.1% in WAD units), the return value will be incorrect, leading to incorrect maximum loan calculations.",
+      "severity": "high",
+      "original_id": "a97c8062a8a5eacb"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_085",
+      "title": "Missing Access Control on `vote` and `unvote` Functions Allows Vote Manipulation",
+      "description": "The `vote` and `unvote` functions lack access control on the `user` parameter, allowing any caller to submit votes on behalf of arbitrary users. This enables manipulation of the voting mechanism used to determine quota rates, which directly affect economic calculations for all users.",
+      "severity": "high",
+      "original_id": "9efaf4267b31bbb8"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_086",
+      "title": "Epoch Update Timing Vulnerability Enables Rate Manipulation Before Admin Operations",
+      "description": "The `_checkAndUpdateEpoch` function updates the epoch and rates only when `epochNow > epochLastUpdate`, but lacks protection against front-running during critical periods. An attacker can manipulate vote timing to influence rates just before admin operations, affecting fee and reward calculations.",
+      "severity": "high",
+      "original_id": "b58f5e61732bc34d"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_087",
+      "title": "Insufficient Vote Validation in `_vote` and `_unvote` Functions",
+      "description": "The `_vote` and `_unvote` functions do not validate that the `user` parameter matches `msg.sender`, allowing vote manipulation. Combined with the missing access control, this enables arbitrary vote submission and removal, affecting the rate calculation mechanism.",
+      "severity": "high",
+      "original_id": "ba007119a3f8aa39"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_088",
+      "title": "Missing Access Control on `flashLoan` and `creditFlashLoan` Enables Fee Manipulation",
+      "description": "The `flashLoan` and `creditFlashLoan` functions lack access control on critical state updates, allowing attackers to manipulate the timing of fee calculations and profit minting. Specifically, the functions call `pool.lendCreditAccount` before the flash loan callback, but the repayment and profit minting occur after the callback. This allows an attacker to front-run the repayment, borrow a large amount, and repay only the principal while the fee calculation is based on the original amount, effectively avoiding the fee. The vulnerability is in the access control boundary where economic state updates (credit account lending, profit minting) occur without proper authorization checks.",
+      "severity": "critical",
+      "original_id": "a6ffe0bd21b4c5ba"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_089",
+      "title": "Flash Loan Repayment Logic Allows Double-Spending of Returned Funds",
+      "description": "The flashLoan and creditFlashLoan functions implement a critical vulnerability where the repayment logic does not properly account for the fact that the flash loan receiver may return more funds than they borrowed. Specifically, the contract calculates the required repayment amount (principal + fee) but then transfers the full amount back to the pool, and then repays the credit account for (total - fee). This creates a scenario where if the receiver returns more than required, the excess is effectively lost to the protocol, but the receiver has already received the full loan amount. The vulnerability is in the sequence: 1) lendCreditAccount(amount, receiver), 2) receiver executes, 3) transferFrom(receiver, pool, total), 4) repayCreditAccount(total - fee, 0, 0), 5) mintProfit(fee). If the receiver returns more than total, the protocol loses the excess, but the receiver has already received the loan amount. The vulnerability is in the repayment logic in flashLoan and creditFlashLoan functions.",
+      "severity": "high",
+      "original_id": "6923ac3cf938a145"
+    },
+    {
+      "id": "code4rena_loopfi_2025_02_tool_090",
+      "title": "Missing Caller Verification in Automatic Functions Allows Unauthorized Vote Manipulation",
+      "description": "The GaugeV3 contract has automatic functions triggered by external calls that do not verify the caller identity before executing operations. Specifically, the `_vote` and `_unvote` functions are called by the `vote` and `unvote` functions with the `onlyVoter` modifier, but the `vote` and `unvote` functions themselves do not verify the `user` parameter matches the caller. This allows the voter contract to submit votes on behalf of arbitrary users without their consent.",
+      "severity": "high",
+      "original_id": "c2e8aaf4ec67a14c"
+    }
+  ],
+  "input_tokens": 33642,
+  "output_tokens": 1494,
+  "cached_tokens": 1310
+}

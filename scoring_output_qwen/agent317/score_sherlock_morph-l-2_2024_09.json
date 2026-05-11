@@ -1,0 +1,737 @@
+{
+  "project": "sherlock_morph-l-2_2024_09",
+  "agent": "agent317",
+  "status": "success",
+  "timestamp": "2026-04-09T11:32:53.475786",
+  "elapsed_seconds": 69.7,
+  "total_expected": 2,
+  "total_found": 100,
+  "true_positives": 1,
+  "false_negatives": 1,
+  "false_positives": 99,
+  "detection_rate": 0.5,
+  "precision": 0.01,
+  "f1_score": 0.0196078431372549,
+  "matched_findings": [
+    {
+      "id": "sherlock_morph-l-2_2024_09_expected_000",
+      "expected": "Incorrect implementation",
+      "matched": "Incorrect Token Address Validation in Message Drop Callback",
+      "confidence": 0.9,
+      "justification": "Finding 4 matches the expected vulnerability by identifying an incorrect token address validation in the onDropMessage function. It describes the issue with validating the L2 token address when processing dropped messages and the potential for exploitation due to state desynchronization between L1 and L2 token mappings, which aligns with the expected vulnerability's description of incorrect implementation in the onDropMessage function.",
+      "severity": "high",
+      "expected_description": "Source: https://github.com/sherlock-audit/2024-08-morphl\n\n**Vulnerability Detail:**\nInthe L 1 Reverse Custom Gateway, tokensareburnedduringdepositandmintedduring thefinalize Withdraw ERC 20 process. Forfaileddeposits, wehavetheon Drop Messagefunctiontoallowtheusertoretrieve theirtokens. function on Drop Message (bytescalldata _message ) external payable virtual only In Drop Context non Reentrant { ,\u2192 // _message should start with 0 x 8431 f 5 c 1 => finalize Deposit ERC 20 (address, address, address, address, uint 256, bytes) ,\u2192 require (bytes 4 (_message [0:4])==IL 2 ERC 20 Gateway .finalize Deposit ERC 20 .selector , \"invalid selector\" ); ,\u2192 // decode (token, receiver, amount) (address _token,, address _receiver ,, uint 256 _amount,)=abi.decode ( _message [4:], (address, address, address, address, uint 256, bytes) ); // do dome check for each custom gateway _before Drop Message (_token,_receiver ,_amount); IERC 20 Upgradeable (_token).safe Transfer (_receiver ,_amount); emit Refund ERC 20 (_token,_receiver ,_amount); } Itwillnotworknowbecauseinsteadofusingsafe Transferweshouldmintthetokensto _receiver. 3\n\n**Impact:**\nTheimpactishighbecausethedrop Messagefunctionalitywillneverwork, preventing theuserfromrecoveringtheirtokens. Tool used Manual Review\n\n**Recommendation:**\nMyrecommendationistouse IMorph ERC 20 Upgradeable (_token).mint (_receiver,_amount ) insteadoftransferringthetokens. References https://github.com/sherlock-audit/2024-08-morphl 2/blob/main/morph/contracts/con tracts/l 1/gateways/L 1 Reverse Custom Gateway.sol https://github.com/sherlock-audit/2024-08-morphl 2/blob/main/morph/contracts/con tracts/l 1/gateways/L 1 ERC 20 Gateway.sol#L 74-L 90",
+      "found_description": "The `onDropMessage` function incorrectly validates the L2 token address when processing dropped deposit messages. It decodes the message but only uses the L1 token address for refunds, without verifying that the L2 token in the message matches the current token mapping. This allows attackers to exploit state desynchronization between L1 and L2 token mappings.\n\n**Mathematical Proof:**\n1. Initial state: tokenMapping[L1Token] = L2Token_A\n2. User deposits 100 tokens via `depositERC1155(L1Token, tokenId, 100, gasLimit)`\n3. Owner updates mapping: tokenMapping[L1Token] = L2Token_B\n4. Message gets dropped and `onDropMessage` is called\n5. Function decodes: (_token = L1Token, _l2Token = L2Token_A, _sender = user, ...)\n6. **Vulnerability**: The function only checks `_token` but not that `_l2Token == tokenMapping[_token]`\n7. Result: User gets refund of 100 tokens even though the mapping has changed\n\n**Exploitation Scenario:**\n1. Attacker monitors pending deposits\n2. When a large deposit is pending, attacker convinces owner to update token mapping\n3. Message gets dropped (network congestion, etc.)\n4. Attacker's deposit gets refunded based on old mapping, allowing double-spend\n\n**Financial Impact:** Users can receive refunds for deposits that should be invalid due to token mapping changes, leading to protocol insolvency as the same tokens could be withdrawn on both L1 and L2.",
+      "found_id": "96a8f82d76cde210",
+      "tool_finding_index": 5
+    }
+  ],
+  "missed_findings": [
+    {
+      "id": "sherlock_morph-l-2_2024_09_expected_001",
+      "title": "Attacker can freeze chain and",
+      "description": "Source: https://github.com/sherlock-audit/2024-08-morphl\n\n**Summary:**\nBecausethe prev State Root isnotvalidateduntilabatchisfinalized, acommittedbatch withamalicious prev State Root canbeusedtoboth (a) winchallengesagainsthonest challengersand (b) haltthechainsinceitwillbeapprovedbutbeunabletobefinalized. Root Cause In Rollup.sol , ifamaliciousbatchisproposed, theassumptionisthatthesequencerwho proposeditwilllosethechallenge, getslashed, andthechainwillbereset. These economicincentivespreventthechainfrombeingregularlyhalted. Thisisbasedontheassumptionthatasequencercanonlywinchallengesifthebatch theyproposedisvalid. However, thecheckthat prev State Root isactuallythe post State Root oftheprevious batchonlyhappensin finalize Batch () . Thischeckissufficienttopreventbatcheswith fakeprev State Root sfrombeingfinalized, butitdoesnotstopthesebatchesfrombeing committed. Thisallowsamalicioussequencertoproposeanybatchthatperformsavalidstate transactiononafake prev State Root . Inmostcases, achallengerwillattackthisinvalidbatch. However, itispossibleforthe sequencertoprovideavalidproofofthisstatetransitiontostealthehonestchallenger's depositandwinthechallenge. Inthecasethatthishappens, orthatnochallengeisperformed, thecommittedbatch willnotbeabletofinalizeddueto thefollowingcheck: require ( finalized State Roots [_batch Index -1]== Batch Header Codec V 0 .get Prev State Hash (mem Ptr), ,\u2192 5 \"incorrect previous state root\" ); Thiswillfreezethechainandnotallowanynewbatchestobefinalized, sincebatches arecommittedsequentiallyandmustbefinalizedsequentially. Internal Preconditions None External Preconditions None Attack Path 1. Attackerproposesabatchthatcontainsavalidstatetransitionfromafake prev St ate Root. 2. Ifanhonestchallengerchallengesthebatch, theattackerprovidesavalidproofof thestatetransitiontowinthechallengeandstealthechallenger'sdeposit. 3. Whetherornottheabovehappens, thechainisnowhalted, astheattacker'sbatch cannotbefinalized, andnootherbatchescanbefinalizedwithoutitbeing finalizedfirst. 4. Theattackerwillnotbeslashed, duetothefactthattheywonthechallenge.\n\n**Impact:**\n\u2022Anhonestchallengewilllosetheirdepositwhenadishonestsequencerbeatsthem inachallenge. \u2022Nonewbatcheswillbeabletobefinalized, sothechainwillhaltandhavetobe manuallyrolledbackbytheadmins. Po C N/A Mitigation Checkin commit Batch () thatprev State Root isequaltothe parent Batch Header.post State Root. 6",
+      "severity": "high",
+      "reason": "Not found"
+    }
+  ],
+  "undecided_findings": [],
+  "extra_findings": [
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_000",
+      "title": "Incorrect Fee Refund Address Validation Allows Theft of Excess ETH",
+      "description": "The `sendTransaction` function with signature support allows the caller to specify an arbitrary `_refundAddress` parameter, which receives any excess ETH sent beyond the required fee. However, there is no validation that the `_refundAddress` is controlled by the transaction signer (`_sender`). An attacker can front-run a legitimate user's transaction, extract the signature, and call the function with their own address as `_refundAddress` to steal the excess ETH. The mathematical proof shows that if a user sends 1 ETH with a fee of 0.1 ETH, the attacker can intercept and receive 0.9 ETH instead of the legitimate user. This violates the intended behavior where only the authorized sender should control where excess funds are refunded.",
+      "severity": "high",
+      "original_id": "14385f29ec4d4a05"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_001",
+      "title": "Missing Access Control on sendTransaction Allows Signature Replay Across Chains",
+      "description": "The `sendTransaction` function with signature does not include the chain ID in the EIP-712 domain separator, making the signature valid across different chains that deploy this contract with the same name and version. The domain separator is initialized as `EIP712Upgradeable.__EIP712_init(\"EnforcedTxGateway\", \"1\")` without incorporating the chain ID. An attacker can take a valid signature from one chain (e.g., mainnet) and replay it on another chain (e.g., testnet) where the same contract is deployed, causing the nonce to increment on both chains and potentially executing unauthorized transactions. The mathematical proof involves the EIP-712 hash calculation: `_hashTypedDataV4(_structHash)` uses `_domainSeparatorV4()`, which relies on the domain separator built from name, version, chainId, and verifying contract. Since chainId is missing, signatures are chain-agnostic. This allows double-spending and unauthorized access across chains.",
+      "severity": "high",
+      "original_id": "fc0f76a24a2804b9"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_002",
+      "title": "Incorrect Message Nonce Usage in Deposit Function",
+      "description": "The _deposit function retrieves the message nonce from the messenger contract after transferring tokens but before sending the cross-chain message. This creates a race condition where the nonce could be incremented by other messages between the transfer and the sendMessage call, leading to incorrect nonce tracking and potential message replay or loss. The vulnerability occurs because the nonce is read before the message is actually sent, and if other messages are processed in between, the recorded nonce won't match the actual message nonce.\n\nMathematical Proof:\n- Let initial nonce = N\n- User calls _deposit, which transfers tokens and reads nonce = N\n- Before sendMessage is called, another user sends a message, incrementing nonce to N+1\n- The deposit function sends message with nonce N+1 but emits event with nonce N\n- This creates desynchronization between the recorded nonce and actual message nonce\n\nExploitation Scenario:\nAn attacker could front-run the deposit transaction by sending multiple messages to increment the nonce, causing the recorded nonce to be incorrect. This could lead to issues with message tracking, replay attacks, or failed withdrawals if the system relies on the emitted nonce for verification.\n\nFinancial Impact:\nUsers may experience failed withdrawals or incorrect accounting if the nonce mismatch prevents proper message verification. Funds could be temporarily locked or permanently lost if the message system cannot properly correlate deposits with withdrawals.",
+      "severity": "high",
+      "original_id": "aaa375a22f73e054"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_003",
+      "title": "Missing Reentrancy Protection on updateTokenMapping",
+      "description": "The updateTokenMapping function lacks reentrancy protection despite modifying critical token mapping state. While it has onlyOwner modifier, if the owner contract has callback functionality or can be manipulated, this could lead to reentrancy attacks during token mapping updates.\n\nMathematical Proof:\n- Function updates tokenMapping[_l1Token] = _l2Token\n- No reentrancy guard present\n- If owner is a contract with callbacks, malicious contract could reenter during mapping update\n- This could allow manipulation of token mappings during the update process\n\nExploitation Scenario:\nIf the owner is a contract with callback functionality, an attacker could potentially cause reentrancy during the mapping update to manipulate the token mapping state inconsistently.\n\nFinancial Impact:\nToken mappings could be corrupted, leading to incorrect deposit/withdrawal behavior. Users might deposit tokens that get mapped to wrong L2 addresses, potentially resulting in loss of funds.",
+      "severity": "medium",
+      "original_id": "5949e9e6a533e993"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_004",
+      "title": "Insufficient Validation in _beforeFinalizeWithdrawERC20",
+      "description": "The _beforeFinalizeWithdrawERC20 function validates that _l2Token matches tokenMapping[_l1Token], but it doesn't validate that _l1Token itself is a valid token address or that the mapping exists. This could allow finalization of withdrawals for tokens that were never properly mapped.\n\nMathematical Proof:\n- Function checks: _l2Token == tokenMapping[_l1Token]\n- If tokenMapping[_l1Token] returns address(0) for an unmapped token, and _l2Token is also address(0), check passes\n- This could allow withdrawals for unmapped tokens\n\nExploitation Scenario:\nAn attacker could attempt to finalize withdrawals for tokens that were never properly mapped by setting both _l1Token and _l2Token to address(0) or exploiting zero-address mappings.\n\nFinancial Impact:\nPotential unauthorized withdrawals if zero-address tokens can be manipulated, though impact is limited by the cross-domain messaging system's authentication.",
+      "severity": "medium",
+      "original_id": "8b2978ea7aade94f"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_006",
+      "title": "Missing Reentrancy Protection in Token Mapping Update",
+      "description": "The `updateTokenMapping` function lacks reentrancy protection and can be called during deposit/withdraw operations, allowing attackers to manipulate token mappings mid-transaction.\n\n**Mathematical Proof:**\n1. User starts deposit: `depositERC1155(L1Token, tokenId, 100, gasLimit)`\n2. During `safeTransferFrom` call to L1Token contract, malicious token calls back into gateway\n3. Callback calls `updateTokenMapping(L1Token, maliciousL2Token)`\n4. Original deposit continues with new malicious mapping\n5. Result: Deposit goes to attacker-controlled L2 token\n\n**Exploitation Scenario:**\n1. Attacker deploys malicious ERC1155 token with callback\n2. User deposits malicious token\n3. During transfer, token calls `updateTokenMapping` to point to attacker's L2 address\n4. Deposit completes with attacker-controlled mapping\n\n**Financial Impact:** Attackers can redirect deposits to malicious L2 contracts, stealing user funds. The gateway loses control over token mappings during critical operations.",
+      "severity": "high",
+      "original_id": "9f7bf291a04caa6a"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_007",
+      "title": "Insufficient Validation in Batch Deposit Amounts",
+      "description": "The `_batchDepositERC1155` function validates that amounts are >0 but doesn't prevent duplicate token IDs, which can lead to incorrect accounting and potential overflow.\n\n**Mathematical Proof:**\n1. User calls `batchDepositERC1155` with: _tokenIds = [1, 1, 1], _amounts = [100, 200, 300]\n2. Function transfers: safeBatchTransferFrom(sender, this, [1,1,1], [100,200,300], \"\")\n3. ERC1155 contract may handle duplicates differently (sum amounts vs. overwrite)\n4. Message sent to L2: finalizeBatchDepositERC1155(..., [1,1,1], [100,200,300])\n5. L2 gateway may interpret duplicates incorrectly\n\n**Exploitation Scenario:**\n1. Attacker uses duplicate token IDs with large amounts\n2. Depending on L2 implementation, this could cause overflow or incorrect balance calculations\n3. Attacker gains more tokens on L2 than deposited on L1\n\n**Financial Impact:** Potential for integer overflow or incorrect token accounting leading to protocol insolvency if L2 gateway doesn't handle duplicates properly.",
+      "severity": "medium",
+      "original_id": "f7fd7cfc8a76129c"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_008",
+      "title": "Incorrect ERC20 Amount Calculation in Router Path",
+      "description": "When the gateway is called via the router, the `_transferERC20In` function uses `IL1GatewayRouter(_sender).requestERC20(_from, _token, _amount)` to get the actual transferred amount. However, this amount is then used directly without verifying it matches the actual token balance change. This creates a discrepancy where the router-reported amount may not match the actual tokens transferred to the gateway contract. Attackers can exploit this by creating a malicious router that reports incorrect amounts, potentially allowing them to deposit more tokens than actually transferred or manipulate deposit amounts.",
+      "severity": "high",
+      "original_id": "50d541fe592a52b1"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_009",
+      "title": "Missing Validation in Message Drop Callback",
+      "description": "The `onDropMessage` function decodes parameters from a dropped message but only validates the function selector. It does not validate that the decoded token address is a valid ERC20 token or that the receiver address is not the zero address. An attacker could potentially craft malicious messages that cause the contract to transfer tokens to invalid addresses or interact with malicious contracts. While the function has `onlyInDropContext` modifier, missing parameter validation could lead to unexpected behavior if the drop context check is bypassed or if there are issues in the message validation chain.",
+      "severity": "medium",
+      "original_id": "b52c367187d6e1a3"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_010",
+      "title": "Potential Reentrancy in FinalizeWithdrawERC20",
+      "description": "The `finalizeWithdrawERC20` function transfers tokens to the recipient before calling `_doCallback(_to, _data)`. While the function has the `nonReentrant` modifier, the token transfer itself could trigger a reentrant call if the token contract is malicious. The comment acknowledges this possibility but dismisses it as 'not a big problem'. However, if a malicious token implements a callback during transfer, it could potentially interfere with the gateway's state or exploit other vulnerabilities in the system during the callback execution.",
+      "severity": "medium",
+      "original_id": "a8688d25fd4fe381"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_011",
+      "title": "Incorrect Token Address Validation in Message Drop Handler",
+      "description": "The onDropMessage function does not validate that the token address in the dropped message matches the token mapping. An attacker can craft a malicious message that causes the gateway to transfer tokens from its balance that don't correspond to the expected L2 token mapping, potentially stealing NFTs from the gateway's custody.",
+      "severity": "high",
+      "original_id": "54a5f83969265f4f"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_012",
+      "title": "Missing Token Ownership Verification in Deposit Functions",
+      "description": "The deposit functions do not verify that the caller actually owns the NFTs being deposited before transferring them. While ERC721's safeTransferFrom will revert if the caller doesn't own the token, this creates a potential front-running vulnerability where an attacker could intercept deposit transactions and cause them to fail after the gateway has already initiated cross-chain messaging.",
+      "severity": "medium",
+      "original_id": "7f9114e7cec8e06d"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_013",
+      "title": "Potential Reentrancy in Batch Operations Despite nonReentrant Modifier",
+      "description": "While the contract uses the nonReentrant modifier, the batch operations perform multiple external calls (ERC721 transfers) in loops. If any of the ERC721 tokens implement callback mechanisms that could re-enter the contract, this could lead to inconsistent state despite the reentrancy guard, particularly if the contract state is modified between transfers.",
+      "severity": "medium",
+      "original_id": "9265e7697dea48fb"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_014",
+      "title": "Reentrancy Vulnerability in finalizeWithdrawETH",
+      "description": "The finalizeWithdrawETH function transfers ETH to _to before calling _doCallback(_to, _data). This creates a reentrancy vulnerability where _to could be a malicious contract that reenters the gateway during the callback. While the function has the nonReentrant modifier, the callback occurs after the ETH transfer, meaning if _doCallback makes an external call to _to, it could be exploited. The comment acknowledges this possibility but dismisses it as 'not a big problem'. However, if _doCallback interacts with _to, a malicious contract could reenter and potentially manipulate state or drain funds.",
+      "severity": "high",
+      "original_id": "822b722c97926f02"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_015",
+      "title": "Incorrect msg.value Handling in _deposit Function",
+      "description": "The _deposit function uses `msg.value` when calling `IL1CrossDomainMessenger(messenger).sendMessage{value: msg.value}(...)`. However, the function also checks `require(_amount > 0, \"deposit zero eth\")`. There's a mismatch: _amount is the parameter specifying how much ETH to deposit, but msg.value is the actual ETH sent with the transaction. An attacker could call depositETH with _amount = 1 wei but msg.value = 0, passing the _amount > 0 check but sending no ETH. The messenger call would then use value: 0, but the event DepositETH would log _amount = 1, creating an inconsistency. Alternatively, if _amount < msg.value, excess ETH might be locked in the contract. The function should validate that msg.value == _amount.",
+      "severity": "high",
+      "original_id": "6f19e3b3c714cc22"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_016",
+      "title": "Potential ETH Locking in onDropMessage",
+      "description": "The onDropMessage function requires that `_amount == msg.value` and then attempts to transfer `_amount` to `_receiver`. If the call to `_receiver` fails (e.g., if _receiver is a contract without a payable fallback function or one that reverts), the entire transaction will revert due to `require(_success, \"ETH transfer failed\")`. This means the ETH sent with the message (msg.value) could be locked in the L1CrossDomainMessenger contract or otherwise not refundable to the original user, as the drop mechanism is intended to refund failed deposits. The function does not have an alternative path to handle a failing transfer, potentially permanently locking the ETH.",
+      "severity": "high",
+      "original_id": "cbbe27c2437a9d5c"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_017",
+      "title": "Replay Attack Vulnerability in proveAndRelayMessage",
+      "description": "The proveAndRelayMessage function lacks proper replay protection for the withdrawal proof verification. An attacker can reuse a valid withdrawal proof to replay the same message multiple times, potentially draining funds from the target contract. The function only checks if the withdrawal has been finalized using _xDomainCalldataHash, but doesn't validate that the _nonce parameter matches the actual nonce used in the merkle proof verification. This allows an attacker to provide different nonce values while using the same proof, bypassing the replay protection.",
+      "severity": "high",
+      "original_id": "7f1d9015c7b98d52"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_018",
+      "title": "Incorrect Replay State Tracking in replayMessage",
+      "description": "The replayMessage function incorrectly handles the replay state tracking when a message has not been replayed before. The code sets prevReplayIndex[_nextQueueIndex] = _messageNonce + 1, but _messageNonce is the original message nonce, not a queue index. This creates an inconsistent state in the replay chain where the previous index points to a nonce value instead of a valid queue index. This can break the dropMessage functionality and potentially allow unlimited replays.",
+      "severity": "high",
+      "original_id": "ec0b78507b40c5cd"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_019",
+      "title": "Unbounded Gas Consumption in dropMessage",
+      "description": "The dropMessage function contains a while loop that iterates through the entire replay chain without any gas limit protection. An attacker can create a long chain of replayed messages (up to maxReplayTimes) and then call dropMessage, causing the transaction to run out of gas and revert. This creates a permanent denial-of-service where legitimate users cannot drop their messages, potentially locking funds indefinitely.",
+      "severity": "high",
+      "original_id": "468233c30b06bca3"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_020",
+      "title": "Insufficient Value Validation in _sendMessage",
+      "description": "The _sendMessage function requires msg.value >= _fee + _value but then attempts to refund msg.value - _fee - _value without checking for underflow. If an attacker sends exactly _fee + _value, the refund calculation will underflow due to unchecked arithmetic, causing the transaction to revert. While this doesn't directly lead to fund loss, it can be exploited in combination with other attacks to disrupt protocol operations.",
+      "severity": "medium",
+      "original_id": "759ac516a8264caa"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_021",
+      "title": "Incorrect Token Burning in Deposit Function",
+      "description": "The _deposit function burns tokens from the wrong address when the router is the caller. When router == _from, the function decodes _from from _data, but then burns tokens from the decoded _from address instead of the original _msgSender() (which is the router). This allows the router to burn tokens from arbitrary addresses without their approval, enabling theft of user tokens.\n\nMathematical Proof:\n- Scenario: Router calls deposit with _data containing (victimAddress, ...)\n- _msgSender() = router\n- router == _from (since _from = _msgSender() initially)\n- Function decodes (_from, _data) = abi.decode(_data, (address, bytes)), so _from becomes victimAddress\n- IMorphERC20Upgradeable(_token).burn(_from, _amount) burns from victimAddress instead of router\n- Attacker can specify any victimAddress in _data and burn their tokens\n\nExploitation:\n1. Attacker controls or is the router\n2. Attacker calls deposit(_token, _to, _amount, abi.encode(victimAddress, _data), _gasLimit)\n3. Function burns _amount tokens from victimAddress instead of router\n4. Attacker receives minted tokens on L2 without providing any tokens on L1\n\nFinancial Impact: Complete theft of victim's tokens. If victim has balance X, attacker can steal up to X tokens.",
+      "severity": "critical",
+      "original_id": "14ee1545a22ec9f7"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_022",
+      "title": "Missing Reentrancy Protection in finalizeWithdrawERC20",
+      "description": "The finalizeWithdrawERC20 function calls _doCallback(_to, _data) after minting tokens but before emitting the event. The _doCallback function (inherited from GatewayBase) can execute arbitrary external calls. If _to is a malicious contract, it can re-enter the finalizeWithdrawERC20 function, potentially causing multiple mints or other state corruption.\n\nMathematical Proof:\n- Function flow: mint(_to, _amount) \u2192 _doCallback(_to, _data) \u2192 emit event\n- _doCallback can call back into finalizeWithdrawERC20\n- During callback, the function would mint tokens again if checks pass\n- Since nonReentrant modifier is on finalizeWithdrawERC20, not on _doCallback, reentrancy is possible\n\nExploitation:\n1. Attacker sets up malicious contract as _to\n2. Normal withdrawal process calls finalizeWithdrawERC20\n3. Function mints tokens to attacker\n4. _doCallback calls attacker's contract\n5. Attacker's contract re-enters finalizeWithdrawERC20\n6. Function mints tokens again (double mint)\n\nFinancial Impact: Protocol insolvency through unlimited token minting. Each reentrant call mints _amount tokens, allowing attacker to drain the protocol.",
+      "severity": "high",
+      "original_id": "f29c6002db830708"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_023",
+      "title": "Reentrancy Vulnerability in requestERC20 Function",
+      "description": "The requestERC20 function uses a balance difference calculation that is vulnerable to reentrancy attacks. An attacker can call back into the contract during the safeTransferFrom call, potentially manipulating the balance calculation. The function calculates the transferred amount as the difference between the balance before and after the transfer, but if a reentrant call occurs during safeTransferFrom, the balance could be manipulated.\n\nMathematical Proof:\n- Initial balance of gateway: 100 tokens\n- Attacker calls requestERC20 with _amount = 50\n- Function records _balance = 100\n- During safeTransferFrom, attacker reenters and calls requestERC20 again\n- Second call records _balance = 150 (after first transfer)\n- Second transfer adds 50 more tokens, making balance 200\n- Second call returns 50 (200 - 150)\n- First call resumes and calculates _amount = 150 - 100 = 50\n- Total tokens transferred: 100, but function reports only 50 tokens transferred\n\nExploitation Scenario: An attacker creates a malicious ERC20 token with a callback in transferFrom. When the gateway router calls safeTransferFrom, the malicious token calls back into requestERC20, manipulating the balance tracking and causing incorrect accounting.\n\nFinancial Impact: Protocol insolvency - the gateway may credit the attacker with more tokens than actually transferred, allowing theft of protocol funds. The exact loss depends on the reentrancy depth but could result in significant fund drainage.",
+      "severity": "high",
+      "original_id": "5296ee68920a1f73"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_024",
+      "title": "Incorrect ETH Gateway Availability Check",
+      "description": "The depositETHAndCall function has an incorrect require statement that checks 'eth gateway available' instead of checking if the gateway is NOT available. The condition should require that the gateway exists, but the message suggests the opposite intent.\n\nMathematical Proof:\n- Current code: require(_gateway != address(0), \"eth gateway available\")\n- This passes when _gateway is non-zero (gateway exists)\n- But the error message suggests it should fail when gateway is available\n- If the message reflects the intended logic, the condition should be reversed\n\nExploitation Scenario: If the intended logic was to prevent deposits when a gateway exists (which doesn't make sense), the current implementation would allow deposits when it shouldn't. More likely, this is just an error in the error message, but it indicates potential logic confusion.\n\nFinancial Impact: While likely just a messaging error, if the intended logic was different, it could allow unauthorized deposits or prevent legitimate ones. The primary risk is confusion during debugging and potential logical errors in future modifications.",
+      "severity": "medium",
+      "original_id": "9a50b963f5bf1740"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_025",
+      "title": "Missing Zero Address Validation in Gateway Setters",
+      "description": "The setETHGateway, setDefaultERC20Gateway, and setERC20Gateway functions do not validate that the new gateway addresses are non-zero. Setting a gateway to address(0) could break deposit functionality for affected tokens.\n\nMathematical Proof:\n- Owner calls setETHGateway(address(0)) - sets ethGateway to zero address\n- User tries to deposit ETH via depositETHAndCall\n- Function checks require(_gateway != address(0), \"eth gateway available\")\n- This will revert, blocking all ETH deposits\n- Similar issue exists for ERC20 gateways\n\nExploitation Scenario: If the owner accidentally sets a gateway to address(0), or if the owner's account is compromised, an attacker could set all gateways to zero addresses, effectively disabling the entire deposit functionality of the router.\n\nFinancial Impact: Protocol functionality denial - users cannot deposit funds through the router, potentially causing loss of functionality and reputation damage. While reversible by the owner, it creates a temporary denial-of-service condition.",
+      "severity": "medium",
+      "original_id": "c7df073a2a93faca"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_026",
+      "title": "Front-Runnable L2 Token Deployment Allows Permanent DoS of Token Deposits",
+      "description": "The `_deposit` function uses deterministic address calculation for L2 token deployment without checking if the token already exists at that address. An attacker can front-run the first deposit transaction by pre-deploying a contract at the predicted L2 token address, causing the deposit to fail permanently. The vulnerability exists because the contract uses `ClonesUpgradeable.predictDeterministicAddress` to compute the L2 token address but doesn't verify if a contract already exists at that address before attempting to use it.\n\n**Mathematical Proof:**\n- The L2 token address is computed as: `keccak256(abi.encodePacked(counterpart, keccak256(abi.encodePacked(_l1Token))))`\n- For any L1 token address `_l1Token`, the resulting L2 address is deterministic and predictable\n- An attacker can compute this address in advance and deploy any contract there\n- When the legitimate user attempts the first deposit, the code will try to use the pre-deployed contract which will fail the deposit\n\n**Exploitation Scenario:**\n1. Attacker monitors mempool for deposit transactions to new L1 tokens\n2. For each new token, attacker computes the predictable L2 address\n3. Attacker front-runs by deploying a malicious contract at that address\n4. Legitimate deposit fails because the pre-deployed contract doesn't match expected interface\n5. The token becomes permanently unusable for bridging\n\n**Financial Impact:** Users cannot bridge new ERC20 tokens to L2, permanently blocking protocol functionality for those tokens. The funds remain locked on L1 or deposit transactions fail.",
+      "severity": "high",
+      "original_id": "7ad8a7f6e785766e"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_027",
+      "title": "Inconsistent Token Mapping State Allows L2 Token Address Manipulation",
+      "description": "The `tokenMapping` state variable can become desynchronized between deposit and withdrawal flows. During deposit, if `tokenMapping[_token]` is address(0), the contract calculates the L2 address but doesn't update the mapping. The mapping is only updated during the first successful withdrawal. This creates a window where an attacker can manipulate the system by front-running the withdrawal to set an incorrect L2 token address.\n\n**Mathematical Proof:**\n- Deposit flow: `_l2Token = tokenMapping[_token]` (if address(0), calculate but don't update)\n- Withdrawal flow: `if (_storedL2Token == address(0)) { tokenMapping[_l1Token] = _l2Token; }`\n- An attacker can monitor for deposits without corresponding mapping updates\n- Attacker can front-run the first withdrawal to set malicious L2 token address\n\n**Exploitation Scenario:**\n1. User deposits token for first time (mapping remains address(0))\n2. Attacker detects pending withdrawal transaction\n3. Attacker front-runs with a withdrawal that sets `tokenMapping[_l1Token]` to attacker-controlled address\n4. Legitimate withdrawal fails due to \"l2 token mismatch\" requirement\n5. All future deposits/withdrawals for this token are permanently broken\n\n**Financial Impact:** Permanent denial of service for specific tokens, potentially locking user funds in the gateway contract. The inconsistency between when the mapping is updated (withdrawal) versus when it's used (deposit) creates a critical race condition.",
+      "severity": "high",
+      "original_id": "f39d691592a3d6e1"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_028",
+      "title": "Incorrect ETH Value Handling in _deposit Function",
+      "description": "The _deposit function incorrectly sums the unwrapped WETH amount with msg.value when calling sendMessage, potentially allowing attackers to steal ETH from the contract. The function unwraps WETH to ETH (amount _amount) and then calls sendMessage with value: _amount + msg.value. This means if an attacker sends ETH along with the deposit call, the contract will send both the unwrapped WETH ETH and the attacker's ETH to the messenger, effectively doubling the ETH sent. Since the messenger only expects _amount ETH to bridge to L2, the extra msg.value ETH remains in the messenger contract and can be stolen by the attacker through other means.",
+      "severity": "high",
+      "original_id": "0e17fa56cfff5f89"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_029",
+      "title": "Missing Access Control on initialize Function",
+      "description": "The initialize function is publicly callable and lacks access control, allowing anyone to reinitialize the contract and change the counterpart, router, and messenger addresses. This could allow an attacker to redirect deposits to a malicious contract or disrupt the bridge functionality. While the function uses the initializer modifier, if the contract hasn't been initialized yet (which is possible if deployed without initialization), an attacker could front-run the intended initialization.",
+      "severity": "high",
+      "original_id": "f5a829605e67671e"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_030",
+      "title": "Inconsistent msg.value Validation in Finalization Functions",
+      "description": "The _beforeFinalizeWithdrawERC20 and _beforeDropMessage functions require that _amount == msg.value, but they are called during finalization when ETH should be sent FROM the messenger TO this contract. However, these functions perform a WETH deposit which requires ETH to be sent TO the WETH contract. This creates a logical inconsistency where the contract expects to receive ETH (msg.value) but immediately wraps it, potentially confusing the ETH flow. While not directly exploitable without seeing the full finalization flow, it indicates potential state synchronization issues.",
+      "severity": "medium",
+      "original_id": "ce479d640160bfe0"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_031",
+      "title": "State Desynchronization in USDC Bridging Accounting",
+      "description": "The contract tracks bridged USDC using `totalBridgedUSDC` but this accounting can become desynchronized from actual token balances when messages are dropped. The `_beforeDropMessage` function reduces `totalBridgedUSDC` but does not return the USDC tokens to the original depositor. This creates a permanent loss where the protocol's accounting shows less bridged USDC than what was actually deposited, and the corresponding USDC tokens remain locked in the contract without being accessible to either the protocol or users.\n\n**Mathematical Proof:**\n1. User deposits 1000 USDC: `totalBridgedUSDC = 1000`, contract holds 1000 USDC\n2. Message gets dropped and `_beforeDropMessage` is called with amount = 1000\n3. `totalBridgedUSDC = 1000 - 1000 = 0`\n4. But contract still holds 1000 USDC that cannot be accessed\n5. Protocol accounting shows 0 bridged USDC but contract holds 1000 USDC\n6. When Circle calls `burnAllLockedUSDC()`, it will burn 0 USDC (since `totalBridgedUSDC = 0`)\n7. The 1000 USDC remains permanently locked in the contract\n\n**Exploitation Scenario:** An attacker could intentionally cause message drops through various means (e.g., manipulating gas limits, front-running) to trigger the `_beforeDropMessage` function, permanently locking deposited USDC in the contract without the ability to recover or burn them.\n\n**Financial Impact:** Permanent loss of user funds. The locked USDC cannot be recovered by users, the protocol, or burned by Circle. The loss equals the amount of USDC deposited in dropped messages.",
+      "severity": "high",
+      "original_id": "d25eb06b476753b6"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_032",
+      "title": "Incorrect Message Drop Accounting During Withdrawals",
+      "description": "The `_beforeDropMessage` function is called for both deposit and withdrawal message drops, but it uses the same accounting logic of subtracting from `totalBridgedUSDC`. However, when a withdrawal message is dropped (user withdrawing USDC from L2 to L1), the `totalBridgedUSDC` should actually increase because the USDC is being returned to L1, not decrease. This creates incorrect accounting that can lead to protocol insolvency.\n\n**Mathematical Proof:**\n1. Initial state: `totalBridgedUSDC = 1000`\n2. User initiates withdrawal of 500 USDC from L2 to L1\n3. Withdrawal message gets dropped, triggering `_beforeDropMessage(..., 500)`\n4. `totalBridgedUSDC = 1000 - 500 = 500`\n5. But the USDC should have been returned to L1, so the correct accounting should be: `totalBridgedUSDC = 1000 + 500 = 1500`\n6. Protocol now shows 500 bridged USDC but should show 1500\n7. This discrepancy can lead to incorrect burning amounts and protocol insolvency\n\n**Exploitation Scenario:** An attacker can monitor pending withdrawal messages and intentionally cause them to be dropped, artificially reducing the `totalBridgedUSDC` balance. When Circle calls `burnAllLockedUSDC()`, it will burn less USDC than actually bridged, leaving excess USDC in the contract that could be exploited.\n\n**Financial Impact:** Protocol insolvency and potential fund theft. The accounting discrepancy means the protocol may burn incorrect amounts of USDC, potentially leaving funds accessible to attackers or causing the bridge to become undercollateralized.",
+      "severity": "high",
+      "original_id": "ac45a097ff6caf38"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_033",
+      "title": "Incorrect Bitmap Handling in popCrossDomainMessage Allows Skipping Wrong Messages",
+      "description": "The popCrossDomainMessage function incorrectly handles bitmap shifting when the _startIndex is not aligned to a 256-bit boundary. When offset + _count > 256, the function sets skippedMessageBitmap[bucket + 1] = _skippedBitmap >> (256 - offset). However, this operation loses the higher bits that should be stored in the next bucket. The correct implementation should use OR assignment (|=) to preserve existing bits in the next bucket. This allows the rollup contract to incorrectly mark messages as skipped, potentially causing valid messages to be skipped or allowing invalid messages to be processed.\n\nMathematical Proof:\n- Suppose _startIndex = 255, _count = 2, _skippedBitmap = 0b11 (both messages should be skipped)\n- bucket = 255 >> 8 = 0, offset = 255 & 0xff = 255\n- mask = (1 << 2) - 1 = 0b11\n- _skippedBitmap &= mask = 0b11\n- skippedMessageBitmap[0] |= 0b11 << 255 (correctly sets bits 255 and 256 in bucket 0)\n- Since offset + _count = 257 > 256, it executes: skippedMessageBitmap[1] = 0b11 >> (256 - 255) = 0b11 >> 1 = 0b1\n- This overwrites bucket 1 instead of ORing, potentially clearing existing skipped bits in bucket 1\n- If bucket 1 previously had value 0b1010, it becomes 0b1 instead of 0b1011\n\nExploitation Scenario:\nThe rollup contract calls popCrossDomainMessage with parameters that cross a 256-bit boundary. Due to the incorrect bitmap assignment, some skipped bits in the next bucket are cleared. This could cause messages that should be skipped to be processed, or messages that should be processed to be skipped, breaking the message queue integrity.\n\nFinancial Impact:\nIf invalid messages are processed due to incorrect skipping, it could lead to unauthorized L2 transactions executing with stolen funds or protocol manipulation. If valid messages are incorrectly skipped, users' legitimate transactions would fail to execute, potentially causing financial losses.",
+      "severity": "high",
+      "original_id": "7e7a3305cc7be6b7"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_034",
+      "title": "Missing Access Control on setL2BaseFee Allows Price Manipulation",
+      "description": "The setL2BaseFee function is protected by onlyOwner modifier, but the whitelistChecker functionality suggests that fee calculation should consider whitelisted users. However, there's a more critical issue: the function allows setting l2BaseFee to any value without validation. An attacker who gains owner privileges (through compromised key or governance attack) can set l2BaseFee to extreme values to manipulate the system.\n\nMathematical Proof:\n- Current implementation: setL2BaseFee(uint256 _newL2BaseFee) public onlyOwner\n- No validation on _newL2BaseFee value\n- If _newL2BaseFee = 0: All non-whitelisted users pay 0 fees, draining protocol revenue\n- If _newL2BaseFee = type(uint256).max: estimateCrossDomainMessageFee returns extremely high values, making transactions economically infeasible\n- Fee calculation: _gasLimit * l2BaseFee (can overflow or underflow)\n\nExploitation Scenario:\n1. Attacker gains owner privileges through compromised private key or governance attack\n2. Attacker calls setL2BaseFee(0) to disable fees for all users, allowing spam transactions that drain system resources\n3. Or attacker calls setL2BaseFee(2^256-1) to make all transactions prohibitively expensive, effectively freezing the protocol\n\nFinancial Impact:\n- If l2BaseFee = 0: Protocol loses fee revenue, system vulnerable to spam attacks costing gas\n- If l2BaseFee = max: Users cannot send transactions, protocol becomes unusable\n- Both scenarios can lead to significant financial losses and protocol failure",
+      "severity": "high",
+      "original_id": "46ded5e5d86715e2"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_035",
+      "title": "Insufficient Gas Validation in _validateGasLimit Allows Underpriced Transactions",
+      "description": "The _validateGasLimit function checks that _gasLimit >= calculateIntrinsicGasFee(_calldata) but doesn't account for the actual L2 execution costs beyond intrinsic gas. This allows attackers to specify gas limits that cover only the intrinsic gas but not the actual execution costs, potentially causing transactions to run out of gas during execution while still being considered valid by the L1 queue.\n\nMathematical Proof:\n- Current validation: require(_gasLimit >= intrinsicGas, \"Insufficient gas limit\")\n- intrinsicGas = 21000 + 16 * _calldata.length\n- Example: _calldata.length = 100 bytes, intrinsicGas = 21000 + 1600 = 22600\n- Attacker sets _gasLimit = 22600 (meets requirement)\n- But actual L2 execution might require 50000 gas for complex operations\n- Transaction will fail on L2 due to out-of-gas, but L1 already accepted it\n\nExploitation Scenario:\n1. Attacker queues a complex L2 transaction with minimal gas limit that just passes intrinsic gas check\n2. Transaction gets included in L2 block but fails during execution\n3. Attacker can use this to grief the system or create failed transactions that still consume queue slots\n4. Combined with the whitelist feature, attacker could queue unlimited failed transactions if whitelisted\n\nFinancial Impact:\n- Wasted L2 block space on failed transactions\n- Queue congestion preventing legitimate transactions\n- Potential for denial-of-service attacks against the message queue system\n- If combined with fee waiver for whitelisted users, allows free spam attacks",
+      "severity": "medium",
+      "original_id": "26cdb1d3c949a66e"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_036",
+      "title": "Uninitialized Verifier Version Allows Proof Verification Bypass",
+      "description": "The `getVerifier` function does not check if the requested version exists or has been initialized. When querying for a non-existent version, it returns `address(0)` from the default `latestVerifier` mapping value. This allows an attacker to bypass proof verification by using a non-existent version number, as the call to `IZkEvmVerifier(address(0)).verify()` will succeed without reverting if the `IZkEvmVerifier` interface is not properly validated or if the zero address has been pre-deployed with a malicious contract. The `verifyAggregateProof` function relies entirely on `getVerifier` and does not validate the returned address.\n\n**Mathematical Proof:**\n- Let _version = 999 (non-existent version)\n- `latestVerifier[999]` returns default struct with `verifier = address(0)`\n- `_verifier.startBatchIndex = 0` (default uint64)\n- Since 0 <= _batchIndex (assuming _batchIndex >= 0), the condition `_verifier.startBatchIndex > _batchIndex` is false\n- Function returns `address(0)`\n- `IZkEvmVerifier(address(0)).verify(_aggrProof, _publicInputHash)` is called\n- If address(0) is a contract, it executes arbitrary code; if not, the call may succeed silently\n\n**Exploitation Scenario:**\nAn attacker submits a batch with a non-existent version number. The rollup contract calls `verifyAggregateProof` with this version. Since no verifier exists for that version, the zero address is used for verification, potentially allowing invalid proofs to be accepted.\n\n**Financial Impact:**\nInvalid batches could be finalized, leading to incorrect state transitions and potential theft of user funds or protocol insolvency. The impact depends on what the fraudulent batch contains, but could be catastrophic.",
+      "severity": "high",
+      "original_id": "b1abba71f9a0775c"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_037",
+      "title": "Incorrect Legacy Verifier Selection Logic Allows Using Wrong Verifier",
+      "description": "The `getVerifier` function has flawed logic when searching for legacy verifiers. The loop searches backwards through the legacyVerifiers array but breaks on the first verifier where `startBatchIndex <= _batchIndex`. However, the legacy verifiers are supposed to be sorted by batchIndex in increasing order. The function should find the verifier with the largest `startBatchIndex` that is <= `_batchIndex`, but the current implementation may select an older verifier instead of the most recent applicable one.\n\n**Mathematical Proof:**\nAssume legacyVerifiers[_version] contains:\n- Index 0: startBatchIndex = 100, verifier = A\n- Index 1: startBatchIndex = 200, verifier = B\n- Index 2: startBatchIndex = 300, verifier = C\n\nQuery for _batchIndex = 250:\n- latestVerifier.startBatchIndex = 400 > 250, so we enter legacy search\n- Loop from i = 3 down to 1\n- i = 3: Check index 2: startBatchIndex = 300 > 250 \u2192 skip\n- i = 2: Check index 1: startBatchIndex = 200 <= 250 \u2192 break and return verifier B\n\nThis is correct. However, if we have:\n- Index 0: startBatchIndex = 100, verifier = A  \n- Index 1: startBatchIndex = 300, verifier = C\n- Index 2: startBatchIndex = 200, verifier = B (incorrectly sorted)\n\nQuery for _batchIndex = 250:\n- i = 3: Check index 2: startBatchIndex = 200 <= 250 \u2192 break and return verifier B\n- But verifier C (startBatchIndex = 300) should not be used yet for batch 250\n\n**Exploitation Scenario:**\nIf the legacyVerifiers array is not properly sorted (due to a bug in updateVerifier or admin error), the function may select an incorrect verifier. An attacker could exploit this by submitting batches that should use a newer, more secure verifier but instead get verified by an older, potentially vulnerable verifier.\n\n**Financial Impact:**\nInvalid proofs could be accepted if an older verifier has known vulnerabilities, leading to incorrect state transitions and potential fund loss.",
+      "severity": "high",
+      "original_id": "08907238a5f7adf7"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_038",
+      "title": "Unchecked Legacy Verifiers Array Growth Can Lead to Out-of-Gas Errors",
+      "description": "The `updateVerifier` function pushes to the `legacyVerifiers[_version]` array without any bounds checking. While there's no direct financial loss from this, an attacker could repeatedly call this function (if they gain owner privileges or through a separate vulnerability) to grow the array indefinitely. When `getVerifier` is called with a version that has a very large legacyVerifiers array, the linear search (O(n)) could consume all available gas, causing the transaction to fail and potentially disrupting protocol operations.\n\n**Mathematical Proof:**\n- Each call to updateVerifier adds 1 entry to legacyVerifiers[_version]\n- After n calls, array length = n\n- getVerifier performs O(n) operations in worst case\n- With large n (e.g., 10,000+), gas consumption exceeds block gas limit\n\n**Exploitation Scenario:**\nAn attacker with owner privileges (or through a compromised owner) calls updateVerifier repeatedly for the same version. Later, when the rollup tries to verify a batch using that version, the getVerifier function runs out of gas, preventing batch verification and halting the rollup.\n\n**Financial Impact:**\nProtocol disruption preventing batch finalization, which could halt withdrawals and deposits, effectively freezing user funds temporarily. The impact is operational disruption rather than direct fund loss.",
+      "severity": "medium",
+      "original_id": "e4fe36abad4a95e3"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_039",
+      "title": "Incorrect Challenge Reward Distribution in Batch Reversion",
+      "description": "When reverting batches, the contract incorrectly adds the challenge deposit to the challenger's reward balance even if the challenge was not finished. This allows challengers to receive their deposit back plus potentially additional rewards when batches are reverted by the owner, regardless of the challenge outcome. The vulnerability occurs because the code doesn't check if the challenge was already resolved before returning the deposit.",
+      "severity": "high",
+      "original_id": "e49fde15507a1ea2"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_040",
+      "title": "Incorrect Finalization Timestamp Extension During Challenge",
+      "description": "When a batch is challenged, the contract extends the finalization timestamp for ALL batches except the challenged one by adding proofWindow. However, this extension is applied to batches that may have already passed their original finalization timestamp, effectively giving them additional time to be challenged. This creates a window where batches that should have been finalizable become challengable again, potentially disrupting the finalization process.",
+      "severity": "high",
+      "original_id": "7e4904aa36b6c300"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_041",
+      "title": "Missing Access Control on finalizeBatch Function",
+      "description": "The finalizeBatch function is publicly callable without any access control modifiers. While it includes checks for batch existence and challenge status, an attacker could potentially spam this function with invalid batch headers, wasting gas or causing unnecessary state transitions. Although the function has validation checks, the lack of access control could be exploited in combination with other vulnerabilities.",
+      "severity": "medium",
+      "original_id": "7d92d816df16b570"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_042",
+      "title": "Potential Division Rounding Error in Bitmap Length Validation",
+      "description": "The bitmap length validation uses integer division that rounds down: ((_totalL1MessagesPoppedInBatch + 255) / 256) * 32. When _totalL1MessagesPoppedInBatch is not a multiple of 256, this calculation may not match the actual required bitmap size. While the check is intended to validate the bitmap length, the rounding behavior could potentially be exploited if the bitmap handling logic has inconsistencies.",
+      "severity": "medium",
+      "original_id": "9854839d8e53f4c8"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_043",
+      "title": "Reentrancy Vulnerability in Message Execution",
+      "description": "The _executeMessage function contains a reentrancy vulnerability where the xDomainMessageSender state variable is temporarily set to _from during the external call to _to. While the function uses nonReentrant modifier on _sendMessage, there is no reentrancy protection on _executeMessage. An attacker could craft a malicious _to contract that calls back into the L2CrossDomainMessenger during execution, potentially bypassing security checks that rely on xDomainMessageSender being properly set. The vulnerability exists because xDomainMessageSender is set before the external call and reset after, but if the called contract reenters, the state variable will still be set to _from, allowing the reentrant call to potentially bypass sender validation checks.",
+      "severity": "high",
+      "original_id": "3acbfe6213f2d001"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_044",
+      "title": "Missing Gas Limit Validation in Message Relay",
+      "description": "The relayMessage function accepts messages from L1 but does not validate that sufficient gas is provided for the execution. While the function checks that the caller is the L1CrossDomainMessenger counterpart, it does not verify that the gas limit provided by L1 is adequate for the _executeMessage call. An attacker could potentially exploit this by sending messages with insufficient gas from L1, causing the execution to fail and emit FailedRelayedMessage, but without proper gas validation, this could be used to disrupt message processing or cause unexpected behavior. The financial impact is potential disruption of cross-chain message processing, which could lead to failed asset transfers or protocol operations.",
+      "severity": "medium",
+      "original_id": "004186025b260958"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_045",
+      "title": "Staker Set Index Desynchronization During Cleanup",
+      "description": "The _cleanStakerStore function incorrectly handles stakerSet cleanup by deleting elements based on stakerIndexes[deleteList[i]] - 1, but when multiple deletions occur, the indices become invalid. The stakerIndexes mapping points to positions in stakerSet, but when stakerSet elements are deleted and the array is compacted by moving the last element, the stakerIndexes for other stakers are not updated. This causes permanent desynchronization between stakerSet and stakerIndexes, breaking all staker lookup functionality.",
+      "severity": "high",
+      "original_id": "c116919ff8e38a43"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_046",
+      "title": "Incorrect Staker Bitmap Calculation",
+      "description": "The getStakerBitmap and getStakersBitmap functions use 1 << stakerIndexes[_staker] for bitmap calculation, but stakerIndexes values range from 1-255. This means bit 0 is never used, and bits 1-255 are used. However, when checking if a staker is active, the code uses stakerIndexes[addr] - 1 to index into stakerSet. The bitmap calculation should use 1 << (stakerIndexes[_staker] - 1) to match the actual staker positions. The current implementation creates incorrect bitmaps that don't correspond to the actual staker positions.",
+      "severity": "high",
+      "original_id": "e9dfaccab0ea3d4c"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_047",
+      "title": "Division Rounding Error in Slash Reward Calculation",
+      "description": "The slash function calculates reward as (valueSum * rewardPercentage) / 100. When valueSum * rewardPercentage is not evenly divisible by 100, the division truncates the remainder. For example, if valueSum = 99 ETH and rewardPercentage = 1, the calculation would be (99 * 1) / 100 = 0 ETH reward, while the remaining 99 ETH goes to slashRemaining. This rounding error means small slash amounts can result in zero rewards to the challenger despite significant value being slashed.",
+      "severity": "medium",
+      "original_id": "ff95d7e31bfb145a"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_048",
+      "title": "Unbounded Delete List Growth Leading to DoS",
+      "description": "The deleteList array grows indefinitely as stakers are removed but only shrinks when _cleanStakerStore is called. If the owner doesn't call cleanStakerStore regularly, the deleteList can grow without bound. Functions like getActiveStakers and _cleanStakerStore itself iterate over all 255 potential stakers plus the deleteList, which could become very large. This can lead to gas limits being exceeded and permanent denial of service for key protocol functions.",
+      "severity": "medium",
+      "original_id": "b082dc7fb9a7dddb"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_049",
+      "title": "Missing Token Existence Check in finalizeDepositERC20 Allows Minting to Non-Existent Tokens",
+      "description": "The finalizeDepositERC20 function does not verify that the _l2Token address corresponds to a valid ERC20 contract before calling mint(). An attacker can provide any address as _l2Token that passes the tokenMapping check but doesn't implement the mint function, causing the transaction to fail and permanently locking deposited funds. Since this function is called by the counterpart gateway via cross-domain message, failed executions cannot be retried, resulting in permanent loss of user funds.\n\nMathematical Proof:\n- Attacker triggers deposit on L1 with malicious _l2Token address (0xMalicious)\n- L1 gateway locks tokens and sends message to L2\n- L2 gateway receives message and calls finalizeDepositERC20(0xL1Token, 0xMalicious, ...)\n- tokenMapping[0xMalicious] returns 0xL1Token (if attacker previously called updateTokenMapping)\n- Function calls IMorphERC20Upgradeable(0xMalicious).mint() which reverts\n- Transaction fails permanently, L1 tokens remain locked\n\nFinancial Impact: User deposits are permanently locked on L1 gateway when finalization fails. The loss equals the deposited amount.",
+      "severity": "high",
+      "original_id": "4faa5263ec8daf64"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_050",
+      "title": "Missing Reentrancy Protection in updateTokenMapping Allows Token Mapping Manipulation During Finalization",
+      "description": "The updateTokenMapping function lacks reentrancy protection and can be called during the execution of finalizeDepositERC20 if the _doCallback function calls back into the gateway. An attacker could manipulate token mappings while a deposit is being finalized, potentially redirecting minted tokens or causing state corruption.\n\nExploitation Scenario:\n1. Attacker sets up a malicious callback in _data\n2. Attacker calls deposit on L1 with specific token mapping\n3. During finalizeDepositERC20, _doCallback triggers malicious contract\n4. Malicious contract calls updateTokenMapping to change mapping for current _l2Token\n5. This could allow minting tokens to wrong address or corrupting gateway state\n\nMathematical Impact: While difficult to quantify precisely, this could allow attackers to:\n- Redirect minted tokens to their address\n- Cause permanent state corruption in token mappings\n- Break the 1:1 correspondence between L1 and L2 tokens\n\nFinancial Impact: Potential theft of minted tokens or permanent protocol state corruption.",
+      "severity": "high",
+      "original_id": "ed4d98762c2bcb88"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_051",
+      "title": "Incorrect Nonce Usage in Withdrawal Events Allows Event Spoofing",
+      "description": "The _withdraw function retrieves the message nonce after sending the message, but uses it in the WithdrawERC20 event emission. However, the nonce is actually incremented by the sendMessage call, meaning the event emits the next nonce rather than the one used for the message. This discrepancy could allow attackers to spoof events or create confusion in off-chain tracking systems.\n\nMathematical Proof:\n- Current nonce = N\n- sendMessage() is called, which increments nonce to N+1\n- messageNonce() now returns N+1\n- Event emits nonce = N+1, but the actual message sent used nonce N\n- Off-chain systems tracking events will associate the wrong nonce with the withdrawal\n\nExploitation: Attackers could exploit this to:\n- Create fake withdrawal events that appear legitimate\n- Confuse monitoring systems about the actual state of cross-chain messages\n- Potentially enable double-spend attacks if off-chain systems rely on correct nonce tracking\n\nFinancial Impact: While not directly stealing funds, this could enable sophisticated attacks that manipulate off-chain infrastructure supporting the bridge.",
+      "severity": "medium",
+      "original_id": "90bf81ef868e11f8"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_052",
+      "title": "Missing Token Ownership Check in Batch Withdraw Allows NFT Theft",
+      "description": "The _batchWithdrawERC721 function burns multiple NFTs in a loop but only checks ownership for each token individually. However, it does not verify that the same sender owns all tokens before proceeding with the burn operations. An attacker can exploit this by including tokens they don't own in the batch, causing the function to fail after some tokens have already been burned. This results in permanent loss of the burned tokens without completing the withdrawal.\n\nMathematical Proof:\n- Suppose Alice owns token IDs [1, 2, 3] and Bob owns token ID [4]\n- Alice calls batchWithdrawERC721 with tokenIds = [1, 2, 3, 4]\n- The function checks ownership for token 1: Alice owns it \u2192 burns token 1\n- Checks ownership for token 2: Alice owns it \u2192 burns token 2  \n- Checks ownership for token 3: Alice owns it \u2192 burns token 3\n- Checks ownership for token 4: Alice does NOT own it \u2192 function reverts\n- Result: Tokens 1, 2, 3 are permanently burned but no withdrawal message is sent\n- Alice loses 3 NFTs worth their full market value\n\nExploitation Scenario:\n1. Attacker convinces victim to include attacker's token in a batch withdrawal\n2. Victim calls batchWithdrawERC721 with mixed ownership tokens\n3. Function burns victim's tokens then reverts on attacker's token\n4. Victim's NFTs are permanently lost\n\nFinancial Impact: Permanent loss of all NFTs burned before the ownership check fails. The value lost equals the market value of the burned NFTs.",
+      "severity": "high",
+      "original_id": "101a6726d93b2b57"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_053",
+      "title": "Incorrect ETH Value Handling in Withdraw Functions",
+      "description": "The withdraw functions require msg.value > 0 but then send the full msg.value to the messenger contract, ignoring the _amount parameter. This allows attackers to withdraw more ETH than intended by sending extra ETH with the transaction. The vulnerability occurs because the contract sends msg.value to the messenger instead of _amount, and the messenger will forward this full amount to L1. This breaks the intended withdrawal logic where only _amount should be withdrawn.",
+      "severity": "high",
+      "original_id": "ac13da5c9110cf45"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_054",
+      "title": "Inconsistent ETH Amount Validation in FinalizeDepositETH",
+      "description": "The finalizeDepositETH function requires msg.value == _amount but then transfers _amount to _to. However, if the contract receives ETH from the messenger and the messenger sends more than _amount, the extra ETH will be permanently locked in the contract. The function only validates that msg.value equals _amount but doesn't handle the case where the messenger might send additional ETH beyond what's needed for the deposit.",
+      "severity": "medium",
+      "original_id": "0ee22d76a0df9f92"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_055",
+      "title": "Missing Token Existence Check in FinalizeDeposit Functions",
+      "description": "The finalizeDepositERC1155 and finalizeBatchDepositERC1155 functions do not verify that the _l2Token address is a valid ERC1155 contract before calling mint/batchMint. An attacker can deploy a malicious contract at a predictable address and set it as the token mapping, then trigger a deposit that will call the malicious contract's mint function with arbitrary parameters. This allows arbitrary code execution in the context of the gateway contract.\n\nMathematical Proof:\n1. Attacker deploys malicious contract with mint function that executes arbitrary code\n2. Attacker calls updateTokenMapping(_l2Token, _l1Token) where _l2Token is the malicious contract\n3. Attacker triggers cross-chain message to call finalizeDepositERC1155\n4. Gateway calls IMorphERC1155(_l2Token).mint(_to, _tokenId, _amount, \"\") which executes attacker's code\n5. Attacker can steal funds, manipulate state, or cause denial of service\n\nExploitation Scenario:\n- Attacker front-runs token deployment to get predictable address\n- Attacker sets malicious contract as token mapping via updateTokenMapping\n- Attacker triggers deposit from L1 to L2\n- Gateway executes attacker's code during mint call\n\nFinancial Impact: Complete compromise of gateway contract allowing theft of all funds controlled by the gateway, manipulation of token mappings, or permanent denial of service.",
+      "severity": "critical",
+      "original_id": "f22871a9f347e38e"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_056",
+      "title": "Incorrect Token Burning in BatchWithdraw Function",
+      "description": "The _batchWithdrawERC1155 function incorrectly calls batchBurn instead of transferring tokens to the gateway before burning. The comment says \"1. transfer token to this contract\" but the code calls batchBurn directly on the user's tokens. This breaks the expected flow where tokens should be transferred to the gateway first, then burned. This could allow reentrancy attacks or incorrect state tracking.\n\nMathematical Proof:\n1. Normal flow: User calls batchWithdrawERC1155 with tokens worth 100 ETH\n2. Function should: transfer tokens to gateway \u2192 burn tokens \u2192 send message\n3. Actual flow: directly burns user's tokens without intermediate transfer\n4. If burn function has reentrancy vulnerability, attacker can reenter and manipulate state\n\nExploitation Scenario:\n- Attacker deploys malicious ERC1155 with reentrant burn function\n- Attacker calls batchWithdrawERC1155\n- During burn call, malicious contract reenters and manipulates gateway state\n- Attacker can double-spend tokens or bypass security checks\n\nFinancial Impact: Potential loss of all tokens involved in batch withdrawals through reentrancy attacks or state manipulation.",
+      "severity": "high",
+      "original_id": "d0040437b9ec2a14"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_057",
+      "title": "Missing Refund Mechanism for Excess ETH",
+      "description": "The withdraw functions accept msg.value but only use it for cross-chain message fees. If users send more ETH than required for gas, the excess is permanently locked in the contract since there's no refund mechanism. This represents a permanent loss of user funds.\n\nMathematical Proof:\n1. User wants to withdraw tokens with gas cost 0.01 ETH\n2. User accidentally sends 1 ETH to withdrawERC1155 function\n3. Contract uses 0.01 ETH for message fee, keeps 0.99 ETH\n4. 0.99 ETH is permanently locked in contract with no way to recover\n\nExploitation Scenario:\n- Users accidentally overpay for gas fees\n- Malicious interfaces could trick users into overpaying\n- Funds accumulate in contract and become permanently inaccessible\n\nFinancial Impact: Permanent loss of user funds through overpayment. The impact scales with usage - more users = more locked ETH.",
+      "severity": "medium",
+      "original_id": "022420ed1babc856"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_058",
+      "title": "Lack of Token Decimal Compatibility Check",
+      "description": "The gateway assumes all ERC1155 tokens have the same decimal precision, but ERC1155 doesn't enforce decimal standards. If L1 and L2 tokens have different decimal precisions, withdrawals and deposits could result in incorrect amounts being transferred.\n\nMathematical Proof:\n1. L1 token has 6 decimals, L2 token has 18 decimals\n2. User deposits 1.0 token (1e6 units) on L1\n3. Gateway mints 1.0 token (1e18 units) on L2\n4. User effectively receives 1e12 times more value than deposited\n5. Reverse withdrawal would burn 1e18 units but only release 1e6 units\n\nExploitation Scenario:\n- Malicious token deployer creates token with unusual decimals\n- Users deposit/withdraw without understanding decimal differences\n- Protocol suffers arbitrage losses or users lose funds\n\nFinancial Impact: Significant value discrepancy between L1 and L2 leading to arbitrage opportunities or user fund losses.",
+      "severity": "medium",
+      "original_id": "f5d90cc4eb89ad8f"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_059",
+      "title": "Fee-on-Transfer Token Accounting Error in Withdraw Function",
+      "description": "The _transferERC20In function has a critical flaw in handling fee-on-transfer tokens when called directly (not through the router). The function calculates the received amount by comparing balances before and after transfer, but then uses this adjusted amount for the withdrawal while still emitting the original _amount parameter in the WithdrawERC20 event. This creates a discrepancy between the actual amount transferred to the contract and the amount recorded in the event log. Attackers can exploit this by using fee-on-transfer tokens to create inconsistent accounting between L1 and L2.\n\nMathematical Proof:\n- User calls _withdraw with _amount = 100 tokens\n- Token has 10% transfer fee, so only 90 tokens actually arrive\n- _transferERC20In calculates: _after (90) - _before (0) = 90\n- Function emits WithdrawERC20 event with original _amount = 100\n- But only 90 tokens are actually sent to L1\n- L1 gateway expects to receive 100 tokens but only gets 90\n\nExploitation Scenario:\n1. Attacker deploys a malicious fee-on-transfer token with high fees\n2. Attacker maps the token using updateTokenMapping\n3. Attacker calls withdraw with a large amount\n4. Event shows large withdrawal but minimal tokens actually move\n5. Protocol accounting becomes inconsistent between layers\n\nFinancial Impact: Protocol insolvency due to inconsistent cross-layer accounting. Users may be credited for more tokens than actually exist on L1.",
+      "severity": "high",
+      "original_id": "03dab36995883171"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_060",
+      "title": "Missing Reentrancy Protection in Token Transfer Callback",
+      "description": "The finalizeDepositERC20 function calls _doCallback(_to, _data) after transferring tokens but before emitting the event. If _to is a contract that implements token callbacks, it could re-enter the function. While the function has the nonReentrant modifier, the _doCallback function (inherited from parent) may not have the same protection. This could allow reentrancy attacks if the callback mechanism is not properly secured.\n\nExploitation Scenario:\n1. Attacker creates a malicious contract that receives tokens and calls back into the gateway\n2. During the callback, the attacker could manipulate state or exploit other vulnerabilities\n3. Since the event hasn't been emitted yet, the protocol state may be inconsistent\n\nFinancial Impact: Potential theft of funds or protocol state manipulation through reentrancy attacks.",
+      "severity": "high",
+      "original_id": "79f580ee1778ae0e"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_061",
+      "title": "Incorrect Gas Limit Handling in Cross-Chain Message",
+      "description": "The _withdraw function passes msg.value directly to the sendMessage call without validating that it matches the expected gas payment for the specified _gasLimit. This could lead to underpayment for cross-chain messages, causing transactions to fail on L1. Additionally, the function uses msg.value for gas payment but doesn't ensure the caller has provided sufficient ETH for the specified gas limit.\n\nMathematical Proof:\n- User specifies _gasLimit = 1,000,000 gas\n- Current L1 gas price is 20 gwei, requiring 0.02 ETH\n- User calls with msg.value = 0.01 ETH\n- Message fails on L1 due to insufficient gas, but tokens are already locked on L2\n\nExploitation Scenario:\n1. Attacker intentionally provides insufficient ETH for the specified gas limit\n2. Tokens get locked in the gateway contract when the L1 message fails\n3. Protocol needs manual intervention to recover locked funds\n\nFinancial Impact: Permanent loss of user funds due to failed cross-chain messages and locked tokens.",
+      "severity": "high",
+      "original_id": "05f8bcc457f04fbc"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_062",
+      "title": "Reentrancy Vulnerability in Gateway Context Management",
+      "description": "The `withdrawERC20AndCall` and `withdrawETHAndCall` functions use a global `gatewayInContext` state variable to track the current gateway during cross-contract calls. This creates a reentrancy vulnerability where an attacker-controlled gateway could re-enter the router while `gatewayInContext` is still set, bypassing the `onlyNotInContext` modifier and potentially manipulating token transfers.\n\n**Mathematical Proof:**\n1. User calls `withdrawERC20AndCall` with _amount = 100 tokens\n2. `gatewayInContext` is set to _gateway address\n3. Control transfers to `IL2ERC20Gateway(_gateway).withdrawERC20AndCall`\n4. Malicious gateway calls back into router's `requestERC20` function\n5. Since `gatewayInContext` is still set, `onlyInContext` modifier passes\n6. Gateway can call `requestERC20` multiple times, transferring additional tokens\n\n**Exploitation Scenario:**\nAn attacker deploys a malicious gateway that re-enters the router during the withdrawal process. The attacker can:\n- Call `requestERC20` multiple times to transfer more tokens than authorized\n- Manipulate the token transfer logic while the context is still active\n- Potentially drain tokens from the router or gateway contracts\n\n**Financial Impact:**\nUsers could lose their entire token balance if a malicious gateway is set. The router owner could set a malicious gateway through `setERC20Gateway` or the default gateway could be compromised.",
+      "severity": "high",
+      "original_id": "d6cf04f9dba73853"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_063",
+      "title": "Incorrect Token Amount Calculation in requestERC20 Function",
+      "description": "The `requestERC20` function calculates the transferred amount by comparing balances before and after the transfer. However, this calculation is vulnerable to manipulation if the token contract's balanceOf function can be manipulated during the transfer, or if the gateway contract holds tokens that could affect the balance calculation.\n\n**Mathematical Proof:**\n1. Gateway calls `requestERC20` with _amount = 100\n2. _balance = gateway's token balance (e.g., 50 tokens)\n3. safeTransferFrom transfers 100 tokens to gateway\n4. New balance should be 150, so _amount = 150 - 50 = 100\n5. BUT if gateway manipulates its balance during transfer (e.g., by transferring out tokens in a hook), the calculation becomes incorrect\n\n**Exploitation Scenario:**\nA malicious gateway could implement a token that manipulates balances during transfers, or the gateway itself could transfer tokens during the call. This could result in:\n- Incorrect amount being recorded for the withdrawal\n- Potential for the gateway to receive more tokens than intended\n- Accounting discrepancies between L1 and L2\n\n**Financial Impact:**\nUsers could be charged incorrect amounts for withdrawals, potentially leading to loss of funds or protocol insolvency if the accounting becomes desynchronized between layers.",
+      "severity": "high",
+      "original_id": "3069556d2a2e8e7e"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_064",
+      "title": "Missing Access Control on Gateway Finalization Functions",
+      "description": "The `finalizeDepositETH` and `finalizeDepositERC20` functions are marked as override but simply revert with \"should never be called\". However, these functions lack access control modifiers, meaning any external caller can trigger the revert. While this doesn't directly cause fund loss, it could be used in a denial-of-service attack against contracts that expect these functions to work properly.\n\n**Exploitation Scenario:**\n1. An external contract attempts to call `finalizeDepositETH` as part of a legitimate cross-chain flow\n2. The call always reverts, breaking the expected protocol flow\n3. This could be exploited to block legitimate deposit finalization processes\n\n**Financial Impact:**\nWhile no direct fund loss occurs, this could lead to:\n- Denial of service for legitimate deposit operations\n- Funds becoming temporarily stuck in transit\n- Protocol functionality disruption",
+      "severity": "medium",
+      "original_id": "adadf9fa328d56eb"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_065",
+      "title": "Token Mapping Desynchronization Allows Double Minting",
+      "description": "The `finalizeDepositERC20` function has a critical state desynchronization vulnerability where the token mapping is updated after the token deployment check but before the mint operation. This allows an attacker to trigger double minting of tokens by exploiting the timing gap between the contract existence check and the mapping update.\n\n**Mathematical Proof:**\n1. Initial state: tokenMapping[_l2Token] = address(0) (not set)\n2. Attacker calls finalizeDepositERC20 with _l2Token that is not a contract\n3. Function checks `!_l2Token.isContract()` - returns true\n4. Function updates `tokenMapping[_l2Token] = _l1Token`\n5. Function calls `_deployL2Token(_deployData, _l1Token)`\n6. Function mints tokens to `_to`\n\nNow, if the same transaction or a subsequent transaction calls finalizeDepositERC20 again with the same parameters:\n7. Function checks `!_l2Token.isContract()` - may still return true if deployment hasn't completed\n8. Since tokenMapping is already set, it passes the `tokenMapping[_l2Token] == _l1Token` check\n9. Function skips the mapping update (already set) and deployment\n10. Function mints tokens again to `_to`\n\n**Exploitation Scenario:**\nAn attacker can front-run the token deployment transaction or exploit reentrancy-like behavior to call finalizeDepositERC20 multiple times before the L2 token contract is fully deployed. Each call will mint the full `_amount` of tokens, effectively doubling (or more) the minted supply.\n\n**Financial Impact:**\nIf `_amount` is 1000 tokens and the attacker triggers 2 calls, they receive 2000 tokens instead of 1000. The protocol becomes insolvent as more tokens are minted than deposited. The attacker can withdraw these excess tokens to L1, stealing funds from the protocol.",
+      "severity": "high",
+      "original_id": "abc6bb368fb6fe51"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_066",
+      "title": "Incorrect Token Deployment Order Allows Factory Bypass",
+      "description": "The `_deployL2Token` function deploys the token and then initializes it, but the token mapping is updated before deployment. This creates a race condition where the mapping points to a token that may not be properly deployed or initialized.\n\n**Mathematical Proof:**\n1. Function updates `tokenMapping[_l2Token] = _l1Token` (line before _deployL2Token call)\n2. Function calls `_deployL2Token` which:\n   - Deploys token via factory\n   - Initializes token with parameters\n3. If deployment fails or is interrupted, the mapping is already set\n\n**Exploitation Scenario:**\nAn attacker can manipulate the token factory to return a malicious contract address or cause the deployment to fail after the mapping is set. Since the mapping is updated before deployment completion, subsequent deposits will use the incorrect mapping without proper validation.\n\n**Financial Impact:**\nIf deployment fails but mapping is set, future deposits will mint tokens to an invalid or malicious contract address. Funds could be permanently lost or stolen. For example, if $1M worth of deposits occur before the issue is detected, all funds are at risk.",
+      "severity": "high",
+      "original_id": "c2988d6d2c762418"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_067",
+      "title": "Incorrect ETH Value Handling in Withdrawal Function",
+      "description": "The _withdraw function incorrectly adds msg.value to the ETH amount being sent to the L1 messenger, allowing attackers to steal ETH from the contract. The function sends `_amount + msg.value` ETH to the messenger, but only `_amount` ETH is actually available from the WETH withdrawal. If a user sends additional ETH with the transaction, the contract will send more ETH than it possesses, draining the contract's ETH balance.",
+      "severity": "high",
+      "original_id": "5172f3d8cf3acc7e"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_068",
+      "title": "Missing Access Control on Receive Function",
+      "description": "The receive() function allows anyone to send ETH to the contract if they spoof the WETH address as the sender. While it checks that _msgSender() == L2_WETH, this can be bypassed by calling from a contract that uses delegatecall or other methods to appear as the WETH address. This could allow attackers to lock ETH in the contract or disrupt its accounting.",
+      "severity": "medium",
+      "original_id": "20940dc59aca5331"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_069",
+      "title": "Division by Zero in Reward Calculation",
+      "description": "The reward calculation in _claim() and query functions performs division by distributions[delegatee][i].delegationAmount without ensuring it's non-zero. If a delegatee has zero delegation amount in an epoch but has delegatorRewardAmount, the division will revert, blocking all claims for that epoch. This can be exploited by front-running delegation operations to create zero-delegation epochs.",
+      "severity": "high",
+      "original_id": "7eb685452417ea48"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_070",
+      "title": "State Desynchronization in Distribution Migration",
+      "description": "When migrating delegator info to next epoch in _claim(), the code copies amounts and delegation amounts without checking if the next epoch already has different values. This can overwrite legitimate delegation data from new delegations in the next epoch, causing incorrect reward calculations. An attacker can delegate in epoch N+1, then trigger a claim for epoch N to overwrite their delegation amount in epoch N+1.",
+      "severity": "high",
+      "original_id": "873c2b0616f18a29"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_071",
+      "title": "Incorrect Reward Calculation Due to Stale Amount Tracking",
+      "description": "The reward calculation uses the latest delegatorAmount and totalAmount found in the epoch loop, not the specific values for each epoch. If a delegator's amount changes between epochs, the calculation will use incorrect historical values. For example, if a delegator has 100 tokens in epoch 1 and 50 tokens in epoch 2, but the calculation might use 50 tokens for both epochs if that's the last non-zero value found.",
+      "severity": "high",
+      "original_id": "6a3b9f83beb15198"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_072",
+      "title": "RemainsNumber Decrement Without Bounds Check",
+      "description": "The remainsNumber is decremented in _claim() without checking if it's already zero. If multiple claims occur for the same epoch, remainsNumber can underflow or become incorrect, potentially causing premature deletion of distribution data or preventing legitimate claims.",
+      "severity": "medium",
+      "original_id": "e06e04ef58a4afcc"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_073",
+      "title": "Withdrawal Lock Bypass via Token Mapping Update",
+      "description": "The `updateTokenMapping` function automatically sets `withdrawLock[_l2Token] = true` when updating the token mapping. However, the `updateWithdrawLock` function allows the owner to set the lock to false independently. This creates a state desynchronization vulnerability where an attacker who gains owner privileges (or if the owner acts maliciously) can bypass withdrawal locks by first calling `updateTokenMapping` to set a valid mapping, then immediately calling `updateWithdrawLock` to unlock withdrawals. This violates the intended security model where token mapping updates should enforce withdrawal locks that cannot be easily bypassed.\n\n**Mathematical Proof:**\n1. Initial state: tokenMapping[L2Token] = 0x0, withdrawLock[L2Token] = false\n2. Attacker calls updateTokenMapping(L2Token, L1Token): tokenMapping[L2Token] = L1Token, withdrawLock[L2Token] = true\n3. Attacker immediately calls updateWithdrawLock(L2Token, false): withdrawLock[L2Token] = false\n4. Result: tokenMapping is valid (L1Token) but withdrawLock is false, allowing withdrawals despite recent mapping change\n\n**Exploitation Scenario:**\nAn attacker with owner privileges can quickly enable withdrawals for a newly mapped token before proper security checks are completed, potentially allowing malicious withdrawals. Alternatively, if the owner account is compromised, an attacker can use this sequence to bypass intended security controls.\n\n**Financial Impact:**\nUsers could withdraw tokens through a gateway that hasn't been properly vetted or secured, potentially leading to loss of funds if the token mapping is incorrect or malicious. The impact depends on the specific token being mapped, but could result in complete drainage of the gateway's funds.",
+      "severity": "high",
+      "original_id": "d5d4a4f21810b2cf"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_074",
+      "title": "Incorrect Nonce Usage in Withdrawal Event",
+      "description": "The `_withdraw` function retrieves the message nonce from the messenger contract before sending the message, but uses this nonce in the emitted event. However, the actual message sent to the messenger will use a different nonce (the one assigned when the message is actually sent). This creates a state desynchronization between the event log and the actual cross-chain message.\n\n**Mathematical Proof:**\n1. Line 138: `uint256 nonce = IL2CrossDomainMessenger(messenger).messageNonce();` gets current nonce (e.g., 100)\n2. Line 140: `IL2CrossDomainMessenger(messenger).sendMessage{value: msg.value}(counterpart, 0, _message, _gasLimit);` sends message, which increments nonce to 101\n3. Line 142: `emit WithdrawERC20(_l1Token, _token, _from, _to, _amount, _data, nonce);` emits event with nonce 100, but actual message has nonce 101\n\n**Exploitation Scenario:**\nWhile this doesn't directly lead to fund loss, it creates tracking inconsistencies. Off-chain systems monitoring events might incorrectly associate withdrawal events with the wrong cross-chain messages. This could lead to incorrect state tracking, failed automation, or reconciliation issues that might be exploited in complex attack scenarios involving multiple withdrawals.\n\n**Financial Impact:**\nIndirect financial impact through operational errors, failed automation, or incorrect accounting. While not directly stealing funds, this could lead to situations where funds appear to be in incorrect states, potentially causing protocol disruptions or enabling other attacks that rely on inconsistent state tracking.",
+      "severity": "medium",
+      "original_id": "3762fff4a173acc8"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_075",
+      "title": "Incorrect USDC Token Burning in Withdrawal Process",
+      "description": "The _withdraw function burns USDC tokens after transferring them to the contract, but the burn operation uses the same amount that was transferred. This creates a vulnerability where if the USDC token contract charges a fee on transfers, the actual amount received by the contract will be less than _amount, but the contract will attempt to burn the full _amount. This could cause the burn to fail or leave the contract with a token balance that doesn't match the expected state.\n\nMathematical Proof:\n- Suppose USDC has a 0.1% transfer fee\n- User withdraws 1000 USDC\n- Contract transfers 1000 USDC from user to contract\n- Due to fee, contract receives 999 USDC (1000 * 0.999)\n- Contract attempts to burn 1000 USDC\n- Burn will fail because contract only has 999 USDC\n- OR if burn succeeds with partial amount, protocol accounting becomes inconsistent\n\nExploitation Scenario:\n1. Attacker monitors for USDC transfers when fees are active\n2. Initiates withdrawal with amount that will cause fee-induced imbalance\n3. Either causes transaction to fail (DoS) or creates accounting inconsistency\n4. If burn partially succeeds, contract may be left with stuck funds\n\nFinancial Impact:\n- Withdrawal transactions may fail unexpectedly\n- Protocol accounting may become inconsistent\n- Contract may accumulate stuck USDC tokens\n- Users may lose gas fees on failed transactions",
+      "severity": "high",
+      "original_id": "e6740508aa19d620"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_076",
+      "title": "Missing Callback Function Vulnerability in FinalizeDeposit",
+      "description": "The finalizeDepositERC20 function has a commented-out callback function (_doCallback) that is explicitly disabled. However, the function still emits an event indicating the callback was attempted. This creates a discrepancy between the actual behavior and the logged event, which could be exploited by external systems that rely on the event for accounting.\n\nMathematical Proof:\n- Function emits FinalizeDepositERC20 event with _data parameter\n- External systems may parse _data expecting callback execution\n- Actual callback execution is disabled via comment\n- Discrepancy: Event suggests callback occurred, but it did not\n\nExploitation Scenario:\n1. External system monitors FinalizeDepositERC20 events\n2. System expects _doCallback to have executed based on event emission\n3. System performs actions assuming callback completed\n4. Due to disabled callback, system state becomes inconsistent with contract state\n\nFinancial Impact:\n- External systems may make incorrect decisions based on misleading events\n- Protocol integrations may break due to unexpected behavior\n- Users may experience losses if external systems rely on callback execution",
+      "severity": "medium",
+      "original_id": "cd56c53988735fa5"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_077",
+      "title": "Insufficient Validation in transferUSDCRoles Function",
+      "description": "The transferUSDCRoles function only validates that the caller is the circleCaller, but does not validate the _owner parameter. This could allow the circleCaller to transfer USDC token roles to any address, including malicious or zero addresses, potentially causing permanent loss of control over the USDC token contract.\n\nMathematical Proof:\n- circleCaller can call transferUSDCRoles with any _owner address\n- No validation on _owner address (not zero address check, not contract check)\n- If _owner is set to address(0) or a malicious contract, USDC ownership is permanently lost\n\nExploitation Scenario:\n1. Malicious actor compromises circleCaller private key\n2. Calls transferUSDCRoles with address(0) or attacker-controlled address\n3. USDC token ownership is permanently transferred\n4. Attacker gains control over USDC minting/burning capabilities\n\nFinancial Impact:\n- Permanent loss of control over USDC token contract\n- Attacker could mint unlimited USDC tokens\n- Protocol insolvency if attacker abuses minting capability\n- Complete compromise of bridge security",
+      "severity": "high",
+      "original_id": "325ace35bbd0d30b"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_078",
+      "title": "Incorrect Array Indexing in Getter Functions Causes Out-of-Bounds Access",
+      "description": "The getter functions getBatchSubmissions, getRollupEpochs, and getRewardEpochs use incorrect array indexing that will cause out-of-bounds access and revert transactions. The functions create an array of size (end - start + 1) but then try to access res[i] where i ranges from start to end. However, the array index should be (i - start) to properly map the storage index to the result array position. This causes the transaction to revert when start > 0, making these view functions unusable for any range that doesn't start at 0.",
+      "severity": "high",
+      "original_id": "d1db205bbeedfb66"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_079",
+      "title": "Missing Validation in Reward Epoch Recording Allows Inflation Manipulation",
+      "description": "The recordRewardEpochs function calls IMorphToken(MORPH_TOKEN_CONTRACT).mintInflations(nextRewardEpochIndex + _rewardEpochs.length - 1) before validating the epoch indices. This allows an attacker to manipulate the inflation minting by providing carefully crafted _rewardEpochs arrays. If an attacker provides an array where nextRewardEpochIndex + _rewardEpochs.length - 1 exceeds the current epoch, the mintInflations call will fail or mint incorrect amounts. Additionally, the function doesn't validate that the provided epoch indices are consecutive and properly aligned with the current state.",
+      "severity": "high",
+      "original_id": "33e2c7cb0492b9fe"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_080",
+      "title": "Division Rounding Error in Reward Calculation Leads to Permanent Loss of Funds",
+      "description": "In recordRewardEpochs, the reward calculation uses integer division which can lead to rounding errors and permanent loss of funds. The calculation: uint256 reward = (inflationAmount * _rewardEpochs[i].sequencerRatios[j]) / PRECISION; followed by commissions[j] = (reward * _rewardEpochs[i].sequencerCommissions[j]) / 100; and delegatorRewards[j] = reward - commissions[j]; can result in dust amounts being permanently locked in the contract when the division rounds down to zero for small ratios or when the commission calculation doesn't account for the full reward amount.",
+      "severity": "high",
+      "original_id": "0f205c0ca7a268ce"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_081",
+      "title": "Proposal Execution Race Condition Allows Double Execution",
+      "description": "The `executeProposal` function has a race condition between the status check and execution that allows a proposal to be executed multiple times. The function first checks `proposalStatus(proposalID)` which returns `(finished, passed, executed)`, but between this check and the actual execution in `_executeProposal`, the proposal could be executed by another transaction, leading to duplicate execution. This is particularly dangerous because `_executeProposal` deletes all previous proposals up to the current one, which could cause permanent data loss if executed multiple times.\n\n**Mathematical Proof:**\n- Transaction 1: Calls `executeProposal(5)` - checks status (finished=false, passed=true, executed=false)\n- Transaction 2: Calls `executeProposal(5)` - checks status (finished=false, passed=true, executed=false)\n- Transaction 1 executes: sets `proposalInfos[5].executed = true`, deletes proposals 0-4\n- Transaction 2 executes: sets `proposalInfos[5].executed = true` again (redundant), deletes proposals 0-4 again (but they're already deleted)\n\n**Exploitation Scenario:** An attacker monitors the mempool for `executeProposal` calls and front-runs them with their own execution call. This could be used to cause confusion or exploit timing issues in the deletion of previous proposals.\n\n**Financial Impact:** While no direct fund loss occurs, duplicate execution could lead to inconsistent state and potential disruption of governance operations. The deletion of proposal data multiple times could cause issues if other systems rely on this data.",
+      "severity": "medium",
+      "original_id": "3abba39c48abfa48"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_082",
+      "title": "Integer Division Rounding in Vote Counting Allows Minority Control",
+      "description": "The `_checkPassed` function uses integer division which can be exploited to pass proposals with less than the intended 2/3 majority. The calculation `validVotes > (latestSequencerSet.length * 2) / 3` uses integer division that truncates fractional results, meaning the required threshold is actually floor(2/3 * N) rather than the mathematically correct ceiling(2/3 * N).\n\n**Mathematical Proof:**\nFor a sequencer set of size 4:\n- Required votes: (4 * 2) / 3 = 8 / 3 = 2.666 \u2192 truncated to 2\n- 2 votes > 2? No (2 is not greater than 2)\n- Actually requires 3 votes (75%) instead of 2.666 (66.6%)\n\nFor a sequencer set of size 5:\n- Required votes: (5 * 2) / 3 = 10 / 3 = 3.333 \u2192 truncated to 3\n- 3 votes > 3? No (3 is not greater than 3)\n- Actually requires 4 votes (80%) instead of 3.333 (66.6%)\n\n**Exploitation Scenario:** A malicious minority of sequencers can coordinate to pass proposals when the sequencer set size is such that floor(2/3 * N) < ceiling(2/3 * N). For example, with 4 sequencers, only 2 malicious sequencers (50%) could theoretically pass proposals if the calculation worked correctly, but due to the rounding, they actually need 3 votes (75%). However, the rounding makes the threshold stricter than intended in some cases.\n\n**Financial Impact:** This could allow protocol parameter changes to be made with less than the intended consensus, potentially enabling malicious parameter changes that affect the entire rollup system.",
+      "severity": "high",
+      "original_id": "8e2ae3a260919047"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_083",
+      "title": "Proposal Deletion During Execution Can Cause State Corruption",
+      "description": "The `_executeProposal` function deletes all previous proposals from `undeletedProposalStart` to `proposalID-1` when a proposal is executed. However, if multiple proposals are executed in quick succession, this can lead to state corruption as proposals that are still being voted on or referenced by other systems get deleted prematurely.\n\n**Mathematical Proof:**\n- Proposal 5 is created and being voted on\n- Proposal 6 is created and quickly passes\n- When proposal 6 executes: `for (uint256 i = undeletedProposalStart; i < 6; i++)` deletes proposals 0-5\n- Proposal 5 is now deleted even though it may still be within its voting period\n- Any calls to `proposalStatus(5)` will revert with \"proposal pruned\"\n\n**Exploitation Scenario:** An attacker could create a proposal (Proposal A) that will take time to gather votes, then quickly create and pass Proposal B (possibly with colluding sequencers) to delete Proposal A before it can complete voting. This could be used to censor proposals or disrupt governance processes.\n\n**Financial Impact:** Loss of governance functionality and potential disruption of protocol parameter updates that were in progress.",
+      "severity": "high",
+      "original_id": "813c864b7dca6b62"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_084",
+      "title": "Missing Access Control on executeProposal Function",
+      "description": "The `executeProposal` function is publicly accessible without any access control modifiers. While it checks that the proposal has passed and voting has ended, this allows anyone to trigger proposal execution. This could lead to front-running attacks where malicious actors execute proposals before the intended parties.\n\n**Exploitation Scenario:** A legitimate sequencer intends to execute a passed proposal, but an attacker monitors the mempool and front-runs the execution transaction. The attacker gains the gas fees and potentially disrupts the timing of the proposal execution.\n\n**Financial Impact:** While the function logic itself is safe (it checks proposal status), the lack of access control allows unnecessary external interference and potential front-running attacks that could disrupt governance timing.",
+      "severity": "medium",
+      "original_id": "0982ad87801e4872"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_085",
+      "title": "Incorrect Staker Ranking Update During Undelegation",
+      "description": "The undelegateStake function incorrectly updates staker rankings when a delegator undelegates from a staker. The function attempts to re-sort stakers by delegation amount but uses an incorrect loop condition and index calculation that can cause out-of-bounds access and incorrect ranking updates. Specifically, the loop condition `i < candidateNumber - 1` is incorrect because `candidateNumber` represents the number of stakers with non-zero delegation, but `stakerAddresses` contains all stakers (including those with zero delegation). This can lead to accessing indices beyond the array bounds when `candidateNumber` is less than `stakerAddresses.length`.\n\nMathematical Proof:\n- Suppose stakerAddresses.length = 5, candidateNumber = 3 (only 3 stakers have delegations)\n- When undelegating from a staker at position 2 (index 1), the loop runs from i=1 to i<2 (candidateNumber-1=2)\n- But stakerAddresses[2] (index 2) may have zero delegation and should not be included in sorting\n- The code attempts to access stakerAddresses[i+1] where i=1, so i+1=2, which is valid\n- However, if candidateNumber=2 and stakerAddresses.length=5, the loop runs from i=1 to i<1 (no iterations), but the staker at position 2 should potentially move down\n- More critically, if the staker being undelegated from is at the last position among active stakers, the loop condition prevents proper sorting\n\nExploitation Scenario:\nAn attacker can manipulate the ranking system by strategically undelegating from stakers to cause incorrect sorting. This could allow a staker with lower total delegation to maintain a higher ranking than deserved, potentially keeping them in the sequencer set when they should be removed.\n\nFinancial Impact:\nIncorrect sequencer set composition could lead to inefficient block production or allow malicious stakers to remain active. The financial impact depends on the reward distribution mechanism but could result in unfair reward allocation.",
+      "severity": "high",
+      "original_id": "bfeddf245d1e43e9"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_086",
+      "title": "Incorrect Pagination Function Returns Wrong Delegator Addresses",
+      "description": "The getAllDelegatorsInPagination function has a critical bug in the return array population. The function creates an array of size `pageSize` but incorrectly assigns delegators using index `i` which starts from `start` (pageSize * pageIndex). However, when copying delegators to the result array, it uses the same index `i` instead of a zero-based index for the result array. This will cause the function to revert with an out-of-bounds error when `start > 0` because it tries to access resultArray[i] where i >= pageSize.\n\nMathematical Proof:\n- Suppose pageSize = 10, pageIndex = 1, delegatorsTotalNumber = 20\n- start = 10, end = 19\n- The function creates an array of size 10 (indices 0-9)\n- But it tries to assign delegatorsInPage[10] = delegators[staker].at(10) - This will revert since 10 >= 10\n\nExploitation Scenario:\nAny contract or user calling this view function with pageIndex > 0 will cause the transaction to revert. While this doesn't directly lead to fund loss, it breaks important view functionality that other contracts might rely on for proper operation.\n\nFinancial Impact:\nBreaks critical view functionality that could be used by other contracts for delegation management and reward calculations. While not directly causing fund loss, it could prevent proper protocol operation.",
+      "severity": "medium",
+      "original_id": "5f64c8d3c7030660"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_087",
+      "title": "Inconsistent State Update in removeStakers Function",
+      "description": "The removeStakers function has inconsistent state updates when removing stakers. The function updates the stakerRankings mapping for all stakers that are shifted in the array, but it doesn't properly handle the case where multiple stakers are removed simultaneously. The ranking updates use a nested loop that processes each removal individually, but the array shifting affects all subsequent stakers, potentially causing incorrect rankings.\n\nMathematical Proof:\n- Suppose stakerAddresses = [A, B, C, D] with rankings 1,2,3,4\n- Remove stakers [B, D] in single call\n- When removing B: shift C to position 1, D to position 2, rankings become A=1, C=2, D=3\n- When removing D: the array is now [A, C] but the code will try to shift elements that don't exist\n- The ranking updates become inconsistent\n\nExploitation Scenario:\nAn attacker could call removeStakers with specific staker combinations to corrupt the ranking system, potentially causing stakers to have incorrect rankings that affect their position in the sequencer set.\n\nFinancial Impact:\nCorrupted staker rankings could lead to incorrect sequencer set composition and unfair reward distribution.",
+      "severity": "medium",
+      "original_id": "44c925a81e32a434"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_088",
+      "title": "Incorrect Recipient Address in Transfer Event",
+      "description": "The `transferTo` function emits a `Transfer` event with the wrong recipient address. The event uses the `recipient` state variable (L1 fee wallet) instead of the `_to` parameter (actual transfer recipient). This creates a critical state desynchronization between the actual transfer operation and the event logging. While this doesn't directly cause financial loss, it breaks protocol invariants and prevents proper accounting and monitoring of L2-to-L2 transfers, which could mask malicious activity or cause accounting discrepancies.",
+      "severity": "medium",
+      "original_id": "f23250c00e29cd17"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_089",
+      "title": "Missing Messenger Address Validation in Withdraw Function",
+      "description": "The `withdraw` function does not validate that the `messenger` address is set before using it. If `messenger` is address(0), the call to `IL2CrossDomainMessenger(messenger).sendMessage` will succeed but send ETH to address(0), permanently burning the funds. This represents a critical financial loss vulnerability where all ETH sent via withdraw could be irrecoverably lost if the owner forgets to set the messenger address.",
+      "severity": "high",
+      "original_id": "60817329a94af5f4"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_090",
+      "title": "Inconsistent Access Control Between Withdraw and Transfer Functions",
+      "description": "The `withdraw` function is restricted to `onlyOwner`, while `transferTo` can be called by both owner and addresses in `transferAllowed` mapping. However, both functions update `totalProcessed` and perform similar ETH transfer operations. This creates an access control inconsistency where privileged transfer operations can be performed by non-owner addresses, potentially allowing bypass of withdrawal restrictions and improper fund movement.",
+      "severity": "medium",
+      "original_id": "e29b6f75ab14b848"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_091",
+      "title": "Inflation Rate Lookup Logic Error in mintInflations Function",
+      "description": "The mintInflations function contains a critical logic error in how it determines the inflation rate for each epoch. The function starts with rate = _epochInflationRates[0].rate and then loops backward through the rate array, but the loop condition 'j > 0' means it never checks the element at index 0. This causes the function to always use the initial rate from index 0 for all epochs, ignoring any updated rates. The mathematical proof shows that if the owner updates the inflation rate from 1% to 10%, the function will still calculate inflation using the original 1% rate, resulting in 90% less inflation being minted than intended. This permanently locks protocol rewards and breaks the economic model.",
+      "severity": "high",
+      "original_id": "8e960af974d015f6"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_092",
+      "title": "Incorrect Epoch Index Validation in mintInflations Function",
+      "description": "The mintInflations function validates that upToEpochIndex >= _inflationMintedEpochs, but this allows minting for future epochs that haven't ended yet when combined with the first require statement. The function requires that the current epoch is greater than upToEpochIndex, but if _inflationMintedEpochs is behind the current epoch, an attacker could call the function with upToEpochIndex = currentEpoch - 1, which would pass both checks. This could allow premature inflation minting for epochs that are still active, potentially disrupting the staking reward distribution mechanism. The mathematical proof shows that if currentEpoch = 10 and _inflationMintedEpochs = 5, an attacker can mint inflation for epoch 9 even though epoch 9 might not have fully ended, leading to incorrect reward calculations.",
+      "severity": "medium",
+      "original_id": "fef556ec7b6f95dd"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_093",
+      "title": "Inflation Calculation Precision Loss with Small Total Supply",
+      "description": "The inflation calculation (increment = (_totalSupply * rate) / PRECISION) can round down to zero when the total supply is small relative to the precision factor. With PRECISION = 1e16 and a rate representing a small percentage, if _totalSupply * rate < 1e16, the division will result in zero inflation. For example, with _totalSupply = 1000 tokens and rate = 100 (representing 0.01% daily inflation), the calculation would be (1000 * 100) / 1e16 = 100,000 / 10,000,000,000,000 = 0.00000001 which rounds down to 0. This would prevent any inflation from being minted during early protocol stages, breaking the inflation mechanism entirely.",
+      "severity": "medium",
+      "original_id": "eef364cfdc37fa6c"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_094",
+      "title": "Incorrect L1 Fee Calculation After Curie Fork",
+      "description": "The getL1FeeCurie function incorrectly uses _data.length as a multiplier for blob fees, which can lead to significant overcharging or undercharging of L1 fees. The function calculates fees as (commitScalar * l1BaseFee + blobScalar * _data.length * l1BlobBaseFee) / PRECISION, but _data.length represents the entire transaction data length rather than the blob-specific portion. This creates a mismatch where users are charged based on total transaction size for blob fees, even though blobs have fixed sizes and costs in Ethereum. An attacker could exploit this by crafting transactions with specific data lengths to manipulate fee calculations.\n\nMathematical Proof:\n- Normal scenario: Transaction with 1000 bytes, commitScalar = 1e9, l1BaseFee = 10 gwei, blobScalar = 1e9, l1BlobBaseFee = 1 gwei\n  Fee = (1e9 * 10e9 + 1e9 * 1000 * 1e9) / 1e9 = (10e18 + 1000e18) / 1e9 = 1010e9 gwei = 1.01 ETH\n- Actual blob cost should be fixed per blob (128KB chunks), not proportional to transaction length\n- Attacker creates minimal transaction (100 bytes) but gets charged for full blob: (1e9 * 10e9 + 1e9 * 100 * 1e9) / 1e9 = 110e9 gwei = 0.11 ETH\n- Protocol loses 0.9 ETH per transaction due to incorrect pricing\n\nExploitation: Attackers can craft transactions with optimal data lengths to minimize their fees while consuming full blob resources, or the protocol may systematically overcharge users, leading to economic inefficiency and potential loss of users.",
+      "severity": "high",
+      "original_id": "25a27ed3d472ab1e"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_095",
+      "title": "Missing Validation in setL1BaseFeeAndBlobBaseFee Function",
+      "description": "The setL1BaseFeeAndBlobBaseFee function allows setting both base fees simultaneously but lacks validation to ensure the relationship between l1BaseFee and l1BlobBaseFee is economically rational. This could allow a malicious or compromised allowed address to set fees that break protocol economics.\n\nAttack Scenario:\n- Attacker gains control of an allowed address (through social engineering or compromise)\n- Sets l1BaseFee to an extremely high value (1 ETH) and l1BlobBaseFee to 0\n- All transactions using getL1FeeCurie will have fees dominated by: (commitScalar * 1e18) / 1e9\n- With typical commitScalar = 1e9, fees become 1e9 * 1e18 / 1e9 = 1e18 wei = 1 ETH per transaction\n- Users are charged 1 ETH for L1 fees regardless of transaction size\n- Protocol becomes unusable due to excessive fees\n\nFinancial Impact: Complete protocol shutdown due to economically irrational fee parameters. Users cannot afford transactions, leading to loss of protocol utility and value.",
+      "severity": "high",
+      "original_id": "998c3da40cbe32d7"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_096",
+      "title": "Division Rounding Error in Fee Calculations",
+      "description": "Both getL1FeeBeforeCurie and getL1FeeCurie functions use division operations that can round down to zero for small transactions, allowing attackers to bypass L1 fee payments entirely.\n\nMathematical Proof for getL1FeeBeforeCurie:\n- Small transaction: _l1GasUsed = 1000, l1BaseFee = 1 gwei, scalar = 1\n- Fee = (1000 * 1e9 * 1) / 1e9 = 1000 wei\n- But if l1BaseFee = 1 wei (unrealistically low): Fee = (1000 * 1 * 1) / 1e9 = 1000 / 1e9 = 0 wei (rounded down)\n\nMathematical Proof for getL1FeeCurie:\n- Small values: commitScalar = 1, l1BaseFee = 1 wei, blobScalar = 1, _data.length = 1, l1BlobBaseFee = 1 wei\n- Fee = (1*1 + 1*1*1) / 1e9 = 2 / 1e9 = 0 wei (rounded down)\n\nExploitation: During periods of extremely low L1 base fees (which can occur during network congestion resolution or manipulation), attackers can spam small transactions paying zero L1 fees, consuming L2 resources without cost. This could lead to L2 network spam and resource exhaustion.",
+      "severity": "medium",
+      "original_id": "be834012cdb2b677"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_097",
+      "title": "Inconsistent State Transition with enableCurie Function",
+      "description": "The enableCurie function permanently enables the Curie fork but doesn't validate or synchronize related state variables. Once enabled, the protocol cannot revert to pre-Curie behavior, but the fee parameters (overhead, scalar) remain set and could be inconsistent with Curie economics.\n\nAttack Scenario:\n- Protocol enables Curie fork\n- Old parameters (overhead, scalar) remain set but are unused in Curie calculations\n- Allowed address maliciously modifies commitScalar and blobScalar to extreme values\n- Since enableCurie is irreversible, the protocol is permanently stuck with potentially malicious fee parameters\n- No way to revert to pre-Curie logic even if Curie parameters are compromised\n\nFinancial Impact: Permanent protocol economic damage if Curie fee parameters are set maliciously after the irreversible transition.",
+      "severity": "medium",
+      "original_id": "9dfd04a906b33e1b"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_098",
+      "title": "Sequencer Set Update Logic Flaw Allows State Desynchronization",
+      "description": "The updateSequencerSet function has a critical logic flaw where state variables can become desynchronized when multiple updates occur within the same block. The condition `if ((block.number + 2) > blockHeight2)` can be false when blockHeight2 is already set to a future block number, causing only sequencerSet2 to be updated while leaving the historical state (blockHeight0, sequencerSet0, blockHeight1, sequencerSet1) unchanged. This breaks the protocol's invariant that the three historical states should represent sequential updates.\n\nMathematical Proof:\n- Initial state: blockHeight2 = 100, block.number = 98\n- First update at block 98: (98+2=100) > 100? FALSE \u2192 Only sequencerSet2 updated\n- Second update at block 98: (98+2=100) > 100? FALSE \u2192 Only sequencerSet2 updated again\n- Result: blockHeight0, sequencerSet0, blockHeight1, sequencerSet1 remain stale while only sequencerSet2 reflects recent changes\n\nThe verification hash becomes inconsistent with the actual historical progression, potentially allowing attackers to manipulate sequencer set verification on L1.",
+      "severity": "high",
+      "original_id": "c03a303399c18353"
+    },
+    {
+      "id": "sherlock_morph-l-2_2024_09_tool_099",
+      "title": "Empty Sequencer Set Validation Missing in Update Function",
+      "description": "The updateSequencerSet function does not validate that newSequencerSet is non-empty, unlike the initialize function which requires `_sequencerSet.length > 0`. This allows the L2_STAKING_CONTRACT to set an empty sequencer set, which according to the comment \"If new sequencer set is nil, layer2 will stop producing blocks\" would halt block production. While this might be intentional for emergency stops, the inconsistency between initialize and update functions creates a potential attack vector if the staking contract is compromised.\n\nExploitation Scenario:\n- Attacker compromises L2_STAKING_CONTRACT (through governance attack or other vulnerability)\n- Attacker calls updateSequencerSet with empty array\n- Layer2 stops producing blocks, halting the entire chain\n- Financial impact: All L2 transactions halted, potentially locking millions in assets\n\nThis represents a single point of failure that could be exploited to permanently disable the layer2 chain.",
+      "severity": "high",
+      "original_id": "3a47494cd93565fe"
+    }
+  ],
+  "input_tokens": 27481,
+  "output_tokens": 964,
+  "cached_tokens": 1292
+}

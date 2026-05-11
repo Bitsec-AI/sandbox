@@ -1,0 +1,526 @@
+{
+  "project": "code4rena_fenix-finance-invitational_2024_10",
+  "agent": "agent794",
+  "status": "success",
+  "timestamp": "2026-04-06T15:15:53.671506",
+  "elapsed_seconds": 214.8,
+  "total_expected": 1,
+  "total_found": 71,
+  "true_positives": 1,
+  "false_negatives": 0,
+  "false_positives": 70,
+  "detection_rate": 1.0,
+  "precision": 0.014084507042253521,
+  "f1_score": 0.02777777777777778,
+  "matched_findings": [
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_expected_000",
+      "expected": "killGauge()will lead to wrong calculation of emission",
+      "matched": "Operation Lifecycle: Incomplete State Restoration on Gauge Kill",
+      "confidence": 0.95,
+      "justification": "FINDING 6 directly matches the expected vulnerability. It correctly identifies the killGauge() function in VoterUpgradeableV2.sol, describes the core issue of incomplete state restoration when killing a gauge (deleting isAlive without restoring previous state like claimable rewards and distribution timestamps), and accurately describes the consequence of accounting inconsistencies leading to wrong emission calculations. The description closely mirrors the expected vulnerability description.",
+      "severity": "high",
+      "expected_description": "Submitted by\nCh_301\n, also found by\nKupiaSec\n\nhttps://github.com/code-423n4/2024-09-fenix-finance/blob/main/contracts/core/VoterUpgradeableV2.sol#L239\n\nhttps://github.com/code-423n4/2024-09-fenix-finance/blob/main/contracts/core/VoterUpgradeableV2.sol#L630-L639\n\nThe\nVoterUpgradeableV2.sol\ncontract has\nkillGauge()\nthat disables the gauge to prevent it from further rewards distribution, only the address with\nGOVERNANCE_ROLE\nrole can call it.\nthe\nkillGauge()\nonly updates three state variables.\n\nFile:\nVoterUpgradeableV2\n.\nsol\n227\n:\nfunction\nkillGauge\n(\naddress\ngauge_\n)\nexternal\nonlyRole\n(\n_GOVERNANCE_ROLE\n) {\n...\n232\n:\ndelete\ngaugesState\n[\ngauge_\n].\nisAlive\n;\n...\n236\n:\ndelete\ngaugesState\n[\ngauge_\n].\nclaimable\n;\n...\n240\n:\ntotalWeightsPerEpoch\n[\nepochTimestamp\n] -=\nweightsPerEpoch\n[\nepochTimestamp\n][\nstate\n.\npool\n];\n\nThe\ndistribute()\nfunction will distribute rewards to pools managed by the\nVoterUpgradeableV2.sol\ncontract and it will call the Minter contract by triggering\nupdate_period()\nfunction before distributing rewards.\n\nThe timeline looks like this:\n\nEpoch_x                      Epoch_x+1\n|-----------x-------------------|-x---------------------\ncall `killGauge()`             call `distribute()`\n\nWhen\ndistribute()\ngets invoked in the timeline it will distribute the rewards of\nEpoch_x\n, The killed gauge has no weight in this epoch because its weight gets subtracted from\ntotalWeightsPerEpoch[]\nin\nkillGauge()\n.\n\nWhen the Minter invokes\nVoterUpgradeableV2.sol#notifyRewardAmount()\nto notify the contract of the reward amount to be distributed for\nEpoch_x\n, we can also find in the same function how the\nindex\nvalue gets increased.\n\nFile:\nVoterUpgradeableV2\n.\nsol\n382\n:\nfunction\nnotifyRewardAmount\n(\nuint256\namount_\n)\nexternal\n{\n...\n387\n:\nuint256\nweightAt\n=\ntotalWeightsPerEpoch\n[\n_epochTimestamp\n() -\n_WEEK\n];\n388\n:\nif\n(\nweightAt\n>\n0\n) {\n389\n:\nindex\n+= (\namount_\n*\n1e18\n) /\nweightAt\n;\n390\n:         }\n\nThe\nindex\nis updated as the reward amount divided by the total weights of\nEpoch_x,\nwe know the weight of the disabled gauge is not included in\ntotalWeightsPerEpoch[Epoch_x]\n.\n\nBack to\n_distribute()\n:\n\nFile:\nVoterUpgradeableV2\n.\nsol\n671\n:\nfunction\n_distribute\n(\naddress\ngauge_\n)\ninternal\n{\n...\n677\n:\nuint256\ntotalVotesWeight\n=\nweightsPerEpoch\n[\ncurrentTimestamp\n-\n_WEEK\n][\nstate\n.\npool\n];\n678\n:\n679\n:\nif\n(\ntotalVotesWeight\n>\n0\n) {\n...\n684\n:\nif\n(\nstate\n.\nisAlive\n) {\n685\n:\ngaugesState\n[\ngauge_\n].\nclaimable\n+=\namount\n;\n686\n:                     }\nelse\n{\n687\n:\nIERC20Upgradeable\n(\ntoken\n).\nsafeTransfer\n(\nminter\n,\namount\n);\n}\n\nBecause\nkillGauge()\ndoesn\u2019t delete the values of\nweightsPerEpoch[]\n, it will send back\namount\nof emissions back to Minter, which actually should get distributed between the existing pools.\n\nTo summarize, the\nindex\nis directly related by the value of\ntotalWeightsPerEpoch[Epoch_x]\n, and the\nkillGauge()\nis subtracted from the\nweightsPerEpoch\nof the disabled gauge. Therefore, the\nindex\ndidn\u2019t include the weight of the killed gauge, but\n_distribute\ncalculates its emission and sends it back to Minter.\n\nTo understand the impact, in case the total emissions for\nEpoch_x\nis\n80e18\nwith three active gauges (with the same amount of votes), each pool will receive\n26.5e18\ntokens.\n\nBut in case one gauge gets killed, one scenario is the 1st gauge will receive\n40e18\nand the other\n40e18\nwill get transferred back to Minter. This will leave the last gauge with 0 emissions (from here, the impact is related to how\ngauge.sol#.notifyRewardAmount()\nwill handle this situation which is out of scope in this audit).\n\nAnother scenario is to send\n40e18\nto the two gauges but the disabled gauge gets revived in the next epoch and will be able to receive his\n40e18\ntokens because the\ngaugesState[gauge_].index\nis not updated (this will loop us to the above scenario again because the\n40e18\ntokens do not exist in the first time).\n\nOne or more gauges will not receive their emissions.\nWrong calculation of\ngaugesState[gauge_].claimable\n.\nThe distribution system will be broken if the killed gauge gets revived again.\n\nThe impact depends on the order of the gauges array that passed to\ndistribute()\nfunction.\n\nLet\u2019s say now is\nEpoch_x\n+1:\n\nWe have three pools with the same vote weight (500e18) for each of them.\nindex = 10e18\n.\nTotal emission is:\namount_ = 80e18\n.\nThe\ntotalWeightsPerEpoch\nof\nEpoch_x\nis:\nweightAt = 1500e18\n.\n\nScenario 1:\n\nNo gauge gets disabled and each gauge will receive\n26.5e18\ntokens as emission.\n\nThis is how we calculate it:\n\nHow `notifyRewardAmount()` increase the `index`\nuint256 weightAt = 1500e18\nuint256 amount_ = 80e18\nindex += (amount_ * 1e18) / weightAt;\n= (80e18 * 1e18)/1500e18\n= 5.3e16\nNow, index = 10.053e18\nHow `distribute()` calcul the `amount` for the 3 pools\nuint256 delta = index - state.index;\n=  10.053 e18- 10e18\n= 0.053e18\nuint256 amount = (totalVotesWeight * delta) / 1e18;\n= (500e18 * 0.053e18)/1e18\n= 26.5e18\n\nScenario 2:\n\nOne gauge gets disabled, so the\ntotalWeightsPerEpoch\nof\nEpoch_x\nis now\nweightAt = 1000e18\n.\nWith the current logic, two gauges each will receive\n40e18\ntokens as emission and\n40e18\nshould be sent back to Minter; which is larger than the total emission which is\n80e18\n.\n\nThis is how we calculate it:\n\nHow `notifyRewardAmount()` increase the `index`\nuint256 weightAt = 1000e18\nuint256 amount_ = 80e18\nindex += (amount_ * 1e18) / weightAt;\n= (80e18 * 1e18)/1000e18\n= 8e16\nNow, index = 10.08e18\nHow `distribute()` calcul the `amount` for the 3 pools\nuint256 delta = index - state.index;\n=  10.08 e18- 10e18\n= 0.08e18\nuint256 amount = (totalVotesWeight * delta) / 1e18;\n= (500e18 * 0.08e18)/1e18\n= 40e18\n\nOne fix is to delete the\nweightsPerEpoch[][]\nin\nkillGauge()\n:\n\nfunction killGauge(address gauge_) external onlyRole(_GOVERNANCE_ROLE) {\n...\nuint256 epochTimestamp = _epochTimestamp();\ntotalWeightsPerEpoch[epochTimestamp] -= weightsPerEpoch[epochTimestamp][state.pool];\n+      delete  weightsPerEpoch[epochTimestamp][state.pool];\nemit GaugeKilled(gauge_);\n}\n\nHowever, the fix should take into consideration how the Minter calculates the emissions for every epoch (is it a fixed value every time or depending on how many gauges are active).\n\nInvalid Validation\n\nb-hrytsak (Fenix) confirmed\n\nalcueca (judge) commented\n:\n\nKilling gauges can be considered normal operation,; therefore, the finding and severity are valid.",
+      "found_description": "When killGauge is called, the contract deletes gaugesState[gauge_].isAlive but does not restore the gauge's previous state (e.g., claimable rewards, distribution timestamps). This leaves accounting inconsistencies.",
+      "found_id": "c9cec73833597f6b",
+      "tool_finding_index": 43
+    }
+  ],
+  "missed_findings": [],
+  "undecided_findings": [],
+  "extra_findings": [
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_000",
+      "title": "Missing Access Control on Critical State Updates",
+      "description": "The function `deposit_for` allows any caller to update the `locked` state for arbitrary token IDs without verifying the caller's relationship to the token ID. This enables attackers to manipulate the `locked` state for tokens they do not own, potentially causing accounting errors and loss of funds.",
+      "severity": "high",
+      "original_id": "725e5bbfffd7cc43"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_001",
+      "title": "Incorrect State Synchronization in `_deposit_for`",
+      "description": "In `_deposit_for`, the `supply` variable is updated before the `locked` state is fully validated and checkpointed. If the checkpoint fails, `supply` remains incorrect, leading to accounting errors.",
+      "severity": "high",
+      "original_id": "9dcdac7876881cb0"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_002",
+      "title": "Division Rounding Errors in `_balanceOfNFT`",
+      "description": "The `_balanceOfNFT` function performs division operations that can round to zero when the numerator is much smaller than the denominator. This can cause users to receive incorrect voting power, especially with small balances or long lock periods.",
+      "severity": "medium",
+      "original_id": "3fa6d0a5e3d9dcca"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_003",
+      "title": "Missing Validation in `create_lock`",
+      "description": "The `create_lock` function does not validate that the `token` address is a valid ERC20 contract before attempting to transfer tokens. This can cause the function to fail silently or behave unexpectedly if the token address is invalid.",
+      "severity": "medium",
+      "original_id": "1b5a2246bb627119"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_004",
+      "title": "Incorrect Return Value Units in `balanceOfNFT`",
+      "description": "The `balanceOfNFT` function returns a value in wei, but the caller may expect the value in ether. This unit mismatch can cause calculations using the return value to be incorrect, leading to accounting errors.",
+      "severity": "medium",
+      "original_id": "0752455ed5356070"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_005",
+      "title": "Replay Attack Vulnerability in `deposit_for`",
+      "description": "The `deposit_for` function does not use a nonce or other replay protection mechanism. An attacker can replay a valid transaction multiple times to deposit tokens without proper authorization, potentially causing loss of funds.",
+      "severity": "high",
+      "original_id": "0da7bfc7e46ae658"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_006",
+      "title": "Missing Validation in `lockPermanent`",
+      "description": "The `lockPermanent` function does not validate that the token ID exists or is valid before attempting to lock it permanently. This can cause the function to fail unexpectedly or behave incorrectly if the token ID is invalid.",
+      "severity": "medium",
+      "original_id": "4c752166b5d04cea"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_007",
+      "title": "Incorrect State Update in `unlockPermanent`",
+      "description": "The `unlockPermanent` function updates the `permanentTotalSupply` state variable before validating that the token ID is valid and exists. If the validation fails, `permanentTotalSupply` remains incorrect, leading to accounting errors.",
+      "severity": "high",
+      "original_id": "be9c3793a5f04f33"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_008",
+      "title": "Missing Access Control on `lockPermanent`",
+      "description": "The `lockPermanent` function allows any caller to permanently lock tokens without verifying the caller's relationship to the token ID. This enables attackers to manipulate the `locked` state for tokens they do not own, potentially causing accounting errors and loss of funds.",
+      "severity": "high",
+      "original_id": "5f57f6011cac0ada"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_009",
+      "title": "Incorrect State Update in `onAttachToManagedNFT`",
+      "description": "The `onAttachToManagedNFT` function updates the `permanentTotalSupply` state variable before validating that the token ID is valid and exists. If the validation fails, `permanentTotalSupply` remains incorrect, leading to accounting errors.",
+      "severity": "high",
+      "original_id": "2efa2d234747f11a"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_010",
+      "title": "Missing Access Control on `deposit_for_without_boost` Allows Fee Evasion",
+      "description": "The function `deposit_for_without_boost` lacks access control restrictions, allowing any user to manipulate the timing of fee calculations by calling the function before legitimate admin operations. This enables users to avoid fees by triggering the function at specific times that reduce their effective locked amount.",
+      "severity": "high",
+      "original_id": "ec60596cf39dc58f"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_011",
+      "title": "Missing Access Control on `deposit_for` Allows Fee Evasion",
+      "description": "The function `deposit_for` lacks access control restrictions, allowing any user to manipulate the timing of fee calculations by calling the function before legitimate admin operations. This enables users to avoid fees by triggering the function at specific times that reduce their effective locked amount.",
+      "severity": "high",
+      "original_id": "99d7f9721528c17c"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_012",
+      "title": "Permanent Lock Bypass via Managed NFT Attachment",
+      "description": "The contract allows an attacker to bypass permanent lock restrictions by attaching tokens to managed NFTs, effectively converting permanent locks to temporary locks and extracting locked funds.",
+      "severity": "high",
+      "original_id": "VotingEscrow-001"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_013",
+      "title": "Critical: State Desynchronization in `_updateForAfterDistribution`",
+      "description": "The function `_updateForAfterDistribution` contains a critical state desynchronization bug where `supplyIndex[_gauge]` is updated to the current global `index` value, but this update happens AFTER the calculation of `_delta = _index - _supplyIndex`. This causes `_delta` to always be zero, preventing any rewards from being accrued to gauges that have been alive during the distribution period.",
+      "severity": "critical",
+      "original_id": "30c0813ca2874f4a"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_014",
+      "title": "Missing User Protection in deposit_for_without_boost",
+      "description": "The deposit_for_without_boost function allows users to deposit tokens without specifying minimum acceptable outputs, exposing them to unfavorable execution. The function lacks parameters for users to constrain execution outcomes.",
+      "severity": "high",
+      "original_id": "d50504f68bbb66fa"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_015",
+      "title": "Critical: Missing Access Control on `vote` Function Allows Fee Evasion",
+      "description": "The `vote` function lacks access control, allowing any user to manipulate vote weights before admin operations, enabling fee evasion.",
+      "severity": "critical",
+      "original_id": "V-001"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_016",
+      "title": "High: Representation Mismatch in `distribute` Function Causes Incorrect Fee Distribution",
+      "description": "The `distribute` function returns values in raw units but callers expect normalized units, causing incorrect fee distribution calculations.",
+      "severity": "high",
+      "original_id": "V-002"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_017",
+      "title": "High: Data Access Desynchronization in `distributeAll` Function Causes Missing Fee Distribution",
+      "description": "The `distributeAll` function iterates over `pools` array but `pools` can be modified during iteration, causing desynchronization and missing fee distribution.",
+      "severity": "high",
+      "original_id": "V-003"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_018",
+      "title": "Missing User Protection in Vote Function",
+      "description": "The vote function allows users to vote for pools without providing mechanisms to specify minimum acceptable outputs. When execution parameters may differ from initial requests, validation, accounting, and state updates do not consistently align with what actually occurred.",
+      "severity": "high",
+      "original_id": "e3700c4b66f6b033"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_019",
+      "title": "State Commitment Before Operation Verification in `vote` Function",
+      "description": "The `vote` function commits state changes (updating `lastVoted`, `votes`, `weightsPerEpoch`, and `totalWeightsPerEpoch`) before verifying that all operations in the `_vote` function succeeded. If the `vote` function fails after state commitment, the state is consumed but the operation is incomplete.",
+      "severity": "high",
+      "original_id": "c4758c92b047cdf3"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_020",
+      "title": "Missing Access Control on Critical State Updates in deposit_for Function",
+      "description": "The deposit_for function allows any caller to update state variables used in economic calculations without proper access control. Specifically, the function calls _deposit_for which updates the supply variable and locked mapping. Since deposit_for is marked as external and nonReentrant but lacks access control modifiers, any address can call it to manipulate the supply and locked balances. This allows an attacker to inflate the supply and locked balances arbitrarily, breaking the economic invariants of the voting escrow system.",
+      "severity": "high",
+      "original_id": "3cca8b32df7271f6"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_021",
+      "title": "State Synchronization Bug in deposit_for Function",
+      "description": "In the deposit_for function, when _deposit_for is called, the supply variable is updated twice: first in deposit_for and then again in _deposit_for. The first update in deposit_for sets supply = supply_before + _value, but then _deposit_for updates it again with supply = new_supply = supply_before + _value + boostedValue. This double update causes the supply variable to be inconsistent with the actual locked balances. The attacker can exploit this by calling deposit_for with a specific value that triggers the double update, causing the supply to be inflated without a corresponding increase in locked balances, allowing the attacker to gain voting power without actually locking tokens.",
+      "severity": "high",
+      "original_id": "d461b6f8731bf8bc"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_022",
+      "title": "Mathematical Error in deposit_for Function",
+      "description": "In the deposit_for function, when _deposit_for is called, the supply variable is updated with supply = supply_before + _value, but then _deposit_for updates it again with supply = new_supply = supply_before + _value + boostedValue. However, the boostedValue is calculated as min(calculatedBoostValue, availableBoostFNXAmount), but the calculation of calculatedBoostValue is based on _value, and the calculation of availableBoostFNXAmount is based on the current state. This causes the supply to be inflated without a corresponding increase in locked balances, allowing the attacker to gain voting power without actually locking tokens.",
+      "severity": "high",
+      "original_id": "8847426c17b8d0e8"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_023",
+      "title": "Missing Caller Verification in Automatic Fund Handling",
+      "description": "The contract has automatic fund handling in the `notifyRewardAmount` function that processes incoming funds without verifying the caller identity. This allows any caller to manipulate the reward distribution state.",
+      "severity": "high",
+      "original_id": "3b76aec6572ebb68"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_024",
+      "title": "Missing User Protection in deposit_for Function",
+      "description": "The deposit_for function modifies user positions by changing locked amounts without allowing users to specify minimum acceptable outputs. This exposes users to unfavorable execution outcomes.",
+      "severity": "high",
+      "original_id": "77e0c88d62ef3a8e"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_025",
+      "title": "Validation Timing Issue in deposit_for Function",
+      "description": "The deposit_for function validates parameters (like _value > 0) AFTER potentially executing state changes, allowing invalid operations to complete.",
+      "severity": "high",
+      "original_id": "4661acfc4fac2729"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_026",
+      "title": "State Synchronization Issue in deposit_for Function",
+      "description": "The deposit_for function modifies state (locked[_tokenId].amount) before validation, causing state desynchronization between expected and actual execution.",
+      "severity": "high",
+      "original_id": "417b7060a353674f"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_027",
+      "title": "Missing Access Control on Economic State Updates in deposit_for",
+      "description": "The deposit_for function calls _deposit_for without access control, allowing any user to manipulate the timing and values of these updates before admin operations, enabling fee avoidance and unfair advantage.",
+      "severity": "high",
+      "original_id": "4da07de3dd4a97a6"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_028",
+      "title": "Missing Access Control on Economic State Updates in deposit_for",
+      "description": "The deposit_for function calls _deposit_for without access control, allowing any user to manipulate the timing and values of these updates before admin operations, enabling fee avoidance and unfair advantage.",
+      "severity": "high",
+      "original_id": "cf2ee9f82d71862e"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_029",
+      "title": "Type System: Packed Value Comparison Without Normalization",
+      "description": "The VotingEscrowUpgradeable contract defines custom types (LockedBalance, Point, Checkpoint) that can have multiple bit representations for the same logical value. The equality operations in the contract compare raw bit representations without normalization, causing equal values with different representations to compare as unequal.",
+      "severity": "high",
+      "original_id": "5e4e17983378a83f"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_030",
+      "title": "Missing Caller Verification in Automatic Deposit Operations",
+      "description": "The contract has automatic deposit operations triggered by default currency handlers that do not verify caller identity or transaction origin before executing operations. This allows anyone can send tokens to the contract and trigger deposit operations that may not align with user intent.",
+      "severity": "high",
+      "original_id": "d0f2ddce2ae38d97"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_031",
+      "title": "Missing User Protection in vote() and _vote() Functions",
+      "description": "The vote() and _vote() functions allow users to cast votes for pools with weights, but provide no mechanism for users to specify minimum acceptable outputs or execution bounds. This exposes users to unfavorable execution outcomes when execution differs from requests.",
+      "severity": "high",
+      "original_id": "fd4e51a29e4838b1"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_032",
+      "title": "Validation Timing Issue in vote() Function",
+      "description": "The vote() function executes operations before validating parameters, allowing invalid operations to complete. Validation occurs after state changes, enabling invalid operations to execute.",
+      "severity": "high",
+      "original_id": "40feed46f049955c"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_033",
+      "title": "Critical: Missing Access Control on `killGauge` Allows Fee Manipulation",
+      "description": "The `killGauge` function lacks proper access control, allowing any caller to manipulate the `claimable` state variable used in reward calculations. This enables attackers to avoid fees by killing gauges before rewards are distributed, causing economic loss to the protocol.",
+      "severity": "critical",
+      "original_id": "34f1f27cfa63b001"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_034",
+      "title": "High: Representation Mismatch in `notifyRewardAmount` Causes Reward Calculation Errors",
+      "description": "The `notifyRewardAmount` function receives reward amounts in one representation but performs calculations expecting a different representation. Specifically, the function receives `amount_` but uses `weightAt` which is in a different unit scale, causing incorrect `index` calculations. This leads to incorrect reward distribution and potential loss of funds.",
+      "severity": "high",
+      "original_id": "9455a2e9444bdd08"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_035",
+      "title": "High: Data Access Integrity Issue in `aggregateClaim` Causes Missing Claims",
+      "description": "The `aggregateClaim` function iterates over arrays but does not verify that the arrays are properly synchronized. When `merkl_.users` and `merkl_.tokens` are processed, if the arrays are not properly aligned, some claims may be missed. This can lead to permanent loss of user funds.",
+      "severity": "high",
+      "original_id": "141d40070c04819a"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_036",
+      "title": "Precision Loss in `balanceOfNFT` and `balanceOfAtNFT` Functions",
+      "description": "The `balanceOfNFT` and `balanceOfAtNFT` functions in VotingEscrowUpgradeableV1_2.sol contain precision loss vulnerabilities in the `Point` structure calculations. The `Point.bias` field is defined as `int128`, but the calculations in `_balanceOfNFT` and `_balanceOfAtNFT` perform division operations that can truncate significant digits, especially when the `slope` and `bias` values are large. This causes the returned voting power values to be systematically lower than mathematically correct values, potentially by several percentage points for large balances.",
+      "severity": "high",
+      "original_id": "VE-001"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_037",
+      "title": "State Inconsistency in `lockPermanent` and `unlockPermanent` Operations",
+      "description": "The `lockPermanent` and `unlockPermanent` functions in VotingEscrowUpgradeableV1_2.sol contain state inconsistency vulnerabilities. When `lockPermanent` is called, it sets `end = 0` and `isPermanentLocked = true`, but the `permanentTotalSupply` is incremented. However, when `unlockPermanent` is called, it decrements `permanentTotalSupply`, but the `locked` struct is restored to a state where `end = _maxLockTimestamp()` and `isPermanentLocked = false`. The issue is that the `permanentPoints` mapping is not properly updated during `unlockPermanent`, causing a mismatch between `permanentTotalSupply` and the sum of all `permanentPoints` values.",
+      "severity": "high",
+      "original_id": "VE-002"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_038",
+      "title": "Authorization Bypass in `onAttachToManagedNFT` and `onDettachFromManagedNFT` Functions",
+      "description": "The `onAttachToManagedNFT` and `onDettachFromManagedNFT` functions in VotingEscrowUpgradeableV1_2.sol contain authorization bypass vulnerabilities. These functions are marked as `external` and are intended to be called by the Managed NFT Manager, but they do not verify that the caller is the Managed NFT Manager. An attacker could call these functions directly to attach or detach tokens from managed NFTs, potentially stealing voting power or causing loss of funds.",
+      "severity": "high",
+      "original_id": "VE-003"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_039",
+      "title": "Resource-Controlled Failure in `deposit_for` and `deposit_for_without_boost` Functions",
+      "description": "The `deposit_for` and `deposit_for_without_boost` functions in VotingEscrowUpgradeableV1_2.sol contain resource-controlled failure vulnerabilities. These functions call `_deposit_for`, which in turn calls `checkpoint`, which calls `_checkpoint`. The `_checkpoint` function performs a loop that iterates up to 255 times, and each iteration performs multiple arithmetic operations. If the caller provides a value that causes the loop to iterate the maximum number of times, the caller can consume more gas than the function expects, potentially causing the transaction to fail with an out-of-gas error. The issue is that the function does not check the remaining gas before calling `_checkpoint`, and does not revert with a specific error message when gas runs out.",
+      "severity": "medium",
+      "original_id": "VE-004"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_040",
+      "title": "Mathematical Domain Validation Failure in `balanceOfNFT` Function",
+      "description": "The `balanceOfNFT` function in VotingEscrowUpgradeable1_2.sol contains a mathematical domain validation failure vulnerability. The function calls `_balanceOfNFT`, which performs a calculation that includes a division operation: `u_old.slope = old_locked.amount / iMAXTIME`. If `old_locked.amount` is negative, the division operation is mathematically valid, but the result is negative, which is not a valid voting power value. The function does not validate that the input values are within the valid mathematical domain for the operations being performed, and does not revert with a specific error message when the input values are outside the valid domain.",
+      "severity": "medium",
+      "original_id": "VE-005"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_041",
+      "title": "Missing Access Control on Critical State Updates in updateAddress",
+      "description": "The updateAddress function lacks access control on critical state updates that affect economic calculations. The function allows any caller to update state variables used in reward distribution calculations without proper authorization.",
+      "severity": "high",
+      "original_id": "df651c1edfe599a6"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_042",
+      "title": "Type System Integrity: Packed Address Comparison Without Normalization",
+      "description": "The contract uses raw address comparisons in multiple places without normalizing addresses (e.g., comparing against address(0x0)). While addresses are typically 20 bytes, if any intermediate representation uses a different encoding (e.g., compressed public keys or custom types), equality checks may fail for semantically identical addresses.",
+      "severity": "high",
+      "original_id": "11706ae76d362e64"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_044",
+      "title": "Operation Lifecycle: State Commitment Before Operation Verification",
+      "description": "The contract commits state changes before verifying all intended operations succeeded. For example, in createV2Gauge, the contract creates bribes and registers the gauge before verifying that the pool was created by the factory.",
+      "severity": "high",
+      "original_id": "1cdbe8941ee326fc"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_045",
+      "title": "External Integration: Interface Definition Incompatibility",
+      "description": "The contract declares interfaces for external protocols (e.g., Alchemy, OpenZeppelin) but uses different parameter counts than the actual external protocol. For example, the contract declares createBribe with 3 parameters but the actual protocol uses 4 parameters.",
+      "severity": "critical",
+      "original_id": "1e2909602de4f5ef"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_046",
+      "title": "External Integration: Fork Behavioral Divergence",
+      "description": "The contract assumes the bribe factory works like the original protocol, but the fork changed where/how bribe creation works. For example, the contract calls bribeFactory.createBribe but the fork moved bribe creation to a separate contract.",
+      "severity": "critical",
+      "original_id": "23f43eb68888e9d2"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_047",
+      "title": "Missing Caller Verification in Automatic Reward Collection Triggers",
+      "description": "The contract has automatic reward collection functions that do not verify the caller identity before executing operations. This allows unauthorized users to trigger reward collection for other users' votes, potentially leading to fund misallocation.",
+      "severity": "high",
+      "original_id": "61d079bae0901b33"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_048",
+      "title": "Missing Verification in Vote Reset Operations",
+      "description": "The _reset function does not verify that the caller is authorized to reset votes for a specific NFT. This allows unauthorized users to reset votes for other users' NFTs, potentially leading to vote manipulation.",
+      "severity": "high",
+      "original_id": "0d464b3ef0293910"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_049",
+      "title": "Missing Authorization Check in Bribe Claim Operations",
+      "description": "The claimBribes function does not verify that the caller is authorized to claim bribes for a specific NFT. This allows unauthorized users to claim bribes for other users' NFTs, potentially leading to bribe misallocation.",
+      "severity": "high",
+      "original_id": "fa9dfcc6d612607b"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_050",
+      "title": "Critical: Missing Access Control on `reset()` and `poke()` Functions Allows Vote Manipulation",
+      "description": "The `reset()` and `poke()` functions lack proper access control, allowing any user to manipulate vote weights at critical times to avoid fees or gain unfair advantages.",
+      "severity": "critical",
+      "original_id": "e3198c79b79940d5"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_051",
+      "title": "Critical: Missing User Protection in Vote Function Allows Execution Manipulation",
+      "description": "The vote() function allows users to vote for pools with specified weights, but provides no mechanism for users to specify minimum acceptable outputs or execution bounds. This allows malicious actors to manipulate execution outcomes by front-running or sandwiching votes, causing users to receive unfavorable outcomes without recourse.",
+      "severity": "critical",
+      "original_id": "01011f23d5b11f01"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_052",
+      "title": "High: Validation Timing in Vote Function Allows Invalid Operations to Complete",
+      "description": "The vote() function executes operations (vote, bribe deposits) before validating all conditions. This allows invalid operations to complete if validation fails after execution. For example, if a pool is not alive, the vote still executes, and bribe deposits occur, but the vote is invalid. The user's votes are used, but the vote is invalid, causing a loss of votes and potential rewards.",
+      "severity": "high",
+      "original_id": "66429f742fb9f83f"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_053",
+      "title": "State Not Restored After Vote Reset",
+      "description": "The reset() function decrements the totalWeightsPerEpoch mapping but does not restore the original value when the reset operation fails due to insufficient time elapsed since last vote. This leads to accounting inconsistency where the total weight tracking becomes incorrect.",
+      "severity": "high",
+      "original_id": "84a13bac8b992d98"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_054",
+      "title": "Missing Domain Validation in _epochTimestamp",
+      "description": "The _epochTimestamp() function returns the active period from the minter without validating that the returned value is within the valid domain for time-based operations. This can lead to undefined behavior when the returned timestamp is used in mathematical operations expecting valid time values.",
+      "severity": "medium",
+      "original_id": "3b4df97122d40cbe"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_055",
+      "title": "Authorization Context Not Bound",
+      "description": "The vote() function does not bind the caller's authorization context to the operation. This allows front-running attacks where an attacker can submit the same vote with different parameters after the authorization is obtained.",
+      "severity": "high",
+      "original_id": "a35ff854b542d7bf"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_056",
+      "title": "Resource-Controlled Failure in distribute()",
+      "description": "The distribute() function can fail silently for some gauges due to gas limits while still committing state changes for other gauges. This occurs because the function calls _distribute() for each gauge but does not check success before committing state changes.",
+      "severity": "high",
+      "original_id": "b448acf67f6f8fab"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_057",
+      "title": "Precision Loss in Weight Calculation",
+      "description": "The weight calculation in vote() function uses integer division which can cause precision loss when calculating _poolWeight = (_weights[i] * _weight) / _totalVoteWeight. This occurs because the division operation truncates the result instead of rounding, leading to small losses that accumulate over time.",
+      "severity": "medium",
+      "original_id": "fe8ecf290a4b9c1a"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_058",
+      "title": "Missing Validation in _createGauge",
+      "description": "The _createGauge() function does not validate that the created gauge address is not the zero address before using it in subsequent operations. This can lead to funds being sent to the zero address permanently.",
+      "severity": "medium",
+      "original_id": "8c2ec75ba521406f"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_059",
+      "title": "State Commitment Before Operation Verification",
+      "description": "The vote() function commits state changes (poolVote, weightsPerEpoch, votes) before verifying that all intended operations succeeded. This can lead to state consumed but operation incomplete if external calls fail.",
+      "severity": "high",
+      "original_id": "631989bd811276f1"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_060",
+      "title": "Critical: Permanent Supply Underflow in unlockPermanent",
+      "description": "The unlockPermanent function performs an unchecked subtraction from permanentTotalSupply without verifying sufficient balance exists. This allows underflow when unlocking more than the total permanent supply, causing permanentTotalSupply to wrap around to a massive value (2^256 - N). This breaks the protocol's accounting invariant that permanentTotalSupply >= 0.",
+      "severity": "critical",
+      "original_id": "940b2eb0388646f2"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_061",
+      "title": "Missing User Protection in Withdrawal Functions",
+      "description": "The withdraw() and onDettachFromManagedNFT() functions reduce user positions or withdraw assets without allowing users to specify minimum acceptable outputs, exposing them to manipulation.",
+      "severity": "high",
+      "original_id": "abb3572c67dd29b7"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_062",
+      "title": "Validation Timing Issue in increase_unlock_time",
+      "description": "The increase_unlock_time function performs validation after state changes instead of before, allowing invalid operations to complete.",
+      "severity": "high",
+      "original_id": "94e0ccc93e709d70"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_063",
+      "title": "State Synchronization Issue in onDettachFromManagedNFT",
+      "description": "The onDettachFromManagedNFT function updates state before dependent operations execute, causing state synchronization issues.",
+      "severity": "high",
+      "original_id": "78e4941960e5d1c1"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_064",
+      "title": "Return Value Unit Consistency Issue in _proccessLockChange",
+      "description": "The _proccessLockChange function returns values in incorrect units when used by callers in calculations, causing unit mismatches.",
+      "severity": "high",
+      "original_id": "a5ea2feb459f0a42"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_065",
+      "title": "State Commitment Timing Issue in _proccessLockChange",
+      "description": "The _proccessLockChange function commits state before operations that could fail, causing state commitment timing issues.",
+      "severity": "high",
+      "original_id": "1a3b67de42824c37"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_066",
+      "title": "Critical: State Desynchronization in Gauge Distribution Logic",
+      "description": "The _updateForAfterDistribution function has a critical state desynchronization bug where supplyIndex[_gauge] is updated to the current global index value, but this update happens AFTER the calculation of _delta uses the OLD supplyIndex value. This causes claimable[_gauge] is incremented with an incorrect delta value, leading to permanent loss of funds. The bug is in lines 1073-1074 where supplyIndex[_gauge] = _index is executed AFTER _delta = _index - _supplyIndex is calculated.",
+      "severity": "critical",
+      "original_id": "6ddaa586d673bcd0"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_067",
+      "title": "High: Missing Access Control on createCustomGauge",
+      "description": "The createCustomGauge function lacks access control on the gauge address parameter. The function requires(!isGauge[gauge_]) but does not validate that the caller has permission to create a gauge at that address. This allows any caller to create a gauge at an arbitrary address, potentially overwriting existing gauges or creating gauges at addresses that were intended to be reserved for specific purposes.",
+      "severity": "high",
+      "original_id": "108704548e3a48a8"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_068",
+      "title": "Missing Reentrancy Protection in vote() and reset() Functions",
+      "description": "The vote() and reset() functions lack proper reentrancy protection despite using the nonReentrant modifier. The functions call external contracts (IBribe.deposit and IGauge.claimFees) after modifying state variables, creating a reentrancy vulnerability where an attacker can exploit the state inconsistency to drain funds.",
+      "severity": "high",
+      "original_id": "d6ebe7541a75fb5c"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_069",
+      "title": "Insecure Fund Distribution in distribute() Function",
+      "description": "The distribute() function lacks proper checks before distributing funds to gauges. The function calls IGauge.notifyRewardAmount() without verifying the gauge's current state, allowing an attacker to manipulate the distribution by triggering the function when the gauge is in an inconsistent state, leading to incorrect fund allocation.",
+      "severity": "high",
+      "original_id": "159c19ec81d66828"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_070",
+      "title": "Missing Validation in _createGauge() Function",
+      "description": "The _createGauge() function lacks proper validation of gauge parameters before creating a new gauge. The function calls IGaugeFactory.createGauge() without verifying the gauge's initial state, allowing an attacker to create a malicious gauge with invalid parameters, leading to fund loss.",
+      "severity": "high",
+      "original_id": "860d3eb1b2e79806"
+    }
+  ],
+  "input_tokens": 8624,
+  "output_tokens": 2834,
+  "cached_tokens": 2459
+}

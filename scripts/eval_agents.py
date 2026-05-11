@@ -27,7 +27,8 @@ import json
 import os
 import sys
 import time
-from dataclasses import asdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from io import StringIO
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -39,6 +40,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from rich.console import Console
+
 from validator.scorer import ScaBenchScorerV2
 
 BENCHMARK_FILE = "validator/curated-highs-only-2025-08-08.json"
@@ -46,6 +49,7 @@ DEFAULT_REPORTS_DIR = "reports"
 DEFAULT_SCORING_OUTPUT = "scoring_output"
 DEFAULT_INFERENCE_API = "http://localhost:8087"
 EVAL_MAX_VULNS = 100
+MAX_WORKERS = 8
 
 
 def load_benchmark():
@@ -72,6 +76,74 @@ def load_agent_findings(report_file):
         return None, f"Invalid report format: {type(data.get('report'))}"
 
     return vulns[:EVAL_MAX_VULNS], None
+
+
+def _atomic_json_write(path: Path, data: dict):
+    """Write JSON atomically via tmp+rename to prevent corrupt files on kill."""
+    tmp = path.with_suffix(".tmp")
+    with open(tmp, "w") as f:
+        json.dump(data, f, indent=2)
+    os.rename(tmp, path)
+
+
+def _score_one_project(
+    project_key: str,
+    report_file: Path,
+    expected_vulns: list,
+    agent_name: str,
+    agent_output_dir: Path,
+    scorer_config: dict,
+) -> dict:
+    """Score a single agent*project pair. Thread-safe: owns its own scorer instance."""
+    t0 = time.time()
+
+    findings, error = load_agent_findings(report_file)
+    if findings is None:
+        result_data = {
+            "project": project_key,
+            "agent": agent_name,
+            "status": "error",
+            "error": error,
+        }
+        _atomic_json_write(agent_output_dir / f"score_{project_key}.json", result_data)
+        return result_data
+
+    buf = StringIO()
+    quiet_console = Console(file=buf)
+    scorer = ScaBenchScorerV2(scorer_config, console=quiet_console)
+
+    result = scorer.score_project(
+        expected_findings=expected_vulns,
+        tool_findings=findings,
+        project_name=project_key,
+    )
+
+    elapsed = time.time() - t0
+    result_data = {
+        "project": result.project,
+        "agent": agent_name,
+        "status": "success",
+        "timestamp": result.timestamp,
+        "elapsed_seconds": round(elapsed, 1),
+        "total_expected": result.total_expected,
+        "total_found": result.total_found,
+        "true_positives": result.true_positives,
+        "false_negatives": result.false_negatives,
+        "false_positives": result.false_positives,
+        "detection_rate": result.detection_rate,
+        "precision": result.precision,
+        "f1_score": result.f1_score,
+        "matched_findings": result.matched_findings,
+        "missed_findings": result.missed_findings,
+        "undecided_findings": result.undecided_findings,
+        "extra_findings": result.extra_findings,
+        "input_tokens": result.input_tokens,
+        "output_tokens": result.output_tokens,
+        "cached_tokens": result.cached_tokens,
+    }
+
+    _atomic_json_write(agent_output_dir / f"score_{project_key}.json", result_data)
+    return result_data
 
 
 def main():
@@ -126,7 +198,9 @@ def main():
     print(f"Scorer model: {args.model or 'CHUTES_MODELS (multi-model)'}")
     print()
 
-    all_summaries = {}
+    # === DISCOVERY PHASE (sequential, fast) ===
+    all_work_units = []   # [(project_key, report_file, expected, agent_name, output_dir, config)]
+    all_preloaded = {}    # {agent_name: [result_data, ...]}  — already-scored results
 
     for agent_dir in agent_dirs:
         agent_name = agent_dir.name
@@ -138,11 +212,9 @@ def main():
             print(f"[{agent_name}] No report files found, skipping")
             continue
 
-        # Filter to requested projects
         if args.projects:
             report_files = [f for f in report_files if f.stem in args.projects]
 
-        # Filter to projects that have benchmark data
         scoreable = []
         no_benchmark = []
         for rf in report_files:
@@ -152,7 +224,6 @@ def main():
             else:
                 no_benchmark.append(project_key)
 
-        # Resume support
         to_score = []
         already_done = []
         for project_key, rf in scoreable:
@@ -164,27 +235,21 @@ def main():
 
         print(f"[{agent_name}] {len(report_files)} reports, {len(to_score)} to score, "
               f"{len(already_done)} done, {len(no_benchmark)} no benchmark data")
-
         if no_benchmark:
             print(f"  No benchmark: {', '.join(no_benchmark)}")
 
-        if not to_score:
-            print(f"  Nothing to score")
-            # Still load existing results for summary
-            for project_key in already_done:
-                score_file = agent_output_dir / f"score_{project_key}.json"
-                try:
-                    with open(score_file) as f:
-                        all_summaries.setdefault(agent_name, []).append(json.load(f))
-                except (json.JSONDecodeError, OSError):
-                    pass
-            continue
+        # Load pre-existing results for summary
+        preloaded = []
+        for project_key in already_done:
+            score_file = agent_output_dir / f"score_{project_key}.json"
+            try:
+                with open(score_file) as f:
+                    preloaded.append(json.load(f))
+            except (json.JSONDecodeError, OSError):
+                pass
+        all_preloaded[agent_name] = preloaded
 
-        if args.dry_run:
-            print(f"  Would score: {[k for k, _ in to_score]}")
-            continue
-
-        # Initialize scorer for this agent
+        # Build scorer config (same for all projects under this agent)
         scorer_config = {
             "api_key": api_key,
             "api_url": args.inference_api,
@@ -195,89 +260,65 @@ def main():
         }
         if args.model:
             scorer_config["model"] = args.model
-        scorer = ScaBenchScorerV2(scorer_config)
 
-        agent_results = []
+        if args.dry_run:
+            if to_score:
+                print(f"  Would score: {[k for k, _ in to_score]}")
+            continue
 
-        # Load existing results for summary
-        for project_key in already_done:
-            score_file = agent_output_dir / f"score_{project_key}.json"
-            try:
-                with open(score_file) as f:
-                    agent_results.append(json.load(f))
-            except (json.JSONDecodeError, OSError):
-                pass
-
-        for i, (project_key, report_file) in enumerate(to_score, 1):
-            print(f"\n  [{i}/{len(to_score)}] Scoring {project_key}...")
-            t0 = time.time()
-
-            findings, error = load_agent_findings(report_file)
-            if findings is None:
-                print(f"    SKIP: {error}")
-                result_data = {
-                    "project": project_key,
-                    "agent": agent_name,
-                    "status": "error",
-                    "error": error,
-                }
-                score_file = agent_output_dir / f"score_{project_key}.json"
-                with open(score_file, "w") as f:
-                    json.dump(result_data, f, indent=2)
-                agent_results.append(result_data)
-                continue
-
-            expected = benchmark[project_key]
-            print(f"    {len(expected)} expected vs {len(findings)} found")
-
-            # Reset token counters per project
-            scorer.input_tokens = 0
-            scorer.output_tokens = 0
-            scorer.cached_tokens = 0
-
-            result = scorer.score_project(
-                expected_findings=expected,
-                tool_findings=findings,
-                project_name=project_key,
-            )
-
-            elapsed = time.time() - t0
-            result_data = {
-                "project": result.project,
-                "agent": agent_name,
-                "status": "success",
-                "timestamp": result.timestamp,
-                "elapsed_seconds": round(elapsed, 1),
-                "total_expected": result.total_expected,
-                "total_found": result.total_found,
-                "true_positives": result.true_positives,
-                "false_negatives": result.false_negatives,
-                "false_positives": result.false_positives,
-                "detection_rate": result.detection_rate,
-                "precision": result.precision,
-                "f1_score": result.f1_score,
-                "matched_findings": result.matched_findings,
-                "missed_findings": result.missed_findings,
-                "undecided_findings": result.undecided_findings,
-                "extra_findings": result.extra_findings,
-                "input_tokens": result.input_tokens,
-                "output_tokens": result.output_tokens,
-                "cached_tokens": result.cached_tokens,
-            }
-
-            score_file = agent_output_dir / f"score_{project_key}.json"
-            with open(score_file, "w") as f:
-                json.dump(result_data, f, indent=2)
-
-            agent_results.append(result_data)
-            detection_pct = round(result.detection_rate * 100)
-            print(f"    Detection: {detection_pct}% | TP: {result.true_positives}/{result.total_expected} | "
-                  f"Precision: {result.precision:.1%} | F1: {result.f1_score:.1%} | {elapsed:.0f}s")
-
-        all_summaries[agent_name] = agent_results
+        for project_key, rf in to_score:
+            all_work_units.append((
+                project_key, rf, benchmark[project_key],
+                agent_name, agent_output_dir, scorer_config,
+            ))
 
     if args.dry_run:
         return
+
+    # === EXECUTION PHASE (parallel) ===
+    all_results = {}  # {agent_name: [result_data, ...]}
+
+    # Seed with preloaded results
+    for agent_name, preloaded in all_preloaded.items():
+        all_results.setdefault(agent_name, []).extend(preloaded)
+
+    if all_work_units:
+        print(f"\nSubmitting {len(all_work_units)} scoring jobs to {MAX_WORKERS} workers...")
+
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+            futures = {
+                pool.submit(_score_one_project, *unit): (unit[3], unit[0])  # (agent_name, project_key)
+                for unit in all_work_units
+            }
+            for future in as_completed(futures):
+                agent_name, project_key = futures[future]
+                try:
+                    result_data = future.result()
+                    all_results.setdefault(agent_name, []).append(result_data)
+                    if result_data.get("status") == "success":
+                        detection_pct = round(result_data["detection_rate"] * 100)
+                        print(f"  [done] {agent_name}/{project_key} | "
+                              f"Detection: {detection_pct}% | "
+                              f"TP: {result_data['true_positives']}/{result_data['total_expected']} | "
+                              f"F1: {result_data['f1_score']:.1%} | "
+                              f"{result_data['elapsed_seconds']}s")
+                    else:
+                        print(f"  [skip] {agent_name}/{project_key}: "
+                              f"{result_data.get('error', 'unknown')}")
+                except Exception as e:
+                    print(f"  [FAIL] {agent_name}/{project_key}: {e}")
+                    all_results.setdefault(agent_name, []).append({
+                        "project": project_key,
+                        "agent": agent_name,
+                        "status": "error",
+                        "error": str(e),
+                    })
+    elif not any(all_preloaded.values()):
+        print("Nothing to score")
+        return
+
+    # Use all_results for the summary section
+    all_summaries = all_results
 
     # Print comparative summary
     print(f"\n{'='*80}")

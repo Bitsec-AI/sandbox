@@ -1,0 +1,121 @@
+{
+  "project": "sherlock_tally_2024_12",
+  "agent": "agent317",
+  "status": "success",
+  "timestamp": "2026-04-09T12:57:54.921826",
+  "elapsed_seconds": 80.6,
+  "total_expected": 2,
+  "total_found": 12,
+  "true_positives": 1,
+  "false_negatives": 1,
+  "false_positives": 11,
+  "detection_rate": 0.5,
+  "precision": 0.08333333333333333,
+  "f1_score": 0.14285714285714285,
+  "matched_findings": [
+    {
+      "id": "sherlock_tally_2024_12_expected_001",
+      "expected": "Updating earning power for de-",
+      "matched": "Insufficient Earning Power Update Validation in bumpEarningPower",
+      "confidence": 0.8,
+      "justification": "Finding 1 describes an issue with incorrect earning power updates when delegatee changes, which aligns with the expected vulnerability about updating earning power for delegatee changes. Both involve improper validation leading to potential reward draining.",
+      "severity": "high",
+      "expected_description": "Source: https://github.com/sherlock-audit/2024-11-tally/issues/31\n\n**Impact:**\nAll of the rewards available at a given time can be drained by a malicious depositor\n\n**Recommendation:**\nPlease consider adding checkpointing of rewards to _alter Delegatee and _alter Claimer : Governance Staker.sol#L 619-L 624: function _alter Delegatee ( Deposit storage deposit, Deposit Identifier _deposit Id, address _new Delegatee ) internal virtual { _revert If Address Zero (_new Delegatee); + _checkpoint Global Reward (); + _checkpoint Reward (deposit); Governance Staker.sol#L 645-L 650: function _alter Claimer ( Deposit storage deposit, Deposit Identifier _deposit Id, address _new Claimer ) internal virtual { _revert If Address Zero (_new Claimer); + _checkpoint Global Reward (); + _checkpoint Reward (deposit);",
+      "found_description": "The bumpEarningPower function fails to properly validate that the new earning power calculation uses the correct deposit parameters. The function calls earningPowerCalculator.getNewEarningPower with deposit.balance, deposit.owner, and deposit.delegatee, but if the deposit's balance or delegatee changes between the checkpoint and the earning power calculation, the new earning power may be calculated incorrectly.\n\nMathematical Proof:\n- Deposit has balance 1000, earning power 800\n- Attacker front-runs bump transaction and calls alterDelegatee\n- New delegatee gives earning power 1200 for same balance\n- bumpEarningPower calculates with OLD delegatee (800) but uses NEW delegatee parameters\n- This creates state desynchronization between the actual delegatee and calculated earning power\n\nExploitation: An attacker can manipulate the timing of delegatee changes relative to bump operations to cause incorrect earning power calculations. This could lead to either inflated rewards (if the new delegatee would give higher earning power) or reduced rewards (if the new delegatee would give lower earning power).\n\nFinancial Impact: Incorrect reward distribution where some users receive more rewards than deserved while others receive less. The protocol's reward distribution becomes unfair and potentially exploitable.",
+      "found_id": "41acd0f993ab3feb",
+      "tool_finding_index": 7
+    }
+  ],
+  "missed_findings": [
+    {
+      "id": "sherlock_tally_2024_12_expected_000",
+      "title": "_requested Tip is not deduced",
+      "description": "Source: https://github.com/sherlock-audit/2024-11-tally/issues/33\n\n**Impact:**\nRewards are denied to legitimate participants (rewards insolvency) 4\n\n**Recommendation:**\nConsider subtracting the tip from the depositor rewards: Governance Staker.sol#L 508: // Send tip to the receiver Safe ERC 20.safe Transfer (REWARD_TOKEN, _tip Receiver, _requested Tip); + deposit.scaled Unclaimed Reward Checkpoint = +deposit.scaled Unclaimed Reward Checkpoint - (_requested Tip * SCALE_FACTOR);",
+      "severity": "high",
+      "reason": "Not found"
+    }
+  ],
+  "undecided_findings": [],
+  "extra_findings": [
+    {
+      "id": "sherlock_tally_2024_12_tool_000",
+      "title": "Stale Oracle Window Underflow Vulnerability",
+      "description": "The _isOracleStale() function uses subtraction without checking if block.timestamp is greater than lastOracleUpdateTime, which can cause underflow and incorrect stale oracle detection when the system time moves backwards (e.g., due to blockchain reorganization). This could allow attackers to manipulate the earning power calculation by exploiting timestamp inconsistencies.\n\nMathematical Proof:\n- Let STALE_ORACLE_WINDOW = 86400 (1 day)\n- Let lastOracleUpdateTime = 1000000\n- If block.timestamp = 999999 (due to reorg), then:\n  block.timestamp - lastOracleUpdateTime = 999999 - 1000000 = -1\n- Since Solidity 0.8+ reverts on underflow, this would cause the function call to revert\n- However, if using unchecked or older Solidity, this would underflow to type(uint256).max\n- This would incorrectly return true for _isOracleStale() when the oracle is actually not stale\n\nExploitation Scenario:\nAn attacker could wait for a blockchain reorganization that causes timestamps to move backwards, then call getEarningPower() or getNewEarningPower() during the window where the subtraction underflows. This would cause the functions to return _amountStaked (full earning power) even when the oracle is actually up-to-date.\n\nFinancial Impact:\nStakers with ineligible delegatees could receive full earning power when they should receive zero, leading to protocol insolvency as rewards are paid out to ineligible participants. The impact depends on the amount staked by ineligible delegatees.",
+      "severity": "high",
+      "original_id": "2b7a91e9d1838928"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_001",
+      "title": "TimeOfIneligibility State Desynchronization",
+      "description": "The _updateDelegateeScore function only updates timeOfIneligibility when a delegatee transitions from eligible to ineligible, but fails to clear it when a delegatee transitions from ineligible to eligible. This creates state desynchronization where timeOfIneligibility persists even after a delegatee becomes eligible again.\n\nMathematical Proof:\n1. Delegatee has score = 100, threshold = 50 (eligible)\n2. Oracle updates score to 40 (ineligible) \u2192 timeOfIneligibility set to block.timestamp\n3. Oracle updates score to 60 (eligible again) \u2192 timeOfIneligibility remains set\n4. getNewEarningPower() checks: timeOfIneligibility[_delegatee] + updateEligibilityDelay <= block.timestamp\n   - Even though delegatee is eligible, the old timeOfIneligibility value is still used\n   - This may incorrectly indicate that an update is needed\n\nExploitation Scenario:\nA malicious oracle could temporarily lower a delegatee's score below threshold to set timeOfIneligibility, then immediately raise it back above threshold. The persisted timeOfIneligibility value could cause getNewEarningPower() to return incorrect update eligibility flags, potentially triggering unnecessary state updates or incorrect earning power calculations.\n\nFinancial Impact:\nStakers may experience incorrect earning power calculations and unnecessary state transitions, potentially leading to loss of rewards or incorrect protocol accounting. The impact is amplified if the protocol relies on accurate update eligibility flags for reward distribution.",
+      "severity": "high",
+      "original_id": "ff78c879aa4a094c"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_002",
+      "title": "Threshold Change State Inconsistency",
+      "description": "When the delegateeEligibilityThresholdScore is changed via setDelegateeScoreEligibilityThreshold(), the timeOfIneligibility mapping is not updated to reflect the new threshold. This creates inconsistencies between delegatee scores and their eligibility timestamps.\n\nMathematical Proof:\n1. Threshold = 50, Delegatee score = 40 (ineligible), timeOfIneligibility set to T1\n2. Owner changes threshold to 30 \u2192 Delegatee is now eligible (40 >= 30)\n3. getNewEarningPower() for this delegatee:\n   - _isDelegateeEligible() returns true (eligible)\n   - But timeOfIneligibility still contains T1\n   - The function returns (_amountStaked, true) which is correct\n4. However, if threshold is later changed back to 50:\n   - Delegatee becomes ineligible again\n   - But timeOfIneligibility still shows T1 (old timestamp)\n   - The update delay calculation uses the old timestamp, potentially allowing immediate penalty\n\nExploitation Scenario:\nA malicious owner could manipulate the threshold to reset eligibility timestamps, then change it back to immediately penalize certain delegatees without respecting the updateEligibilityDelay. Alternatively, the inconsistent state could cause incorrect earning power calculations during threshold transitions.\n\nFinancial Impact:\nStakers could lose earning power immediately after threshold changes without the intended delay period, violating the protocol's safety mechanism. This could lead to unfair penalty application and potential loss of user funds.",
+      "severity": "high",
+      "original_id": "2b830edd55cf5602"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_003",
+      "title": "Replay Attack Vulnerability in claimRewardOnBehalf Function",
+      "description": "The claimRewardOnBehalf function has a critical vulnerability where it uses different nonce sources for owner vs claimer signatures, allowing signature replay attacks. When checking the claimer's signature, it uses `nonces(deposit.claimer)` but does not consume the nonce. However, when checking the owner's signature, it uses `_useNonce(deposit.owner)` which increments the nonce. This creates an inconsistency where a valid claimer signature can be replayed indefinitely because the claimer's nonce is never incremented.\n\nMathematical Proof:\n1. Claimer signs message with nonce = N\n2. Function validates claimer signature using nonces(deposit.claimer) = N\n3. Signature is valid, but _useNonce(deposit.claimer) is never called\n4. Nonce remains at N, allowing the same signature to be reused\n5. Attacker can repeatedly call claimRewardOnBehalf with the same signature\n\nExploitation Scenario:\n1. A legitimate claimer signs a reward claim message\n2. The claim is executed successfully\n3. An attacker observes the transaction and extracts the signature\n4. The attacker repeatedly calls claimRewardOnBehalf with the same signature\n5. Each call successfully claims rewards without requiring new signatures\n\nFinancial Impact:\n- Rewards are drained from the protocol repeatedly\n- The legitimate claimer loses their rewards to the attacker\n- Protocol loses funds that should only be claimable once per signature",
+      "severity": "high",
+      "original_id": "GS-001"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_004",
+      "title": "Inconsistent Nonce Handling Between Owner and Claimer Operations",
+      "description": "The contract has inconsistent nonce handling patterns between different operations. For stakeOnBehalf, stakeMoreOnBehalf, alterDelegateeOnBehalf, alterClaimerOnBehalf, and withdrawOnBehalf functions, the nonce is consumed using `_useNonce(_depositor)` before signature validation. However, in claimRewardOnBehalf, the nonce is read but not consumed for claimer signatures, creating a security inconsistency.\n\nMathematical Proof:\n1. For depositor operations: nonce is incremented before signature check\n2. For claimer operations: nonce is read but not incremented\n3. This creates two different security models within the same contract\n4. Attackers can exploit the weaker security model (claimer operations)\n\nExploitation Scenario:\n1. Attacker monitors transactions to identify claimer signatures\n2. Attacker replays claimer signatures since nonce doesn't increment\n3. Depositor operations remain secure due to proper nonce consumption\n4. Protocol has inconsistent security levels for different operations\n\nFinancial Impact:\n- Claimer signatures can be replayed leading to reward theft\n- Creates a security vulnerability specifically for reward claims\n- Undermines the overall security model of the signature-based system",
+      "severity": "high",
+      "original_id": "GS-002"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_005",
+      "title": "Missing Deposit Existence Check in claimRewardOnBehalf",
+      "description": "The claimRewardOnBehalf function accesses `deposits[_depositId]` without verifying that the deposit actually exists. If an attacker provides a non-existent deposit ID, the function will attempt to access a storage slot that may contain arbitrary data, potentially leading to unexpected behavior or state corruption.\n\nMathematical Proof:\n1. Function receives _depositId parameter\n2. Directly accesses deposits[_depositId] without existence check\n3. If _depositId doesn't map to a valid deposit, storage slot may contain garbage data\n4. deposit.owner and deposit.claimer could be non-zero addresses\n5. Signature validation may pass if the garbage data matches certain patterns\n\nExploitation Scenario:\n1. Attacker generates random deposit IDs\n2. For each ID, attempts claimRewardOnBehalf with crafted signatures\n3. If storage slot contains data that passes signature validation, rewards may be claimed incorrectly\n4. Could lead to reward theft or protocol state corruption\n\nFinancial Impact:\n- Potential reward theft if garbage data matches valid signature patterns\n- Protocol state corruption through manipulation of storage slots\n- Undermines the integrity of the deposit system",
+      "severity": "medium",
+      "original_id": "GS-003"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_006",
+      "title": "Incorrect Reward Balance Check in notifyRewardAmount",
+      "description": "The notifyRewardAmount function contains an incorrect balance check that can lead to protocol insolvency. The check compares scaledRewardRate * REWARD_DURATION against REWARD_TOKEN.balanceOf(address(this)) * SCALE_FACTOR, but this logic is inverted. The correct comparison should be (scaledRewardRate * REWARD_DURATION) / SCALE_FACTOR <= REWARD_TOKEN.balanceOf(address(this)). The current implementation allows reward notifications to proceed even when the contract has insufficient reward tokens to cover the distribution, leading to a shortfall where later claimants cannot receive their full rewards.\n\nMathematical Proof:\n- Let rewardRate = 100 tokens/day, REWARD_DURATION = 30 days\n- Total rewards needed = 100 * 30 = 3000 tokens\n- Contract balance = 2000 tokens (insufficient)\n- scaledRewardRate = 100 * 1e36 = 1e38\n- Current check: (1e38 * 30) = 3e39 vs (2000 * 1e36) = 2e39\n- 3e39 > 2e39 \u2192 check passes incorrectly\n- But actual tokens needed: 3000 > 2000 \u2192 should fail\n\nExploitation: A malicious or compromised reward notifier can notify rewards that exceed the contract's actual balance. When users try to claim rewards, the contract will attempt to transfer more tokens than it holds, causing claim failures and permanent loss of user rewards.\n\nFinancial Impact: Users lose their earned rewards permanently when the contract lacks sufficient tokens to fulfill claims. The loss affects all users proportionally to their stake.",
+      "severity": "high",
+      "original_id": "91ebd4969ec27935"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_008",
+      "title": "Precision Loss in Reward Calculation Leading to Permanent Fund Locking",
+      "description": "The reward calculation system uses integer division with SCALE_FACTOR (1e36), but when small amounts are staked or when reward rates are low, the division operations can round down to zero, permanently locking reward tokens in the contract.\n\nMathematical Proof:\n- Total earning power = 1000 (small stake)\n- scaledRewardRate = 1e18 * 1e36 = 1e54 (small reward rate)\n- Time elapsed = 1 second\n- Reward per token = (1e54 * 1) / 1000 = 1e51\n- For a deposit with earning power 1: rewards = 1 * 1e51 = 1e51\n- When divided by SCALE_FACTOR: 1e51 / 1e36 = 1e15 wei = 0.000000001 tokens\n- If this rounds to zero due to integer division, rewards are permanently locked\n\nExploitation: Attackers can create many small deposits or wait for periods of low staking activity to cause reward calculations to round to zero. The locked rewards accumulate over time and cannot be claimed by legitimate users.\n\nFinancial Impact: Permanent loss of reward tokens locked in the contract. Users who stake small amounts or stake during low-activity periods lose their rightful rewards.",
+      "severity": "high",
+      "original_id": "dfa1f736d72628b2"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_009",
+      "title": "Incorrect Tip Validation Logic in bumpEarningPower",
+      "description": "The tip validation logic in bumpEarningPower contains a flaw where the condition for earning power decreases incorrectly checks if (unclaimedRewards - requestedTip) < maxBumpTip instead of checking if unclaimedRewards < requestedTip. This allows attackers to request tips that exceed the available unclaimed rewards when earning power decreases.\n\nMathematical Proof:\n- Deposit has unclaimed rewards = 50 tokens\n- maxBumpTip = 100 tokens\n- Earning power decreases from 1000 to 800\n- Attacker requests tip = 60 tokens (more than unclaimed rewards)\n- Current check: (50 - 60) < 100 \u2192 -10 < 100 \u2192 true (passes)\n- But 60 > 50 \u2192 should fail due to insufficient rewards\n- The subtraction underflows but the condition still evaluates true\n\nExploitation: Attackers can drain deposits by requesting excessive tips when earning power decreases, taking more rewards than are actually available. This leaves the deposit with negative scaledUnclaimedRewardCheckpoint (due to underflow) or zero rewards for the legitimate claimer.\n\nFinancial Impact: The deposit owner loses their rightful rewards to the tip receiver. The protocol's incentive mechanism is broken as bumpers can extract value beyond what's available.",
+      "severity": "high",
+      "original_id": "2f6d3a9757ec905a"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_010",
+      "title": "Silent Permit Failure Allows Unauthorized Staking",
+      "description": "The permitAndStake and permitAndStakeMore functions use try/catch blocks that silently ignore permit failures, allowing staking operations to proceed even when the permit signature is invalid, expired, or rejected by the token contract. This enables attackers to stake tokens without proper authorization by providing invalid permit parameters that fail but don't revert the transaction.",
+      "severity": "high",
+      "original_id": "c35b950feb92a5f0"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_011",
+      "title": "Permit Replay Attack Due to Missing Nonce Validation",
+      "description": "The contract does not validate that permit signatures use the correct nonce for the signer, allowing replay attacks where the same signature can be used multiple times. Since the permit function calls are wrapped in try/catch blocks that ignore failures, an attacker could potentially reuse a valid signature across multiple staking operations if the token contract's permit implementation has vulnerabilities or if the signature remains valid due to deadline manipulation.",
+      "severity": "medium",
+      "original_id": "34324fa80f912177"
+    }
+  ],
+  "input_tokens": 6533,
+  "output_tokens": 243,
+  "cached_tokens": 51
+}

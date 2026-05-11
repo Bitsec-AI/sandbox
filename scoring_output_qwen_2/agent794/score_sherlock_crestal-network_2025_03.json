@@ -1,0 +1,729 @@
+{
+  "project": "sherlock_crestal-network_2025_03",
+  "agent": "agent794",
+  "status": "success",
+  "timestamp": "2026-04-09T13:08:57.017431",
+  "elapsed_seconds": 53.8,
+  "total_expected": 1,
+  "total_found": 100,
+  "true_positives": 1,
+  "false_negatives": 0,
+  "false_positives": 99,
+  "detection_rate": 1.0,
+  "precision": 0.01,
+  "f1_score": 0.019801980198019802,
+  "matched_findings": [
+    {
+      "id": "sherlock_crestal-network_2025_03_expected_000",
+      "expected": "Anyone who is approving Blueprint V 5 con-",
+      "matched": "Payment Cost Calculation Uses Unverified Token Balances, Enabling Underpayment Exploitation",
+      "confidence": 0.9,
+      "justification": "Finding 1 describes the payWithERC20 function being used to drain funds due to lack of balance verification, which aligns with the expected vulnerability's description of the function being exploited to drain users who approve payment tokens.",
+      "severity": "high",
+      "expected_description": "Source: https://github.com/sherlock-audit/2025-03-crestal-network-judging/issues/260\n\n**Summary:**\npay With ERC 20 is supposed to be used inside Blueprint V 5 contract to handle payment. But this function also can be used to drain anyone who is interact with Blueprint V 5 and using it to approve payment token when creating an agent. Root Cause Payment.sol#L 25-L 32 @> function pay With ERC 20 (address erc 20 Token Address , uint 256 amount , address from Address , address to Address ) public { ,\u2192 // check from and to address require (from Address != to Address ,\"Cannot transfer to self address\" ); require (to Address != address (0), \"Invalid to address\" ); require (amount >0,\"Amount must be greater than 0\" ); IERC 20 token = IERC 20 (erc 20 Token Address ); token .safe Transfer From (from Address , to Address , amount ); } the root cause simply because this function is public function, meaning anyone can call this and supply valid token address, then fill from Address with any address that still have allowance/approving the payment token to be spend by Blueprint V 5 contract 5 Internal Pre-conditions 1.admin enable usdc or any erc 20 token as payment by calling Blueprint:: add Payment Address External Pre-conditions 1.victim approve the spending of usdc or any erc 20 token set in last step for Blueprint V 5 contract address proxy 2.the amount approved should be greater than the amount used for creating agent with token cost 3.victim call the function to create agent (optional) Attack Path 1.attacker call pay With ERC 20 supplying the parameter with usdc address, victim address and sufficient amount to be sent into attacker address\n\n**Impact:**\nuser/victim who interacted would lose their funds drained by attacker Po C No response Mitigation make the Payment:: pay With ERC 20 internal",
+      "found_description": "The payWithERC20 function is called to deduct fees based on paymentOpCostMp, but no verification is performed that the user actually has sufficient balance. An attacker can call createAgentWithToken with a token address they control, set paymentOpCostMp to a high value, then call payWithERC20 with a zero-balance transfer. If the ERC20 token implementation allows zero-value transfers without balance checks (e.g., malicious or buggy token), the protocol will record a fee payment that never occurred, enabling free agent creation while falsely inflating fee collection metrics.",
+      "found_id": "82a56d96042a38f6",
+      "tool_finding_index": 70
+    }
+  ],
+  "missed_findings": [],
+  "undecided_findings": [],
+  "extra_findings": [
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_000",
+      "title": "Critical State Variable Shadowing and Missing Initialization of Core Protocol State",
+      "description": "The contract inherits from Blueprint but does not initialize any of its state variables or implement any of its core functionality. The BlueprintV4 contract declares no state variables beyond the NFT_CONTRACT_ADDRESS constant and the inherited ones, yet it inherits from Blueprint (imported from './history/BlueprintV4.sol'). This implies Blueprint defines critical state variables (e.g., fee structures, reward pools, user balances, accounting snapshots) that are never initialized or set. As a result, any function in Blueprint that relies on these uninitialized state variables will operate on zero or garbage values, leading to complete protocol insolvency, incorrect fee calculations, or permanent locking of user funds. The initialize() function only sets VERSION, EIP712 domain, and nftContractAddress, but ignores all other state variables required by Blueprint. This is a critical design flaw that breaks the entire economic model of the protocol.",
+      "severity": "critical",
+      "original_id": "00f846a9895eac4a"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_001",
+      "title": "No Deposit or Withdrawal Logic Implemented - Protocol Incomplete",
+      "description": "The contract BlueprintV4 is a stub that inherits from Blueprint but contains no implementation of deposit, withdrawal, or any fund handling logic. It has no receive() or fallback() functions, no deposit() function, no withdrawal queue, and no mechanism to process user funds. This renders the entire protocol non-functional as users cannot deposit or withdraw assets, and the contract cannot fulfill its intended purpose. However, this is not a vulnerability in the traditional sense but a critical design flaw that prevents the protocol from operating as intended. Since no fund flows exist, no attack can be executed, but the protocol is effectively dead on deployment.",
+      "severity": "critical",
+      "original_id": "af9bcddeab6ec1ab"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_002",
+      "title": "Incomplete Contract Implementation - Missing Core Functionality",
+      "description": "The contract BlueprintV4 inherits from Blueprint but does not implement any of its core functions or state variables. The Blueprint contract (imported but not shown) likely defines critical DeFi logic such as liquidity management, fee distribution, or authorization flows. Since BlueprintV4 only initializes ownership and EIP712 domain but implements none of the expected behavior, any external interaction with the contract will fail or behave unpredictably. This constitutes a critical type system and operation lifecycle failure: the contract presents itself as a functional blueprint but is structurally empty.",
+      "severity": "critical",
+      "original_id": "791adaad83825866"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_003",
+      "title": "EIP-712 Domain Signature Misuse Due to Missing Signing Functionality",
+      "description": "The contract initializes EIP712 with a signing domain but does not define any function to sign or verify typed data. This creates a type system integrity flaw: signatures can be generated off-chain for this domain, but the contract has no mechanism to validate them. Any attempt to use EIP712 for authorization (e.g., permit, delegate, or batch operations) will fail silently or revert, leaving the signature mechanism useless. The domain is declared but never used \u2014 a semantic mismatch between type declaration and operational implementation.",
+      "severity": "high",
+      "original_id": "beb793ba5732e008"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_004",
+      "title": "NFT Contract Address Hardcoded Without Validation or Upgradability",
+      "description": "The NFT_CONTRACT_ADDRESS is hardcoded as a constant, preventing any future updates even though the contract is upgradeable. This creates an operation lifecycle flaw: if the NFT contract is compromised, upgraded, or migrated, this contract cannot adapt. The address is stored in a state variable nftContractAddress, but it is initialized from a constant, meaning the state variable is redundant and unchangeable. This breaks the upgradeability promise of UUPSUpgradeable \u2014 a critical lifecycle inconsistency.",
+      "severity": "high",
+      "original_id": "73e80d8f7a14a738"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_005",
+      "title": "UUPS Upgradeability Enabled Without Authorization Logic for Critical Functions",
+      "description": "While UUPSUpgradeable is initialized, the _authorizeUpgrade function only checks onlyOwner, which is insufficient. In a DeFi context, upgradeability must be gated by time locks, multi-sig, or governance. Allowing a single owner to upgrade the contract at any time enables a front-running attack: an owner could upgrade to a malicious version, drain funds, and escape accountability. This is a lifecycle integrity failure \u2014 state commitment (upgrade) occurs without sufficient authorization context binding.",
+      "severity": "critical",
+      "original_id": "cda5119f0dbff64b"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_006",
+      "title": "Circular Import Creates Unintended Behavior and Potential Reentrancy",
+      "description": "The contract imports './history/BlueprintV4.sol' while being named BlueprintV4. This circular import (contract importing itself by path) is likely a mistake. In Solidity, this may cause the compiler to include the same contract twice, leading to undefined behavior, reentrancy risks, or deployment failure. Even if it compiles, it introduces a type system ambiguity: the contract may inherit from itself, creating an infinite or corrupted inheritance chain. This is a critical flaw in type system integrity \u2014 the contract's type hierarchy is malformed.",
+      "severity": "critical",
+      "original_id": "d1193d3ab0346059"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_007",
+      "title": "Reputation System Division by Zero and Underflow Enables Reputation Manipulation",
+      "description": "The setReputation function performs a division operation (reputation - 6 * factor) / totalProposalRequest without checking if totalProposalRequest is zero. This allows an attacker to set totalProposalRequest to zero, causing division by zero (revert) or, if totalProposalRequest is later incremented to 1, enabling arbitrary reputation inflation by submitting a single proposal. The division result can also underflow if reputation < 6 * factor, but the logic incorrectly adds the negative value, effectively subtracting reputation. This breaks the economic incentive model and allows attackers to manipulate solver reputation for unfair advantage.",
+      "severity": "critical",
+      "original_id": "015d43ffa9e9760e"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_008",
+      "title": "Missing Economic State Initialization and Access Control in BlueprintV4",
+      "description": "The BlueprintV4 contract inherits from Blueprint (imported from ./history/BlueprintV4.sol) but does not define or initialize any state variables related to economic calculations such as balance snapshots, fee multipliers, position tracking, or reward distributions. The initialize() function only sets up ownership, EIP712 domain, UUPS upgradeability, and the NFT contract address \u2014 none of which are used for economic accounting. Any state variables defined in the inherited Blueprint contract that govern fees, interest, or user balances are left uninitialized and publicly modifiable if not properly restricted. Since no access control modifiers (e.g., onlyOwner) are applied to any state-updating functions in BlueprintV4, and the inherited Blueprint contract may expose mutable economic state variables, an attacker can manipulate critical accounting variables (e.g., totalSupply, userShares, feeAccumulator) before or during protocol operations, leading to fee avoidance, unfair reward distribution, or insolvency.",
+      "severity": "critical",
+      "original_id": "f92d3178b856f858"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_009",
+      "title": "Unverified External Interface Dependency: Inherited Blueprint Contract May Have Incompatible or Malicious State Logic",
+      "description": "The contract imports and inherits from './history/BlueprintV4.sol' but does not verify or constrain the behavior of the inherited Blueprint contract. The Blueprint contract may define state variables (e.g., totalAssets, totalShares, lastUpdate, feeRate) and functions (e.g., _updateAccounting, _calculateFee) that are expected to be called by external systems or users. However, since BlueprintV4 does not override or validate these functions, and no access control is enforced on them, the inherited contract may contain malicious or incompatible logic \u2014 such as returning amounts in raw wei instead of normalized 18-decimal units, or using a different fee calculation base. This creates a representation boundary violation: if Blueprint defines a function like getShareValue() that returns raw asset amounts but the caller (e.g., a reward distributor) expects normalized shares, the conversion is never performed, causing miscalculations in user payouts. For example, if totalAssets = 1000 ether (1e21 wei) and totalShares = 1e18, the correct share value is 1000. But if Blueprint returns 1e21 without normalization, and the caller divides by 1e18 expecting 1e18 units, the result becomes 1e21 / 1e18 = 1000, which appears correct \u2014 but if the caller then multiplies by user shares (e.g., 1e17), it gets 1e17 * 1e21 / 1e18 = 1e20 wei (100 ether) instead of 100 ether, leading to 100x overpayment. This cascades into protocol insolvency.",
+      "severity": "high",
+      "original_id": "c7deff978e12d9cb"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_010",
+      "title": "Data Structure Integrity Violation: Uninitialized and Unmonitored State Variables in Inherited Blueprint",
+      "description": "The BlueprintV4 contract inherits from Blueprint, which likely maintains indexed data structures such as userPosition[address] or feeHistory[uint256]. However, BlueprintV4 does not initialize, validate, or synchronize these structures. If Blueprint uses a counter (e.g., positionId) to index user positions and the counter is incremented in Blueprint\u2019s logic but never reset or validated in BlueprintV4, an attacker can exploit gaps in the sequence. For example, if positionId = 1000 and 999 positions are deleted, the counter remains at 1000. A new user deposits and is assigned positionId = 1000, but the data at index 1000 in the array may still contain stale data from a previously deleted user. When the protocol calculates rewards by iterating from 0 to positionId, it reads stale data at index 1000, inflating totalAssets or totalShares. Mathematical proof: Assume stale data at index 999 contains 1000 ether in assets. The protocol iterates from 0 to positionId=1000, summing all positions. The stale 1000 ether is included, but no user owns it. If totalShares = 1e18, the share value becomes (1e18 + 1000 ether) / 1e18 = 2.0, causing all users to be paid 100% more than they should. A user with 1e17 shares receives 200 ether instead of 100 ether \u2014 a 100 ether theft from the protocol treasury.",
+      "severity": "high",
+      "original_id": "60ede7af752bfcdd"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_011",
+      "title": "Missing Critical Functionality and No User-Initiated Operations",
+      "description": "The contract BlueprintV4 is a minimal proxy wrapper that inherits from Blueprint but implements no functions beyond initialization and upgrade authorization. It does not expose any user-facing operations for deposits, withdrawals, swaps, or position management. This renders the protocol non-functional, as users cannot interact with it to perform any economic activity. While not a direct fund theft, this constitutes a critical protocol failure where user assets cannot be accessed or managed, effectively locking all funds intended for this contract.",
+      "severity": "critical",
+      "original_id": "dae090c8625f6dbf"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_012",
+      "title": "Insecure Upgradeability with No Access Control on Blueprint Interface",
+      "description": "The contract BlueprintV4 inherits from Blueprint (imported from './history/BlueprintV4.sol'), but the Blueprint interface or base contract is not visible in the provided code. However, since BlueprintV4 is upgradeable via UUPSUpgradeable and only restricts _authorizeUpgrade to onlyOwner, the security of the entire protocol depends entirely on the Blueprint interface's function declarations. If the Blueprint interface exposes critical functions (e.g., withdraw, swap, mint, setFees) without access control modifiers, then after upgrade, an attacker-controlled implementation could grant itself admin rights or drain funds. The current code does not validate or restrict the interface's function signatures, creating a high-risk upgrade vector.",
+      "severity": "high",
+      "original_id": "b03410002eca3602"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_013",
+      "title": "Hardcoded NFT Contract Address with No Upgradability or Validation",
+      "description": "The NFT_CONTRACT_ADDRESS is hardcoded as a constant (0x7D8...f578) and assigned to nftContractAddress in initialize(). There is no mechanism to update this address, even though the contract is upgradeable. If the NFT contract is compromised, upgraded, or deprecated, this contract cannot adapt. Furthermore, if the NFT contract is intended to be used for access control or asset verification (e.g., NFT ownership required to interact), a broken or malicious NFT contract will permanently break functionality. No validation is performed to ensure the address is non-zero or a valid contract, creating a single point of failure.",
+      "severity": "high",
+      "original_id": "c4672bdb2ee20259"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_014",
+      "title": "Potential Interface Mismatch Between BlueprintV4 and Blueprint",
+      "description": "The contract imports and inherits from './history/BlueprintV4.sol' as contract Blueprint. However, the provided code does not include the Blueprint contract definition. If Blueprint declares functions that BlueprintV4 does not override (e.g., withdraw(), deposit(), claimRewards()), then those functions may be inherited from a previous version or an unintended implementation. This creates a risk of interface incompatibility: BlueprintV4 may expose functions with different semantics than expected by external callers (e.g., a DEX or frontend), leading to incorrect behavior, fund loss, or reentrancy. Since UUPS upgradeability allows arbitrary implementation changes, this mismatch could be exploited during an upgrade to inject malicious logic.",
+      "severity": "high",
+      "original_id": "19fd7c835058dc02"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_015",
+      "title": "No Validation of NFT Contract Address Before Use",
+      "description": "The nftContractAddress is assigned the hardcoded constant value in initialize(), but there is no check to verify that the address is not zero, is a contract, or has expected functionality (e.g., supports ERC721). If the hardcoded address is incorrect (e.g., typo, deprecated), or if the contract at that address is later destroyed, any future logic relying on nftContractAddress (e.g., minting, access control) will revert or behave incorrectly. Since no functions currently use nftContractAddress in the provided code, the risk is latent but critical \u2014 any future function using it will fail insecurely.",
+      "severity": "medium",
+      "original_id": "f9be0c40be682a92"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_016",
+      "title": "Automatic Processing of Withdrawal Funds via Default Receive Function",
+      "description": "The contract has no explicit receive or fallback function, but it does not prevent receiving ETH. Since the contract has no logic to distinguish between user deposits and system-returned funds, an attacker can send ETH directly to the contract during any operation that triggers external calls (e.g., deployment requests). These funds become indistinguishable from legitimate deposits and can be misappropriated by the contract's internal accounting, leading to fund loss or inflation of protocol balances.",
+      "severity": "high",
+      "original_id": "9c14e0471463bb25"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_017",
+      "title": "State Commitment Before External Call in submitDeploymentRequest Allows Front-Running and Theft of Deployment Rights",
+      "description": "The submitDeploymentRequest function commits state (sets status to Pickup and assigns deployWorkerAddr) before verifying that the caller is authorized or that the request is still available. This allows an attacker to front-run legitimate workers by submitting a deployment request with a higher gas price, stealing the deployment assignment and preventing the intended worker from claiming it. The state change is irreversible and occurs before any validation of the caller's legitimacy beyond basic existence checks, creating a clear opportunity for MEV extraction and denial of service to legitimate workers.",
+      "severity": "high",
+      "original_id": "40382a9075706cb2"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_018",
+      "title": "Inconsistent Validation and State Update in createMultipleDeploymentRequest Allows Partial Execution and State Corruption",
+      "description": "The createMultipleDeploymentRequest function iterates over an array of proposals and calls deploymentRequest for each. However, it only sets projectDeploymentID on the first iteration, and subsequent iterations append to the same list only if projectDeploymentID is non-zero. This creates a race condition where if the first deploymentRequest reverts (e.g., due to gas limits or external call failure), the entire function continues, but projectDeploymentID remains zero, causing subsequent deployment requests to be appended to an uninitialized or incorrect list. This results in orphaned deployment requests that cannot be tracked by the project, breaking the integrity of the deploymentIdList mapping and potentially causing loss of deployment tracking for users.",
+      "severity": "high",
+      "original_id": "f8778dd05f27cb77"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_019",
+      "title": "Missing User Protection in createAgentWithNFT and createAgentWithWhitelistUsers Allows Forced NFT Usage and Asset Locking",
+      "description": "The createAgentWithNFT and createAgentWithWhitelistUsers functions allow any user to trigger the creation of an agent using a specified NFT token ID, but they do not validate that the NFT is available or that the user has consented to its use. An attacker can call these functions with a token ID owned by another user (e.g., via a public NFT metadata API or leaked ID), causing the NFT to be marked as Status.Pickup and permanently locked in the contract. The original owner cannot reclaim or use the NFT for any other purpose, as the contract enforces uniqueness via nftTokenIdMap. This constitutes a direct theft of NFT utility and potential value.",
+      "severity": "critical",
+      "original_id": "6adea56cc4e6a5e4"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_020",
+      "title": "Signature Replay Vulnerability in createProposalRequestWithSig and createDeploymentRequestWithSig Due to Lack of Nonce Binding",
+      "description": "The signature-based functions (createProposalRequestWithSig, createDeploymentRequestWithSig, etc.) use EIP712 to validate signatures but do not include a nonce or timestamp in the digest. This allows an attacker to capture a valid signed message from a user and replay it indefinitely to create multiple proposals or deployments under the user's identity. Since the digest only includes projectId, base64RecParam, and serverURL \u2014 all of which are static or predictable \u2014 the same signature can be reused across blocks. This enables an attacker to drain a user's ability to create legitimate requests by exhausting their request IDs or triggering unwanted deployments.",
+      "severity": "high",
+      "original_id": "410a7666215261ac"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_021",
+      "title": "Validation After State Change in submitProofOfDeployment Allows Unauthorized Proof Submission",
+      "description": "The submitProofOfDeployment function first checks that the requestID exists and that the status is not Init or GeneratedProof, but it does not validate that the msg.sender is the designated deployWorkerAddr until after the status has been updated to GeneratedProof. This creates a window where an attacker can call submitProofOfDeployment with a valid requestID and a forged proof, and if the function reverts after the status update (e.g., due to a failed emit), the status remains GeneratedProof, permanently locking the deployment and preventing the legitimate worker from submitting a valid proof. The state change (status update) occurs before the final authorization check, violating Pattern 2.",
+      "severity": "high",
+      "original_id": "0fc535fc0eec4bca"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_022",
+      "title": "Unit Mismatch in updateWorkerDeploymentConfigWithSig Causes Incorrect Signature Verification and Unauthorized Config Updates",
+      "description": "The updateWorkerDeploymentConfigWithSig function generates a digest using serverURL = 'app.crestal.network', but the original deployment request uses the serverURL provided by the user. This creates a unit mismatch: the signature was generated for the original serverURL, but verification uses a hardcoded string. An attacker can submit a valid signature for a legitimate deployment request with a different serverURL, and the contract will still accept it because the digest used for verification does not match the digest used for signing. This allows unauthorized users to update deployment configurations for any deployment, potentially injecting malicious config data or disrupting service.",
+      "severity": "high",
+      "original_id": "58586bd444116c4f"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_023",
+      "title": "Reentrancy Risk in createAgent via checkNFTOwnership Without Reentrancy Guard",
+      "description": "The createAgent function calls checkNFTOwnership, which likely performs an external call to the NFT contract to verify ownership. However, BlueprintCore has no reentrancy guard (e.g., nonReentrant modifier), and the function modifies critical state (nftTokenIdMap, deploymentOwners) after the external call. An attacker can deploy a malicious NFT contract that re-enters createAgent during the ownership check, triggering multiple agent creations with the same NFT token ID, bypassing the uniqueness check. This allows an attacker to create multiple agents with a single NFT, potentially draining whitelist slots or creating fraudulent deployment identities.",
+      "severity": "high",
+      "original_id": "dd035c4a57b68348"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_024",
+      "title": "Inconsistent State Synchronization Between projects and deploymentIdList in createMultipleDeploymentRequest",
+      "description": "In createMultipleDeploymentRequest, the function sets projects[projectId].requestDeploymentID = projectDeploymentID after the loop, but if any deploymentRequest call fails during iteration (e.g., due to gas limit or revert), the projectDeploymentID may be partially populated in deploymentIdList while projects[projectId].requestDeploymentID remains uninitialized or incorrect. This creates a state inconsistency where the project's requestDeploymentID does not point to a valid list in deploymentIdList, breaking the ability to retrieve deployment history for the project. This is a state synchronization failure (Pattern 6) that leads to data loss and broken user experience.",
+      "severity": "high",
+      "original_id": "d65050fc2a0e5f51"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_025",
+      "title": "Unrestricted Reputation Manipulation via setReputation",
+      "description": "The setReputation function updates solverReputation state without access control, allowing any user to trigger reputation increases for any solver address. This state is used in economic calculations that determine solver incentives and potentially fee distributions. Attackers can repeatedly call setReputation on a target solver to artificially inflate their reputation, bypassing the intended rate-limiting logic based on totalProposalRequest. This manipulation distorts the protocol's incentive mechanism and could lead to unfair reward allocation or governance influence.",
+      "severity": "high",
+      "original_id": "156f3722eb5bfec8"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_026",
+      "title": "Deployment Request ID Collision via Block Timestamp Dependency",
+      "description": "The deploymentRequest function generates requestID using block.timestamp, msg.sender, base64Proposal, block.chainid, and projectId. Since block.timestamp is predictable and can be manipulated by miners within a 15-second window (Ethereum consensus), an attacker can brute-force a collision by submitting multiple deployment requests with crafted base64Proposal values. This allows an attacker to overwrite an existing deployment requestID, causing legitimate users to lose their deployment assignments. The desynchronization between deploymentIdList and requestDeploymentStatus leads to orphaned deployment records and potential loss of service guarantees.",
+      "severity": "high",
+      "original_id": "82db96882f0cd8d2"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_027",
+      "title": "Inconsistent Unit Representation in createMultipleDeploymentRequest",
+      "description": "The createMultipleDeploymentRequest function increments totalDeploymentRequest by base64Proposals.length, but each individual deploymentRequest call does not increment it. This creates a representation boundary violation: totalDeploymentRequest is used in setReputation to calculate reputation growth (line 155), but its value becomes inconsistent with the actual number of deployment requests processed. When base64Proposals.length > 1, totalDeploymentRequest is overcounted, causing solver reputation to grow slower than intended. For example, if 10 deployments are created in one call, totalDeploymentRequest increases by 10, but only one deploymentRequest call was made internally \u2014 so the denominator in reputation calculation is inflated by 9x, reducing reputation growth by ~90% for all solvers. This breaks the economic incentive model.",
+      "severity": "high",
+      "original_id": "c4caee85d174ef8c"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_028",
+      "title": "NFT Token ID Reuse via Missing Status Reset in updateWorkerDeploymentConfig",
+      "description": "The updateWorkerDeploymentConfig function allows deployment owners to update configs even after proof submission (Status.GeneratedProof), and resets status to Status.Pickup. However, the nftTokenIdMap[tokenId] is never reset from Status.Pickup. This means once an NFT is used to create an agent, it can never be reused \u2014 even if the deployment is canceled or the agent is decommissioned. This creates a permanent lock of NFT assets. For example, if 1000 NFTs are issued for agent creation, and 500 are used, 500 NFTs become permanently unusable, reducing protocol liquidity and user utility. The financial impact is the permanent locking of NFTs worth $X each, with no recovery mechanism.",
+      "severity": "high",
+      "original_id": "1ccddd7e680f9645"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_029",
+      "title": "Whitelist User Status Bypass via Signature Forgery in createAgentWithWhitelistUsersWithSig",
+      "description": "The createAgentWithWhitelistUsersWithSig function validates whitelist status using the signerAddr from EIP712 signature, but does not validate that the signerAddr is the same as msg.sender. An attacker can sign a message with a whitelisted user's key and call the function with their own address as msg.sender, thereby creating an agent under their own account while consuming the whitelist slot of the victim. This allows one attacker to exhaust multiple whitelist slots by forging signatures, effectively denying service to legitimate users. For example, if 100 whitelist slots exist, an attacker can forge 100 signatures and consume all slots, preventing any new legitimate users from creating agents.",
+      "severity": "high",
+      "original_id": "9986066612c9f6ce"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_030",
+      "title": "Authorization Context Binding Failure in Signature-Based Operations",
+      "description": "Signature-based functions (e.g., createProposalRequestWithSig, createDeploymentRequestWithSig) bind the signer address correctly but do not bind the execution context (projectId, base64Proposal, serverURL) to the signature digest. This allows an attacker to replay a valid signature with different parameters, consuming nonces and state without authorization.",
+      "severity": "critical",
+      "original_id": "ca958b69bb3ca066"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_031",
+      "title": "State Commitment Before Operation Verification in Deployment Acceptance",
+      "description": "In submitDeploymentRequest(), the state is committed (requestDeploymentStatus[requestID].status = Status.Pickup and deployWorkerAddr = msg.sender) before verifying that the requestID is valid and not already picked. This allows an attacker to trigger multiple submissions with invalid or already-picked requestIDs, consuming state and blocking legitimate workers.",
+      "severity": "high",
+      "original_id": "c2a41a78675b720d"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_032",
+      "title": "Incomplete State Restoration in Agent Creation with Whitelist",
+      "description": "When createAgentWithWhitelistUsers() or createAgentWithWhitelistUsersWithSig() is called, the user's status is set to Status.Pickup in whitelistUsers mapping. However, there is no mechanism to reset this status if the agent creation fails (e.g., due to NFT ownership check failure or out-of-gas). This permanently locks the user out of creating future agents, even if the original attempt was invalid.",
+      "severity": "high",
+      "original_id": "97d71b0b0a9d3284"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_033",
+      "title": "Mathematical Domain Violation in Reputation Calculation",
+      "description": "The setReputation() function performs division (reputation - 6 * factor) / totalProposalRequest. If totalProposalRequest is 0 (initial state), this causes a division by zero, which reverts. However, if totalProposalRequest is 1 and reputation is exactly 6*factor, the numerator becomes 0, and the function proceeds. But if reputation < 6*factor, it adds factor unconditionally. This creates a non-monotonic, non-deterministic reputation curve that can be manipulated by an attacker to trigger integer underflow or overflow in edge cases.",
+      "severity": "high",
+      "original_id": "6ebbfbf1d47db691"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_034",
+      "title": "Fork Behavioral Divergence in EIP712 Digest Generation",
+      "description": "The functions getRequestProposalDigest() and getRequestDeploymentDigest() are imported from EIP712.sol but their implementation is not shown. If the external EIP712 contract was forked (e.g., from OpenZeppelin) and changed the domain separator structure or field ordering, the digest generation will be incompatible with the signer's expected format. This causes valid signatures to be rejected or invalid ones to be accepted, breaking the entire authorization system.",
+      "severity": "critical",
+      "original_id": "190fec7404239c7a"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_035",
+      "title": "Resource-Controlled Failure in createMultipleDeploymentRequest",
+      "description": "In createMultipleDeploymentRequest(), the function iterates over base64Proposals and emits events for each deployment. However, if gas runs out during the loop, the transaction reverts, but totalDeploymentRequest is incremented only after the loop. This means the state change (totalDeploymentRequest) is committed only if the entire loop completes. However, if the loop is partially executed and reverts, the partial deployments are not recorded, but the totalDeploymentRequest counter is not incremented \u2014 creating an accounting inconsistency between deployed requests and the counter.",
+      "severity": "medium",
+      "original_id": "93cbfdfeb3290038"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_036",
+      "title": "NFT Token ID Reuse via Status Manipulation",
+      "description": "The nftTokenIdMap tracks NFT usage with Status.Pickup. However, in updateWorkerDeploymentConfig(), if a deployment has Status.GeneratedProof, it is reset to Status.Pickup. This allows an attacker to submit a proof, then trigger a config update to reset the status, and reuse the same NFT token ID to create another agent \u2014 bypassing the one-time-use constraint.",
+      "severity": "high",
+      "original_id": "0e2c8b191d0bdf23"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_037",
+      "title": "Missing Access Control on Payment Address Removal Allows Fee Avoidance",
+      "description": "The removePaymentAddress function allows any owner to disable a payment address, but the BlueprintCore contract (not shown) likely contains functions that allow users to create or update agent tokens using payment addresses. If an owner disables a payment address after a user has initiated a transaction but before it is finalized, the user's payment may be accepted but the fee collection logic may fail to route funds to the feeCollectionWalletAddress, effectively allowing the owner to bypass fee collection. This is a critical economic manipulation vulnerability because the owner can selectively disable payment addresses to steal fees without being detected.",
+      "severity": "critical",
+      "original_id": "d2bccef77d8a2f3d"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_038",
+      "title": "Inconsistent State Update Between Payment Address Enablement and Cost Mapping",
+      "description": "The setCreateAgentTokenCost and setUpdateCreateAgentTokenCost functions validate that a payment address is enabled via paymentAddressEnableMp[paymentAddress], but they do not validate that the payment address exists in paymentAddressesMp[PAYMENT_KEY]. An owner could add a payment address to paymentAddressesMp but then disable it via paymentAddressEnableMp, and then later re-enable it without re-adding it to paymentAddressesMp. This creates a state inconsistency where the cost mapping exists for an address that is not in the canonical list of payment addresses. If BlueprintCore uses paymentAddressesMp[PAYMENT_KEY] to iterate over valid payment addresses for fee distribution, it will skip this address, causing fees paid to it to be permanently lost or misallocated. This is a state synchronization bug that leads to permanent fund loss.",
+      "severity": "high",
+      "original_id": "486c3ac939b1591d"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_039",
+      "title": "Whitelist Address Array Processing Vulnerability Enables DoS and State Corruption",
+      "description": "The setWhitelistAddresses function iterates over an array and sets each address to Status.Issued without checking for existing state or preventing duplicate entries. If an attacker passes a very large array (e.g., 10,000 addresses), the transaction will consume excessive gas and likely revert due to block gas limit, causing a denial-of-service. More critically, if the array contains a mix of valid and invalid addresses, the function will partially succeed \u2014 setting some addresses to Issued while reverting on gas exhaustion. This leaves the whitelist in a partially corrupted state where some addresses are incorrectly marked as issued, potentially allowing unauthorized users to mint NFTs. Since the function is only callable by the owner, this is a critical integrity issue.",
+      "severity": "high",
+      "original_id": "90924cff7963436d"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_040",
+      "title": "Reset Agent Creation Status Allows Unauthorized NFT Minting via State Manipulation",
+      "description": "The resetAgentCreationStatus function allows the owner to reset a user's whitelist status to Issued and a tokenId's status to Init. If a user has already minted an NFT (i.e., nftTokenIdMap[tokenId] was set to Status.Minted), calling resetAgentCreationStatus with that tokenId resets it to Init, effectively allowing the same user to mint the same NFT again. This creates a double-spend vulnerability: the user can mint the same NFT multiple times by triggering resetAgentCreationStatus after each mint. Since NFTs are unique assets, this leads to inflation of the NFT supply and dilution of value. The financial impact is direct: each duplicate mint represents a stolen asset that can be sold on secondary markets.",
+      "severity": "critical",
+      "original_id": "8f2ba3f13e13ca64"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_041",
+      "title": "Fee Collection Wallet Address Can Be Changed After Fees Are Accrued, Enabling Theft",
+      "description": "The setFeeCollectionWalletAddress function allows the owner to change the fee collection wallet at any time. If fees are collected incrementally (e.g., via a separate function in BlueprintCore that transfers fees to feeCollectionWalletAddress), an owner can wait until a large amount of fees have accumulated, then change the feeCollectionWalletAddress to an address they control, and then drain the remaining fees. Since the fee collection logic likely transfers funds to the current value of feeCollectionWalletAddress, changing it after fees are accrued but before they are withdrawn allows the owner to redirect future and potentially pending fees. This is a classic time-of-check-time-of-use (TOCTOU) vulnerability with direct fund theft potential.",
+      "severity": "critical",
+      "original_id": "41b44c6aa88ebc80"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_042",
+      "title": "Payment Address Enablement Flag Can Be Exploited to Bypass Cost Validation",
+      "description": "The setCreateAgentTokenCost and setUpdateCreateAgentTokenCost functions validate paymentAddressEnableMp[paymentAddress] but do not validate that paymentOpCostMp[paymentAddress][CREATE_AGENT_OP] was previously zero or that the cost is non-zero. An owner could set a cost to 1000, then set it to 0, then disable the payment address, then re-enable it, and the cost remains 0. This allows the owner to effectively set the cost to zero for any payment address, enabling free agent token creation. Since the cost is used to determine how much users must pay to create an agent token, this allows anyone to create agent tokens for free, leading to economic collapse of the token issuance model. The financial impact is direct: every free mint represents a lost fee that would have gone to the fee collection wallet.",
+      "severity": "high",
+      "original_id": "bd5337b6335c848e"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_043",
+      "title": "Missing User Protection in Agent Token Creation Cost Setting",
+      "description": "The functions setCreateAgentTokenCost and setUpdateCreateAgentTokenCost allow the owner to arbitrarily set the cost of creating or updating an agent token for any payment address. However, there is no mechanism for users to specify minimum acceptable output values or to reject execution if the cost exceeds their tolerance. This exposes users to potential manipulation where the owner could suddenly increase the cost to an exorbitant level, effectively locking users out of the system or forcing them to pay inflated fees without recourse.",
+      "severity": "high",
+      "original_id": "1d3a733b9b31b5e7"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_044",
+      "title": "Access Control Violation in Public Interface Functions",
+      "description": "The contract exposes multiple critical administrative functions (e.g., setNFTContractAddress, setWhitelistAddresses, addPaymentAddress, setFeeCollectionWalletAddress) as public functions with onlyOwner restriction, but the interface does not declare any access control modifiers. This creates a misleading interface contract that implies these functions are unrestricted, potentially leading to integration errors in frontend or external systems that assume these functions are callable by anyone. While the implementation enforces onlyOwner, the interface declaration fails to reflect this security expectation, violating Pattern 4.",
+      "severity": "high",
+      "original_id": "8c5fd4420bedacb1"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_045",
+      "title": "State Synchronization Issue in resetAgentCreationStatus",
+      "description": "The function resetAgentCreationStatus updates whitelistUsers[userAddress] to Status.Issued but does not validate or synchronize the tokenId state with the user's actual eligibility. If a user has already created an agent token (nftTokenIdMap[tokenId] == Status.Created), resetting their whitelist status to Issued does not reset the tokenId's state, creating an inconsistent state where a user may be marked as eligible but their token ID is already claimed. This could allow a malicious owner to reset a user's status and then reissue the same tokenId to another user, causing double-spending or token misassignment.",
+      "severity": "high",
+      "original_id": "9e67251a4d42c458"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_046",
+      "title": "Inconsistent Payment Address Validation and Usage",
+      "description": "The function setCreateAgentTokenCost validates that paymentAddressEnableMp[paymentAddress] is true before setting the cost. However, the paymentAddressEnableMp map is only modified by addPaymentAddress and removePaymentAddress (which sets it to false). There is no validation that the paymentAddress is actually present in paymentAddressesMp[PAYMENT_KEY]. This creates a potential inconsistency: a payment address could be enabled but not listed in the official paymentAddressesMp array, leading to audit trail discrepancies or incorrect fee routing if downstream logic relies on the array for enumeration.",
+      "severity": "medium",
+      "original_id": "b76b95c29b85f50d"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_047",
+      "title": "No Reentrancy Protection on Critical State Updates",
+      "description": "The contract performs state updates (e.g., whitelistUsers, paymentAddressEnableMp, paymentOpCostMp) without reentrancy guards. Although the functions are only callable by the owner, if the owner is a smart contract (e.g., a multisig or proxy), and any of these state updates trigger external calls (e.g., via event listeners or downstream integrations), reentrancy could occur. While not directly exploitable by external users, this design violates best practices and could lead to state corruption if the owner contract is compromised or maliciously designed.",
+      "severity": "medium",
+      "original_id": "3caf08ae3c1af29e"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_048",
+      "title": "Missing Input Validation for Array Length in Bulk Operations",
+      "description": "The functions setWhitelistAddresses and removeWhitelistAddresses accept arbitrary-length arrays without bounds checking. An attacker could pass an extremely large array (e.g., 10,000 addresses) to trigger a gas limit exhaustion, effectively DoSing the contract for the owner. While the owner is trusted, this is a denial-of-service vector that could prevent legitimate administrative operations.",
+      "severity": "medium",
+      "original_id": "ffeae6ecf8d0e88c"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_049",
+      "title": "Potential for Fee Collection Wallet Misdirection",
+      "description": "The setFeeCollectionWalletAddress function allows the owner to change the fee collection wallet at any time. However, there is no mechanism to lock or audit this address after initial setup. If the owner's key is compromised, an attacker could redirect all future fees to a malicious address. While access-controlled, the lack of a timelock, multi-sig requirement, or fee collection address immutability after deployment creates a single point of failure with high financial impact.",
+      "severity": "high",
+      "original_id": "a109911a54765cee"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_050",
+      "title": "Missing Receive Function Handling Allows Funds to Be Irreversibly Locked",
+      "description": "The Blueprint contract has no receive() or fallback() function defined, but accepts Ether transfers via direct sends. Since there is no logic to handle incoming Ether, any funds sent to the contract are permanently locked and cannot be withdrawn or reclaimed by the owner or users. This creates a critical financial risk as users or external systems may accidentally or maliciously send funds to the contract, resulting in permanent loss.",
+      "severity": "critical",
+      "original_id": "3f26bd1992c5b58e"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_051",
+      "title": "State Inconsistency in Deployment Request ID Assignment Leading to Double-Spending of NFTs",
+      "description": "The function createAgentWithNFT and its internal counterpart createAgent allow a user to create an agent using an NFT as payment, but the NFT token ID status is only updated after the deployment request is created. If the deployment request reverts due to an external call failure (e.g., in payWithERC20 or during EIP712 signature validation), the NFT token ID remains marked as Status.Pickup, permanently locking the NFT without completing the agent creation. This creates a denial-of-service condition where users lose access to their NFTs even when the transaction fails. The issue stems from state commitment (nftTokenIdMap[tokenId] = Status.Pickup) occurring before the atomicity of the entire operation is guaranteed, violating the critical state commitment principle.",
+      "severity": "high",
+      "original_id": "8b5c34524b0165fa"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_052",
+      "title": "Incorrect Unit Handling in Payment Cost Calculation Leading to Fee Theft",
+      "description": "The function updateWorkerDeploymentConfigCommon retrieves the cost of UPDATE_AGENT_OP from paymentOpCostMp[tokenAddress][UPDATE_AGENT_OP], which is expected to be in the token's native decimal units. However, the payWithERC20 function (inherited from Payment.sol) expects the amount parameter to be in the token's scaled decimal representation (e.g., 1 USDC = 1000000). If the cost is stored as 1000000 (representing 1 token unit) but the actual token has 18 decimals, payWithERC20 will transfer 10^18 * 1000000 wei, which is 1 million times the intended amount. This results in the protocol collecting excessive fees, effectively stealing funds from users. The root cause is a unit mismatch between the stored cost (assumed to be in token units) and the expected input of payWithERC20 (in wei scaled by token decimals).",
+      "severity": "critical",
+      "original_id": "90e6506a7bd29896"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_053",
+      "title": "Replayable Deployment Acceptance via Nonceless RequestID Generation",
+      "description": "The function submitDeploymentRequest accepts a deployment request by setting requestDeploymentStatus[requestID].status = Status.Pickup and requestDeploymentStatus[requestID].deployWorkerAddr = msg.sender. However, requestID is generated using keccak256(abi.encodePacked(block.timestamp, userAddress, base64Proposal, block.chainid, projectId, index)), which is deterministic and does not include a nonce or random salt. An attacker can observe a legitimate deployment request, replay the same parameters (same timestamp, user, proposal, etc.) in a subsequent block, and submit the same requestID to claim the deployment for themselves. Since the status check only verifies that the request is not already picked up (Status.Pickup), and the requestID is identical, the attacker can overwrite the legitimate worker's assignment. This allows the attacker to steal deployment rewards or trigger unauthorized deployments.",
+      "severity": "high",
+      "original_id": "027abad146eae070"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_054",
+      "title": "Whitelist User Bypass via Signature Forgery in createAgentWithWhitelistUsersWithSig",
+      "description": "The function createAgentWithWhitelistUsersWithSig validates that the signerAddr is in the whitelist and has not already created an agent. However, it uses getRequestDeploymentDigest to generate the digest for signature verification, which is intended for deployment requests. The digest function likely includes projectId, base64Proposal, and serverURL \u2014 parameters that are not unique to the user identity. An attacker can use a valid signature from a different user's deployment request (e.g., from createProjectIDAndDeploymentRequestWithSig) and replay it in createAgentWithWhitelistUsersWithSig. Since the signature is valid for the digest structure, the function accepts it, allowing the attacker to bypass the whitelist entirely and create an agent as any user. This is a critical access control bypass.",
+      "severity": "critical",
+      "original_id": "4e17f877ead49462"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_055",
+      "title": "NFT Ownership Check Bypass via Reentrancy in createAgent",
+      "description": "In createAgent, the function checkNFTOwnership(nftContractAddress, tokenId, userAddress) is called before updating nftTokenIdMap[tokenId] = Status.Pickup. However, if the NFT contract is malicious and reenters the BlueprintCore contract during the ownership check (e.g., via onERC721Received), the attacker can trigger another createAgent call with the same tokenId before the status is updated. Since the status check (nftTokenIdMap[tokenId] != Status.Pickup) occurs only at the top level, the reentrant call will pass the check and allow the same NFT to be used twice. This enables double-spending of NFTs, allowing an attacker to create multiple agents with one NFT and drain protocol resources.",
+      "severity": "critical",
+      "original_id": "aec782eb04d958e2"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_056",
+      "title": "State Commitment Before External Call in createAgentWithToken and createAgentWithTokenWithSig Allows Reentrancy and Fund Theft",
+      "description": "The createAgentWithToken and createAgentWithTokenWithSig functions perform a token transfer (payWithERC20) to the feeCollectionWalletAddress BEFORE updating the deploymentOwner mapping and emitting the CreateAgent event. This creates a reentrancy vulnerability where an attacker can recursively call createAgentWithToken during the external call, creating multiple agent deployments and draining the user's token balance. The state (deploymentOwners[requestID]) is updated only after the external payment, allowing an attacker to exploit the window where the payment has been made but ownership is not yet recorded.",
+      "severity": "critical",
+      "original_id": "a66ce7a10a8d57e2"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_057",
+      "title": "Missing User Protection in createAgentWithNFT and createAgentWithWhitelistUsers Allows Forced NFT Burn Without Compensation",
+      "description": "The createAgentWithNFT and createAgentWithWhitelistUsers functions consume an NFT token (by setting nftTokenIdMap[tokenId] = Status.Pickup) without providing any mechanism for the user to specify minimum acceptable outcomes or cancel the operation. If the subsequent deploymentRequest() call fails (e.g., due to invalid parameters, contract revert, or gas exhaustion), the NFT is permanently locked in Status.Pickup state with no way to reclaim it. Users have no control over execution bounds, and partial failure results in irreversible asset loss.",
+      "severity": "high",
+      "original_id": "37670ce8f22c63b5"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_058",
+      "title": "Validation Timing Violation in submitDeploymentRequest Allows Unauthorized Worker Pickup",
+      "description": "The submitDeploymentRequest function validates that requestDeploymentStatus[requestID].status != Status.Pickup AFTER it has already modified the state by setting requestDeploymentStatus[requestID].status = Status.Pickup and requestDeploymentStatus[requestID].deployWorkerAddr = msg.sender. This allows an attacker to submit the same requestID twice in the same block: the first submission succeeds and sets the status to Pickup, the second submission bypasses the validation (because the status is already Pickup) and overwrites the worker address, effectively stealing the deployment assignment from the legitimate worker. Validation must occur before state mutation.",
+      "severity": "high",
+      "original_id": "2605a1b3d94b0cfa"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_059",
+      "title": "Inconsistent State Update in updateWorkerDeploymentConfigCommon Allows Unauthorized Config Updates",
+      "description": "The updateWorkerDeploymentConfigCommon function checks deploymentOwners[requestID] == userAddress after performing the token payment (payWithERC20). If the payment succeeds but the ownership check fails (e.g., due to a race condition or incorrect owner), the payment is still executed and funds are transferred to the feeCollectionWalletAddress, while the config update is reverted. This results in a financial loss to the user who paid for an operation that never completed, while the protocol keeps the fee. Validation of ownership must occur before any fund transfer.",
+      "severity": "high",
+      "original_id": "e962977bef22cd87"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_060",
+      "title": "Signature Context Binding Failure in createAgentWithWhitelistUsersWithSig Allows Impersonation of Whitelist Users",
+      "description": "The createAgentWithWhitelistUsersWithSig function validates the signer's whitelist status using getSignerAddress(digest, signature) but does not include the msg.sender in the EIP712 digest. This means an attacker can obtain a valid signature from a whitelist user (e.g., via phishing) and submit it from any address to create an agent, impersonating the signer. The signature binds only to projectId, base64Proposal, and serverURL \u2014 not to the submitter address \u2014 allowing anyone to execute the operation on behalf of the signer. This violates signature execution context binding (Pattern 9).",
+      "severity": "high",
+      "original_id": "a90b5d6f6b196e70"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_061",
+      "title": "Partial Execution Risk in createAgentWithToken and createAgentWithTokenWithSig Leads to Fund Loss Without Agent Creation",
+      "description": "In createAgentWithToken and createAgentWithTokenWithSig, the function first calls payWithERC20 (external token transfer) and then calls createCommonProjectIDAndDeploymentRequest. If the latter reverts (e.g., due to invalid projectId, serverURL, or internal logic), the token payment is already consumed and cannot be refunded. The user loses funds without receiving any agent or deployment. There is no mechanism to revert the payment if the deployment creation fails, violating the principle that state changes and fund movements must be atomic or committed only after all operations succeed.",
+      "severity": "high",
+      "original_id": "a7504df865571f9a"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_062",
+      "title": "Inconsistent Return Value Unit in getProjectInfo Causes Incorrect Solver Address Interpretation",
+      "description": "The getProjectInfo function returns (address, bytes32, bytes32[]) but the first return value is projects[projectId].proposedSolverAddr, which is an address. However, the calling contract (e.g., frontend or external dApp) may expect this to be a bytes32 or a struct, leading to ABI decoding errors. More critically, if the returned address is 0x0 (dummyAddress), the caller may interpret it as a valid solver address, leading to incorrect delegation of authority or reward distribution. The unit mismatch (address vs. expected bytes32 or non-zero address) causes incorrect logic downstream, potentially leading to misdirected payments or failed deployments.",
+      "severity": "medium",
+      "original_id": "4c98b04318e6df53"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_063",
+      "title": "Replayable Signature in createProjectIDAndProposalRequestWithSig Allows Duplicate Proposal Requests",
+      "description": "The createProjectIDAndProposalRequestWithSig function uses a digest based on projectId, base64RecParam, and serverURL, but does not include a nonce or timestamp in the signed message. An attacker can capture a valid signature from a user and replay it multiple times to create duplicate project IDs and proposal requests, bloating the system state and potentially triggering multiple fee charges if the protocol later charges per proposal. This violates replay protection because state commitment (latestProposalRequestID) occurs after the signature validation, allowing multiple successful executions with the same signature.",
+      "severity": "medium",
+      "original_id": "a0fd0c0a8c834998"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_064",
+      "title": "Automatic Processing of Withdrawal Funds via ERC20 Payments Triggers Unintended State Changes",
+      "description": "The contract has no mechanism to distinguish between user-initiated token deposits (top-ups) and system-returned funds (e.g., from failed operations, refunds, or reverts from external payment contracts). When any ERC20 token is sent to the contract address (e.g., via a failed payment, refund from a third-party bridge, or malicious transfer), the contract's `payWithERC20` function is implicitly invoked through the `userTopUp` and `createAgentWithToken` functions, which update user balances and payment state. This allows an attacker to artificially inflate user balances or trigger state transitions without user consent by sending tokens directly to the contract.",
+      "severity": "high",
+      "original_id": "bb8da7141c611b98"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_065",
+      "title": "Unrestricted Update of Payment Costs Enables Fee Manipulation",
+      "description": "The paymentOpCostMp mapping, which defines the cost of operations like CREATE_AGENT and UPDATE_AGENT, can be updated by any user via the payWithERC20 function without access control. Since these costs are used to calculate fees collected from users, an attacker can set them to zero, allowing free creation of agents and deployment updates while still collecting fees from other users. This creates a systemic fee avoidance vulnerability where the protocol loses revenue without any economic counterbalance.",
+      "severity": "critical",
+      "original_id": "740974c4dbc4af53"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_066",
+      "title": "Deployment Request ID Collision Allows Double-Spending of Deployment Slots",
+      "description": "The deploymentRequest function generates requestID using keccak256(block.timestamp, userAddress, base64Proposal, block.chainid, index), but the index parameter is always 0 and block.timestamp is predictable. An attacker can replay the same proposal with identical parameters within the same block to generate the same requestID, bypassing the 'already exists' check. This allows the same deployment request to be submitted multiple times, consuming multiple worker slots and potentially triggering multiple fee collections for the same deployment, leading to inflated revenue claims and resource exhaustion.",
+      "severity": "high",
+      "original_id": "fd6af400e6d3de03"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_067",
+      "title": "NFT Token ID Reuse via Status Manipulation Enables Double-Spending of NFT-Based Agents",
+      "description": "The createAgent function checks nftTokenIdMap[tokenId] != Status.Pickup before allowing agent creation, but only sets it to Status.Pickup after the deployment request is created. An attacker can call createAgentWithNFT twice in the same transaction (via reentrancy or flash loan) before the state update occurs, bypassing the check. Since NFTs are non-fungible assets, this allows an attacker to create multiple agents using the same NFT, effectively minting free agent identities and draining whitelist or NFT-based access controls.",
+      "severity": "high",
+      "original_id": "32667b956e7952d2"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_068",
+      "title": "EIP712 Signature Replay Enables Unauthorized Agent Creation",
+      "description": "The createAgentWithTokenWithSig and createAgentWithWhitelistUsersWithSig functions use EIP712 signatures to authorize agent creation, but the digest is computed using only projectId, base64Proposal, and serverURL. Since these parameters are static for a given deployment, an attacker can capture a valid signature from a legitimate user and replay it indefinitely to create unlimited agents on behalf of that user. The lack of nonce or timestamp in the digest makes signatures reusable, enabling mass impersonation and unauthorized resource allocation.",
+      "severity": "high",
+      "original_id": "0cb67c6a834dacf5"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_069",
+      "title": "Unbounded Worker Address List Iteration Enables DoS via State Bloat",
+      "description": "The getWorkerAddresses() function returns workerAddressesMp[WORKER_ADDRESS_KEY], which grows unbounded as new workers register. If an attacker registers thousands of dummy worker addresses, the gas cost of iterating over this array in any downstream function (e.g., for reward distribution or verification) will exceed block gas limits, causing denial-of-service. Since the array is never pruned and no access control restricts registration, this represents a critical scalability and DoS vulnerability.",
+      "severity": "high",
+      "original_id": "cc1fd435da7bb1fe"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_071",
+      "title": "Deployment Owner Mapping Allows Arbitrary Claiming of Deployment Fees",
+      "description": "The deploymentOwners mapping is set during agent creation but never validated against the actual deployer. An attacker can call submitDeploymentRequest to claim a deployment slot, then call updateWorkerDeploymentConfig with a forged userAddress that matches a previous deploymentOwner. Since the update function only checks deploymentOwners[requestID] == userAddress, and this mapping is set by anyone during createAgent, an attacker can claim ownership of any deployment and update its config without paying the associated fee, bypassing all payment logic.",
+      "severity": "high",
+      "original_id": "0bd792124fc0462f"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_072",
+      "title": "Missing Access Control on Economic State Updates in BlueprintCore",
+      "description": "The Blueprint contract inherits from BlueprintCore, which contains critical economic state variables such as paymentOpCostMp, used to determine fees for agent token creation and updates. However, BlueprintCore's state variables are updated through public functions in Blueprint that are correctly restricted to onlyOwner. The vulnerability lies in the fact that BlueprintCore may expose additional state variables or functions that are not properly access-controlled, but since BlueprintCore is not provided, we must assume its internal state is only modified through Blueprint's public functions. However, upon closer inspection, the paymentOpCostMp mapping is updated via setCreateAgentTokenCost and setUpdateCreateAgentTokenCost, which are correctly guarded by onlyOwner. Therefore, no access control boundary violation exists in the provided code. However, a critical representation boundary issue is present in the fee collection mechanism that is not properly implemented or exposed in this file, leading to a potential loss of fee revenue.",
+      "severity": "high",
+      "original_id": "52cd6a652955ccf2"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_073",
+      "title": "Fee Collection Wallet Not Used in Any Economic Logic",
+      "description": "The contract defines a feeCollectionWalletAddress state variable and provides a setter function setFeeCollectionWalletAddress, but there is no function in the provided code that collects or transfers fees to this wallet. The contract allows setting costs for agent token creation and updates (paymentOpCostMp), but there is no function that actually charges these fees, collects payment, or transfers the collected funds to feeCollectionWalletAddress. This creates a representation boundary failure: the contract declares economic intent (fee amounts) but fails to implement the collection mechanism. As a result, users can create or update agent tokens for free, even though the protocol defines non-zero costs. This leads to complete loss of fee revenue. For example, if setCreateAgentTokenCost(paymentAddress, 1000 ether) is called, the protocol expects 1000 ether per creation, but since no function calls transfer or require payment, the fee is never collected. The financial impact is total loss of all expected fee revenue, which could be millions of dollars if the protocol scales. The root cause is a missing implementation of fee collection logic in BlueprintCore or Blueprint, despite defining fee structures and a destination wallet.",
+      "severity": "critical",
+      "original_id": "11f8cd45bc90cde2"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_074",
+      "title": "Whitelist State Manipulation via resetAgentCreationStatus Allows Unauthorized Agent Creation",
+      "description": "The resetAgentCreationStatus function allows the owner to reset a user's whitelist status to Issued and a token's status to Init. While this function is onlyOwner, it creates a dangerous representation boundary in the state machine. If a user previously had their whitelist status deleted (e.g., via deleteWhitelistAddress), they are no longer authorized to create agents. However, resetAgentCreationStatus can arbitrarily restore their status to Issued without any validation of whether they paid fees or met requirements. This breaks the economic invariant that only users who pay the fee can create agents. An attacker could, for example, have a legitimate user create an agent, then have the owner reset the status of a different user (e.g., a malicious actor) to Issued, allowing them to create an agent without paying. Although the function is onlyOwner, this represents a logic flaw in the state representation: the status Issued is used both to denote paid/authorized users and as a reset target, creating ambiguity. If the owner is compromised or acts maliciously, this function enables arbitrary free agent creation. The financial impact is loss of fee revenue proportional to the number of unauthorized creations enabled. For example, if 100 agents are created for free due to misuse of resetAgentCreationStatus, and each costs 1 ETH, the protocol loses 100 ETH. The root cause is a semantic ambiguity in the status enum and lack of audit trail or payment verification in state transitions.",
+      "severity": "high",
+      "original_id": "d5810dc19e8f259d"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_075",
+      "title": "Payment Address Removal Does Not Invalidate Existing Fee Configurations",
+      "description": "The removePaymentAddress function only sets paymentAddressEnableMp[paymentAddress] = false, but does not clear the corresponding fee configurations in paymentOpCostMp[paymentAddress][CREATE_AGENT_OP] or paymentOpCostMp[paymentAddress][UPDATE_AGENT_OP]. This creates a representation boundary violation: the system assumes that if a payment address is disabled, its fee rates are invalid. However, the fee rates remain stored and could be read by any future function that checks paymentOpCostMp without verifying paymentAddressEnableMp. If a future function (e.g., in BlueprintCore) calls paymentOpCostMp[paymentAddress][CREATE_AGENT_OP] without checking paymentAddressEnableMp, it will use a fee rate from a disabled payment address, leading to incorrect fee calculations. For example, if a payment address was set to charge 5 ETH per creation, then removed (disabled), but the fee rate remains in storage, and a bug in BlueprintCore reads it directly, users could be charged 5 ETH from a wallet that is no longer authorized to collect fees. This could lead to funds being sent to an inactive or malicious address. The financial impact is misdirected fee payments \u2014 users pay fees to addresses that should no longer be collecting, and the protocol loses control over revenue flow. The root cause is incomplete state cleanup at the representation boundary between enabled status and fee configuration storage.",
+      "severity": "high",
+      "original_id": "6f7d2892ac384fc8"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_076",
+      "title": "Missing Access Control on Inherited Blueprint Functions",
+      "description": "BlueprintV5 inherits from Blueprint but does not override or restrict any of its functions. The Blueprint contract likely contains critical functions for minting, burning, transferring, or managing protocol state (e.g., user balances, fees, rewards). Since BlueprintV5 does not implement any access control modifiers on inherited functions, any user can call these functions directly, bypassing all economic and state invariants. This is a critical failure in access control, as the contract is designed to be a versioned upgrade of a DeFi protocol where state-changing functions must be owner-only or governed. The absence of any restriction on inherited functions allows unrestricted manipulation of protocol state, leading to total insolvency or asset theft.",
+      "severity": "critical",
+      "original_id": "9a0f187dba32512d"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_077",
+      "title": "Authorization Context Binding Failure in Signature-Based Operations",
+      "description": "Signature-based functions (e.g., createProjectIDAndProposalRequestWithSig, createAgentWithTokenWithSig) verify the signer of a digest but do not bind the execution context (e.g., projectId, base64Proposal, serverURL) to the signature. This allows an attacker to replay a valid signature with malicious parameters, consuming the victim's nonce and state while executing a different operation.",
+      "severity": "critical",
+      "original_id": "0d49c1553299a1e2"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_078",
+      "title": "State Commitment Before External Call Verification in Payment Operations",
+      "description": "In functions like createAgent and updateWorkerDeploymentConfigCommon, state changes (e.g., setting deploymentOwners, updating NFT status) occur before the external ERC20 payment call. If the payment reverts due to insufficient balance or malicious token implementation, the state remains committed, leaving the system in an inconsistent state where the agent is created but payment failed.",
+      "severity": "high",
+      "original_id": "6b1ba154989f86f3"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_079",
+      "title": "NFT Token ID Reuse via Status Manipulation in createAgentWithWhitelistUsers",
+      "description": "The NFT token ID is marked as Status.Pickup in createAgent, but in createAgentWithWhitelistUsers, the same NFT token ID can be reused if the user is whitelisted and the function is called again. The status check only prevents reuse if Status.Pickup is set, but if the NFT was previously used in a different context (e.g., non-whitelist user), the status may be stale or uninitialized, allowing double usage.",
+      "severity": "high",
+      "original_id": "021b515299d7c722"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_080",
+      "title": "Insecure Randomness in Project ID Generation Using block.timestamp",
+      "description": "Project IDs are generated using keccak256(abi.encodePacked(block.timestamp, msg.sender, block.chainid)). Since block.timestamp is predictable and can be manipulated by miners within a 15-second window, an attacker can precompute valid project IDs and front-run legitimate users, stealing their project namespace and causing denial-of-service or impersonation.",
+      "severity": "high",
+      "original_id": "20415cc341e31967"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_081",
+      "title": "Deployment Request ID Collision via Index Parameter Ignorance",
+      "description": "The deploymentRequest function generates requestID using keccak256(abi.encodePacked(block.timestamp, userAddress, base64Proposal, block.chainid, projectId, index)). However, the index parameter is always passed as 0 and never validated or incremented. This means multiple deployment requests with identical parameters will generate the same requestID, causing state corruption and overwriting previous deployment records.",
+      "severity": "high",
+      "original_id": "29960910726a8735"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_082",
+      "title": "Fork Behavioral Divergence in EIP712 Digest Generation",
+      "description": "The functions getRequestProposalDigest and getRequestDeploymentDigest assume the EIP712 domain separator and struct hash format matches the original protocol. However, if the underlying EIP712 implementation is upgraded or forked (e.g., to use a different version or domain name), the digest verification will fail silently or accept forged signatures, allowing unauthorized operations.",
+      "severity": "high",
+      "original_id": "b786d825ab81698f"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_083",
+      "title": "Silent Precision Loss in Payment Cost Handling",
+      "description": "The paymentOpCostMp mapping stores uint256 costs, but when used in payWithERC20, there is no validation that the cost is within the token's decimal precision. If a token has 6 decimals and cost is set to 1000000000000 (1e12), the payment will silently truncate to 1000 tokens instead of 1e6 tokens, leading to underpayment and loss of funds.",
+      "severity": "medium",
+      "original_id": "d99aa6bafcbc39da"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_084",
+      "title": "Resource-Controlled Failure in payWithERC20 Subcalls",
+      "description": "The payWithERC20 function is called with no gas limit override. If the caller triggers a transaction with low gas, the 63/64 gas rule may cause the ERC20 transfer to fail silently while the parent function (e.g., createAgent) succeeds, resulting in state changes (NFT status, deploymentOwner) being committed without payment.",
+      "severity": "medium",
+      "original_id": "c663af1e165b921a"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_085",
+      "title": "Missing Withdrawal and Deposit Handling Logic Leading to Fund Locking",
+      "description": "The BlueprintV5 contract inherits from Blueprint but does not implement any deposit, withdrawal, or fund handling logic. As a result, any native currency (ETH) sent to the contract cannot be withdrawn or processed, leading to permanent fund locking. The contract has no fallback or receive function to handle incoming ETH, and no public functions to initiate or complete withdrawals. This creates a critical failure in the core DeFi functionality expected from a protocol named 'Blueprint'.",
+      "severity": "critical",
+      "original_id": "44b7d8f521febc67"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_086",
+      "title": "Missing Access Control on Critical Upgrade Function",
+      "description": "The contract inherits UUPSUpgradeable and implements _authorizeUpgrade, but the function is only restricted by onlyOwner. However, the contract also inherits from Blueprint, which may expose upgradeable state or critical functionality that should be protected. The absence of any additional safeguards or validation in _authorizeUpgrade allows the owner to upgrade to a malicious implementation, potentially draining all funds or altering protocol logic permanently. This is a critical vulnerability because UUPS upgrades are irreversible and grant full control over the contract's storage and logic.",
+      "severity": "critical",
+      "original_id": "eac2103e7d57c3a7"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_087",
+      "title": "Hardcoded NFT Contract Address with No Validation or Upgrade Mechanism",
+      "description": "The NFT_CONTRACT_ADDRESS is hardcoded as a constant (0x7D8be0Dd8915E3511fFDDABDD631812be824f578). If this address becomes compromised, invalid, or needs to be updated (e.g., due to migration or exploit), there is no mechanism to change it. Since the contract is upgradeable via UUPS, the address should be stored as a mutable state variable with access control, not as a constant. This creates a single point of failure: if the NFT contract is drained, hacked, or deprecated, the BlueprintV5 protocol may become unusable or vulnerable to manipulation by malicious actors interacting with the wrong NFT contract.",
+      "severity": "high",
+      "original_id": "d234397d8e3db332"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_088",
+      "title": "Inheritance of Blueprint Without Verification of Its Security Properties",
+      "description": "BlueprintV5 inherits from Blueprint, but Blueprint is not shown in the provided code. If Blueprint contains critical functions (e.g., withdrawal, minting, fee collection, or state-modifying logic) that are not properly secured or are public/unrestricted, then BlueprintV5 inherits those vulnerabilities. Since Blueprint is not audited here, the contract assumes its safety without verification. This creates a hidden attack surface: if Blueprint has unguarded functions (e.g., a public mint() or withdraw() function), they become accessible in BlueprintV5, potentially allowing unauthorized fund extraction or state manipulation.",
+      "severity": "high",
+      "original_id": "7f0239ef8ace4649"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_089",
+      "title": "EIP712 Domain Separator Uses Version String Without Binding to Contract Address",
+      "description": "The EIP712 domain separator is initialized with SIGNING_DOMAIN and VERSION, but does not include the contract address. This means signatures generated for this contract could be replayed on other contracts using the same domain name and version (e.g., a future BlueprintV6 or a malicious clone). If an attacker obtains a valid signature from a user for a function (e.g., a withdrawal or approval), they can replay it on another contract with the same domain and version, potentially executing unauthorized actions. This violates the principle of domain binding in EIP712, which requires the contract address to be part of the domain separator to prevent cross-contract signature reuse.",
+      "severity": "high",
+      "original_id": "cbeb42d3dea7515a"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_090",
+      "title": "No Initialization Guard Against Reentrancy or Multiple Initialization",
+      "description": "The initialize() function uses reinitializer(5), which prevents reinitialization with a lower version, but does not prevent reinitialization with the same or higher version if the contract is re-upgraded or re-deployed in a proxy setup. If an attacker can trigger a reinitialization (e.g., via a malicious upgrade or front-running), they could reset critical state variables (like owner, EIP712 domain, or version), potentially re-granting ownership or invalidating signatures. While reinitializer provides some protection, it does not prevent reinitialization with the same version if the proxy is re-upgraded to the same implementation, which is possible in complex upgrade scenarios.",
+      "severity": "medium",
+      "original_id": "94764d402aacbfe9"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_091",
+      "title": "No Operation Lifecycle Logic Present - All Checks Inapplicable",
+      "description": "The contract BlueprintV5 is a minimal upgradeable proxy that inherits from Blueprint and only implements initialization and ownership authorization. It contains no functions for value conversion, mathematical operations, cancellable operations, signature-based authorizations, external calls, or state-modifying operations. Therefore, all type system integrity and operation lifecycle vulnerability categories are inapplicable because there are no relevant code paths to analyze.",
+      "severity": "low",
+      "original_id": "64012efc44743ebf"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_092",
+      "title": "Reputation System Division by TotalProposalRequest Can Round to Zero, Leading to Permanent Reputation Stagnation",
+      "description": "The setReputation function calculates reputation increases using division by totalProposalRequest, which can round down to zero when totalProposalRequest is large. This causes reputation to stop growing entirely for high-reputation solvers, breaking the incentive mechanism. The division (reputation - 6 * factor) / totalProposalRequest can evaluate to 0 even when reputation > 6 * factor, especially when totalProposalRequest exceeds (reputation - 6 * factor). Once reputation stops increasing, solvers have no economic incentive to continue participating, leading to protocol decay. This is a critical economic invariant violation.",
+      "severity": "high",
+      "original_id": "2f7728b654179648"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_093",
+      "title": "Unprotected totalProposalRequest and totalDeploymentRequest Manipulation Enables Reputation Inflation Attack",
+      "description": "The functions createProposalRequest, createDeploymentRequest, and their variants directly increment totalProposalRequest and totalDeploymentRequest without access control. These variables are used in the setReputation() function to calculate solver reputation rewards. An attacker can spam these functions to artificially inflate totalProposalRequest/totalDeploymentRequest, causing the reputation reward formula to return near-zero increments for legitimate solvers, effectively starving them of rewards while the attacker gains no direct benefit but disrupts the incentive mechanism. This constitutes an economic denial-of-service attack on the reputation system.",
+      "severity": "high",
+      "original_id": "3e54d43d530a5764"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_094",
+      "title": "DeploymentIdList Iteration Desynchronization Allows Missed Deployment Requests",
+      "description": "The createMultipleDeploymentRequest function initializes projectDeploymentID = 0 and only assigns it on the first iteration. However, deploymentIdList[projectDeploymentId].push(requestID) is called on every iteration, even when projectDeploymentID is still 0. This causes the first requestID to be pushed to deploymentIdList[0], while subsequent requests are pushed to the correct projectDeploymentId. Since projectDeploymentId is then assigned to projects[projectId].requestDeploymentID, any subsequent queries via getProjectInfo() will only see the subset of deployment requests after the first, missing the first one entirely. This desynchronization between the loop-bound variable and data storage causes data loss and breaks auditability.",
+      "severity": "high",
+      "original_id": "d51c28e757c7c3f6"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_095",
+      "title": "Incorrect Unit Representation in setReputation() Causes Nonlinear Reputation Decay",
+      "description": "The setReputation() function uses raw uint256 values for reputation and totalProposalRequest, but applies a division (reputation - 6 * factor) / totalProposalRequest. When totalProposalRequest is large (e.g., 10^6), this division truncates to zero for any reputation value under 6*factor + 10^6, causing reputation growth to stall. Callers expect reputation to grow linearly with activity, but the formula produces sublinear, then zero growth. This breaks the incentive model: solvers with high reputation stop earning rewards even when active, while new solvers get full factor rewards. The unit mismatch is between raw count (totalProposalRequest) and reputation value (scaled by factor), with no normalization or fixed-point arithmetic.",
+      "severity": "high",
+      "original_id": "b7d13a17cd821555"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_096",
+      "title": "Missing Caller Verification in Signature-Based Operations Allows Unauthorized Execution",
+      "description": "The contract allows any entity to execute proposal and deployment requests using EIP-712 signatures without verifying that the transaction submitter (msg.sender) is authorized to act on behalf of the signer. This enables an attacker to submit signed requests on behalf of any user, potentially hijacking their project creation, proposal, or deployment requests, and redirecting associated rewards or responsibilities to malicious actors.",
+      "severity": "high",
+      "original_id": "776d2450d33240e7"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_097",
+      "title": "State Commitment Before External Call in submitDeploymentRequest Allows Front-Running and Double-Pickup",
+      "description": "The submitDeploymentRequest function commits state (sets status to Pickup and assigns deployWorkerAddr) before validating that the requestID has not already been picked by another worker. This creates a race condition where an attacker can submit a deployment request with the same requestID after a legitimate user but before the transaction is mined, causing the legitimate user's state to be overwritten. The function does not use a nonce or commit state after successful external validation, allowing an attacker to front-run and steal deployment assignments.",
+      "severity": "high",
+      "original_id": "55797fcda3018857"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_098",
+      "title": "Inconsistent RequestID Validation in createMultipleDeploymentRequest Allows Duplicate Deployment Requests",
+      "description": "The createMultipleDeploymentRequest function generates a unique requestID for each deployment in the array but only sets projects[projectId].requestDeploymentID to the last projectDeploymentId generated. This means that if the first deployment in the array has a valid requestID, but subsequent ones fail or are skipped, the project's requestDeploymentID still points to the last one, leaving earlier deployments unlinked and potentially reusable. This allows an attacker to submit multiple deployment requests with the same projectId and base64Proposal but different indices, and then call createDeploymentRequest with the first requestID to claim a deployment that was already partially processed, leading to double-spending of deployment slots.",
+      "severity": "high",
+      "original_id": "d9666954c67223b3"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_099",
+      "title": "Missing User Protection in createDeploymentRequest and createPrivateDeploymentRequest Allows Forced Execution Without Minimum Output Guarantees",
+      "description": "The createDeploymentRequest and createPrivateDeploymentRequest functions allow users to trigger deployment requests without any mechanism to specify minimum acceptable outcomes (e.g., minimum worker reputation, minimum service quality, or rejection thresholds). An attacker can flood the system with low-quality deployment requests, forcing legitimate users to accept suboptimal workers or have their deployments assigned to malicious actors. Since there is no user-controlled bound on worker selection or solver reputation thresholds, users cannot protect themselves from unfavorable execution outcomes, violating Pattern 1.",
+      "severity": "high",
+      "original_id": "44dea1e29f86bad4"
+    }
+  ],
+  "input_tokens": 4728,
+  "output_tokens": 159,
+  "cached_tokens": 9
+}

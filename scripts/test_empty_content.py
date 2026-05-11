@@ -25,9 +25,11 @@ load_dotenv()
 API_URL = os.getenv("PROXY_URL", "http://localhost:8087")
 
 MODELS = [
-    "deepseek-ai/DeepSeek-V3.2-TEE",
+    "zai-org/GLM-5-TEE",
     "moonshotai/Kimi-K2.5-TEE",
-    "MiniMaxAI/MiniMax-M2.5-TEE",
+    # "deepseek-ai/DeepSeek-V3.2-TEE",
+    # "moonshotai/Kimi-K2.5-TEE",
+    # "MiniMaxAI/MiniMax-M2.5-TEE",
 ]
 MULTI_MODEL = f"{','.join(MODELS)}:throughput"
 

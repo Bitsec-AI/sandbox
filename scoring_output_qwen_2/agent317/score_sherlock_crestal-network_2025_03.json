@@ -1,0 +1,176 @@
+{
+  "project": "sherlock_crestal-network_2025_03",
+  "agent": "agent317",
+  "status": "success",
+  "timestamp": "2026-04-09T12:55:12.197876",
+  "elapsed_seconds": 10.1,
+  "total_expected": 1,
+  "total_found": 21,
+  "true_positives": 1,
+  "false_negatives": 0,
+  "false_positives": 20,
+  "detection_rate": 1.0,
+  "precision": 0.047619047619047616,
+  "f1_score": 0.0909090909090909,
+  "matched_findings": [
+    {
+      "id": "sherlock_crestal-network_2025_03_expected_000",
+      "expected": "Anyone who is approving Blueprint V 5 con-",
+      "matched": "Unauthorized ERC20 Token Transfer",
+      "confidence": 0.9,
+      "justification": "Finding 0 matches the expected vulnerability as it describes unauthorized ERC20 token transfers via the payWithERC20 function. Both mention that any caller can transfer tokens if the fromAddress has approved the contract, leading to potential draining of funds. The core issue and consequences align closely.",
+      "severity": "high",
+      "expected_description": "Source: https://github.com/sherlock-audit/2025-03-crestal-network-judging/issues/260\n\n**Summary:**\npay With ERC 20 is supposed to be used inside Blueprint V 5 contract to handle payment. But this function also can be used to drain anyone who is interact with Blueprint V 5 and using it to approve payment token when creating an agent. Root Cause Payment.sol#L 25-L 32 @> function pay With ERC 20 (address erc 20 Token Address , uint 256 amount , address from Address , address to Address ) public { ,\u2192 // check from and to address require (from Address != to Address ,\"Cannot transfer to self address\" ); require (to Address != address (0), \"Invalid to address\" ); require (amount >0,\"Amount must be greater than 0\" ); IERC 20 token = IERC 20 (erc 20 Token Address ); token .safe Transfer From (from Address , to Address , amount ); } the root cause simply because this function is public function, meaning anyone can call this and supply valid token address, then fill from Address with any address that still have allowance/approving the payment token to be spend by Blueprint V 5 contract 5 Internal Pre-conditions 1.admin enable usdc or any erc 20 token as payment by calling Blueprint:: add Payment Address External Pre-conditions 1.victim approve the spending of usdc or any erc 20 token set in last step for Blueprint V 5 contract address proxy 2.the amount approved should be greater than the amount used for creating agent with token cost 3.victim call the function to create agent (optional) Attack Path 1.attacker call pay With ERC 20 supplying the parameter with usdc address, victim address and sufficient amount to be sent into attacker address\n\n**Impact:**\nuser/victim who interacted would lose their funds drained by attacker Po C No response Mitigation make the Payment:: pay With ERC 20 internal",
+      "found_description": "The payWithERC20 function allows any caller to transfer ERC20 tokens from any 'fromAddress' to any 'toAddress' without proper authorization. This function uses safeTransferFrom which requires the 'fromAddress' to have approved the contract to spend their tokens, but if such approval exists, any user can trigger the transfer on behalf of the 'fromAddress'. This enables unauthorized token transfers when approvals are present.\n\n**Mathematical Proof:**\n- Alice approves Payment contract to spend 1000 USDC\n- Bob calls payWithERC20(USDC_address, 1000, Alice, Bob)\n- Function transfers 1000 USDC from Alice to Bob without Alice's explicit consent for this specific transfer\n- Alice loses 1000 USDC, Bob gains 1000 USDC\n\n**Exploitation Scenario:**\nAn attacker monitors the blockchain for ERC20 approvals to the Payment contract. When they detect an approval, they immediately call payWithERC20 to transfer the approved amount to their own address, effectively stealing the tokens.\n\n**Financial Impact:**\nUsers who have approved the Payment contract to spend their tokens can have their entire approved balance stolen by any third party. The loss equals the approved amount.",
+      "found_id": "044a78d58609f745",
+      "tool_finding_index": 0
+    }
+  ],
+  "missed_findings": [],
+  "undecided_findings": [],
+  "extra_findings": [
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_001",
+      "title": "Payment Address Array Corruption in removePaymentAddress",
+      "description": "The removePaymentAddress function only sets paymentAddressEnableMp[paymentAddress] = false but does not remove the address from the paymentAddressesMp[PAYMENT_KEY] array. This creates state desynchronization where the array contains addresses that are marked as disabled. When other functions iterate through paymentAddressesMp[PAYMENT_KEY], they will process disabled addresses, potentially leading to incorrect fee calculations or operations on invalid payment addresses. The mathematical issue is that the array length and enabled status become inconsistent - if there are 10 addresses in the array but only 5 are enabled, functions using the array will process all 10 but only 5 should be valid. This can lead to incorrect fee distributions or failed transactions when disabled addresses are used.",
+      "severity": "high",
+      "original_id": "be5c8b8a02261119"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_002",
+      "title": "Unbounded Loop in setWhitelistAddresses and removeWhitelistAddresses",
+      "description": "The setWhitelistAddresses and removeWhitelistAddresses functions contain loops that iterate over input arrays without size limits. An attacker could provide a very large array that causes the transaction to run out of gas and revert, effectively performing a denial-of-service attack on the owner's ability to manage whitelist addresses. For example, if an attacker convinces the owner to call setWhitelistAddresses with 10,000 addresses, the transaction would consume excessive gas and likely fail, preventing legitimate whitelist management operations. This is particularly critical since these are owner-only functions and could block essential protocol administration.",
+      "severity": "high",
+      "original_id": "3157b872e5c9ceb4"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_003",
+      "title": "Missing Payment Address Validation in Cost Setting Functions",
+      "description": "The setCreateAgentTokenCost and setUpdateCreateAgentTokenCost functions check if paymentAddressEnableMp[paymentAddress] is true, but they don't verify that the payment address actually exists in the paymentAddressesMp[PAYMENT_KEY] array. This creates a state inconsistency where an address could be enabled but not properly registered in the array, or vice versa. If an address is added to paymentAddressesMp but paymentAddressEnableMp is never set to true, the cost setting functions will fail even though the address is technically in the system. Conversely, if paymentAddressEnableMp is set to true for an address not in the array, other functions that iterate through the array won't see this address. This desynchronization can lead to incorrect fee calculations and operational failures.",
+      "severity": "medium",
+      "original_id": "bf6340c9beec43e3"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_004",
+      "title": "Reputation Inflation Vulnerability in setReputation Function",
+      "description": "The setReputation function contains a mathematical flaw that allows unlimited reputation inflation. When totalProposalRequest <= 1000, the function uses a fixed denominator of 1000 for reputation calculation. However, when reputation is already >= 6*factor, the calculation adds (reputation - 6*factor)/1000, which can be exploited to rapidly inflate reputation scores. Attackers can repeatedly call functions that invoke setReputation to artificially boost their reputation without meaningful contributions.\n\nMathematical Proof:\n- Let factor = 1 (for simplicity)\n- Initial reputation = 6 (6*factor)\n- After first call: reputation = 6 + (6-6)/1000 = 6 + 0 = 6\n- After second call: reputation = 6 + (6-6)/1000 = 6\n- This appears correct initially, but the issue is that the function can be called repeatedly without constraints\n- More critically, if an attacker can manipulate totalProposalRequest or if the calculation logic is flawed in how it handles the growth rate\n\nHowever, upon closer examination, the mathematical formula itself may not lead to unlimited inflation in the way initially described. The vulnerability is more subtle: the reputation growth mechanism doesn't properly scale with actual contribution metrics and can be gamed through repeated calls to reputation-increasing functions.\n\nExploitation Scenario: An attacker repeatedly calls createDeploymentRequest or createPrivateDeploymentRequest with minimal cost to artificially inflate their solver reputation. This could allow them to appear more reputable than legitimate solvers, potentially gaining preferential treatment in the system.\n\nFinancial Impact: While not directly causing fund loss, this vulnerability undermines the reputation system's integrity, potentially allowing malicious actors to gain trust and subsequently exploit other parts of the system. The impact is primarily to system integrity rather than direct financial loss.",
+      "severity": "medium",
+      "original_id": "3c332fe8e92cc451"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_005",
+      "title": "Predictable Request ID Generation Allows Front-Running",
+      "description": "The contract generates request IDs using predictable parameters (block.timestamp, msg.sender, and input data). Attackers can front-run transactions by predicting the request ID and submitting their own transactions first. This is particularly dangerous for deployment requests where the first submitter gets the work assignment.\n\nMathematical Proof:\n- Request ID = keccak256(abi.encodePacked(block.timestamp, msg.sender, base64RecParam, block.chainid))\n- Attackers can monitor mempool for pending transactions\n- They can compute the likely request ID before the legitimate transaction is mined\n- By submitting a transaction with slightly earlier timestamp, they can claim the request ID\n\nExploitation Scenario: An attacker monitors the mempool for deployment requests. When they see a legitimate request about to be submitted, they quickly compute the expected request ID and submit their own deployment request with similar parameters but slightly modified timestamp to claim the work assignment.\n\nFinancial Impact: Legitimate workers lose work opportunities to attackers. The attacker can then provide substandard service or exploit the deployment process. This represents theft of service opportunities and potential downstream financial impacts.",
+      "severity": "high",
+      "original_id": "e6e70ba98fe21136"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_006",
+      "title": "Missing Access Control on Critical State-Modifying Functions",
+      "description": "Multiple functions that modify critical protocol state lack proper access control, allowing any user to manipulate key protocol data structures including reputation scores, request tracking, and project associations.\n\nVulnerable Functions:\n- createProposalRequest: Allows any user to create proposal requests for any existing project\n- createPrivateProposalRequest: Same issue with private requests\n- createDeploymentRequest: Any user can create deployment requests\n- submitDeploymentRequest: Any user can claim deployment work\n- submitProofOfDeployment: Proof submission lacks validation of work completion\n\nExploitation Scenario: An attacker can spam the system with fake requests, manipulate reputation scores by repeatedly calling reputation-increasing functions, or claim deployment work they cannot complete, disrupting legitimate operations.\n\nFinancial Impact: System spam can lead to denial of service for legitimate users. Fake reputation inflation can distort the trust system. Failed deployments due to malicious claims can cause financial losses for project owners.",
+      "severity": "high",
+      "original_id": "b757c50a9da5d8e2"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_007",
+      "title": "State Desynchronization in Request Tracking",
+      "description": "The contract maintains multiple tracking mappings (latestProposalRequestID, latestDeploymentRequestID) that can become desynchronized. When a user creates multiple requests rapidly, the latest tracking may not accurately reflect the actual latest request due to transaction ordering in blocks.\n\nMathematical Proof:\n- User submits Request A at timestamp T1 (mined in block B1)\n- User submits Request B at timestamp T2 (T2 > T1) but mined in same block B1\n- Due to how transactions are ordered in blocks, Request B might be processed before Request A\n- latestProposalRequestID[msg.sender] will point to Request B, but Request A has later timestamp\n\nExploitation Scenario: Attackers can exploit this by front-running their own transactions or manipulating transaction ordering to create confusion about which request is actually the latest, potentially interfering with request processing logic.\n\nFinancial Impact: While not directly causing fund loss, this can disrupt request processing workflows and lead to incorrect request handling, potentially causing service disruptions.",
+      "severity": "medium",
+      "original_id": "5c74973d4ad0d1d5"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_008",
+      "title": "Reputation Inflation Vulnerability in setReputation Function",
+      "description": "The setReputation function contains a mathematical flaw that allows attackers to artificially inflate solver reputation scores. When totalProposalRequest is less than or equal to 1000, the function uses a fixed denominator of 1000, but when totalProposalRequest exceeds 1000, it uses the actual total. This creates an incentive for attackers to manipulate the reputation system by controlling when reputation updates occur.\n\nMathematical Proof:\n- Initial reputation: 6 * factor (minimum threshold)\n- After first update with totalProposalRequest = 1001: reputation += (reputation - 6*factor) / 1001\n- After second update with totalProposalRequest = 1002: reputation += (reputation - 6*factor) / 1002\n- The growth rate becomes: reputation(n+1) = reputation(n) + (reputation(n) - 6*factor) / totalProposalRequest\n- This creates exponential growth when reputation is high and totalProposalRequest is low\n\nExploitation: An attacker can wait until totalProposalRequest is low relative to their reputation, then trigger multiple reputation updates to achieve disproportionately high reputation scores. This could allow them to gain preferential treatment in the protocol despite not providing proportional value.\n\nFinancial Impact: Solvers with artificially inflated reputations could receive unfair allocation of deployment requests, leading to centralization and potential manipulation of the solver market.",
+      "severity": "high",
+      "original_id": "3eb25c19f6a2cd4f"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_009",
+      "title": "Deterministic Project ID Generation Allows Front-Running",
+      "description": "The createProjectID() function generates project IDs using block.timestamp, msg.sender, and block.chainid. This deterministic generation allows attackers to predict and front-run project creation.\n\nMathematical Proof:\n- Project ID formula: keccak256(abi.encodePacked(block.timestamp, msg.sender, block.chainid))\n- Attackers can monitor pending transactions and compute the expected project ID\n- They can then call setProjectId() with the predicted ID before the legitimate user\n\nExploitation Scenario:\n1. Attacker monitors mempool for createProjectID() transactions\n2. Computes the project ID that will be generated\n3. Front-runs by calling setProjectId() with the predicted ID\n4. Legitimate user's transaction fails due to \"projectId already exists\" check\n\nFinancial Impact: Attackers can block legitimate users from creating projects, effectively performing a denial-of-service attack on the protocol. This could prevent users from deploying their applications and cause financial losses due to delayed deployments.",
+      "severity": "high",
+      "original_id": "ecaa4408d71a82fb"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_010",
+      "title": "State Desynchronization in Multiple Deployment Request Handling",
+      "description": "The createMultipleDeploymentRequest function has a state synchronization issue where the projectDeploymentID variable is not properly initialized and managed across loop iterations, potentially leading to incorrect deployment tracking.\n\nMathematical Proof:\n- The function uses: if (projectDeploymentID != 0) { deploymentIdList[projectDeploymentID].push(requestID); } else { projectDeploymentID = projectDeploymentId; ... }\n- However, projectDeploymentID is initially 0 and gets set in the first iteration\n- Subsequent iterations use the same projectDeploymentID for all deployments, even though each iteration generates a different projectDeploymentId\n- This creates a mismatch between the actual deployment IDs and the tracking structure\n\nExploitation: An attacker could create multiple deployment requests where the tracking becomes corrupted, making it difficult to properly manage and verify deployments. This could lead to deployments being associated with wrong projects or becoming untrackable.\n\nFinancial Impact: Incorrect deployment tracking could result in:\n- Inability to properly verify deployment proofs\n- Loss of deployment history and audit trails\n- Potential for double-spending or replay attacks if deployments are not properly isolated",
+      "severity": "high",
+      "original_id": "411694501d47a161"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_011",
+      "title": "Access Control Bypass in Project Upgrade Function",
+      "description": "The upgradeProject function allows any user to reset critical project state (requestProposalID, requestDeploymentID, proposedSolverAddr) without proper authorization checks, potentially disrupting ongoing deployments.\n\nMathematical Proof:\n- Function signature: upgradeProject(bytes32 projectId) public hasProject(projectId)\n- The only modifier checks if the project exists, not if the caller owns it\n- Any address can call this function for any existing project\n- This resets: projects[projectId].requestProposalID = 0, projects[projectId].requestDeploymentID = 0, projects[projectId].proposedSolverAddr = dummyAddress\n\nExploitation Scenario:\n1. Attacker identifies an active project with ongoing deployments\n2. Calls upgradeProject() with the project ID\n3. This resets the project's deployment tracking\n4. Legitimate deployment operations fail due to inconsistent state\n\nFinancial Impact: Attackers can disrupt active deployments, causing:\n- Failed deployments and lost work\n- Financial losses from interrupted services\n- Reputation damage to solvers and workers\n- Potential for extortion attacks where attackers demand payment to not disrupt projects",
+      "severity": "high",
+      "original_id": "f6ddee8117c54359"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_012",
+      "title": "Reputation Calculation Division by Zero",
+      "description": "The setReputation function can divide by zero when totalProposalRequest is 0, causing transaction failure and preventing reputation updates. When totalProposalRequest is 0, the function attempts to divide by 1000, but if reputation is exactly 6*factor, the calculation becomes (reputation - 6*factor)/1000 = 0/1000 = 0, which is safe. However, the real issue is that when totalProposalRequest is 0, the division by 1000 is unnecessary and could lead to precision loss. More critically, if the function is called before any proposal requests are made, the calculation path is mathematically sound but the logic may not reflect intended behavior.",
+      "severity": "medium",
+      "original_id": "79c52c2ed944bd8d"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_013",
+      "title": "Missing Access Control on Critical State Modification Functions",
+      "description": "Multiple functions that modify critical protocol state lack access control modifiers, allowing any user to manipulate project states, reputation, and deployment statuses. The upgradeProject function allows any user to reset project information for any project ID, potentially disrupting ongoing deployments. The submitProofOfDeployment function allows any address claiming to be a worker to submit proofs without proper verification. The UpdateWorkerDeploymentConfig function allows unauthorized configuration updates. These missing access controls enable attackers to corrupt protocol state, invalidate legitimate operations, and potentially steal rewards or disrupt services.",
+      "severity": "high",
+      "original_id": "7aa415ccf6a31c99"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_014",
+      "title": "Deterministic ID Generation Vulnerable to Front-Running",
+      "description": "Multiple functions generate predictable identifiers using block.timestamp and msg.sender that can be front-run by attackers. The createProjectID function uses keccak256(abi.encodePacked(block.timestamp, msg.sender, block.chainid)) which is predictable. Attackers can monitor mempool and pre-create projects with the same parameters to cause collisions. Similarly, proposalRequest and deploymentRequest use predictable requestID generation. This allows attackers to front-run legitimate operations, causing failures or hijacking request flows.",
+      "severity": "high",
+      "original_id": "cc622440d283c071"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_015",
+      "title": "State Desynchronization in Project Upgrade Function",
+      "description": "The upgradeProject function resets project.requestProposalID and project.requestDeploymentID to 0, but doesn't update the deploymentIdList mapping or other related state. This creates desynchronization where deploymentIdList may still contain references to the reset deployment IDs, while the project structure indicates they don't exist. Attackers can exploit this by calling upgradeProject on active projects, causing inconsistent state that may lead to failed operations or incorrect status reporting.",
+      "severity": "medium",
+      "original_id": "8db85e8ac74e5a0a"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_016",
+      "title": "Inconsistent State Validation in Multiple Deployment Functions",
+      "description": "Several deployment functions have inconsistent validation logic. The createMultipleDeploymentRequest function validates base64Proposals.length != 0 but doesn't validate individual array elements. The deploymentRequest function checks if requestDeploymentID == 0 but this check can be bypassed through multiple invocation paths. Attackers can exploit these inconsistencies by providing malformed inputs or calling functions in unexpected sequences to corrupt state or bypass intended restrictions.",
+      "severity": "medium",
+      "original_id": "091ea4d483bf4a88"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_017",
+      "title": "Deterministic Project ID Collision Enables Front-Running and Project Hijacking",
+      "description": "The createProjectID() function generates project IDs using block.timestamp, msg.sender, and block.chainid. Since block.timestamp is the same for all transactions in a block, an attacker can front-run project creation by predicting the project ID and calling setProjectId() first. This allows the attacker to hijack the victim's project creation attempt, causing the legitimate user's transaction to fail with \"projectId already exists\". The mathematical proof shows that for any given block, the project ID is deterministic based on the sender's address and chain ID, making it predictable for front-running attacks.",
+      "severity": "high",
+      "original_id": "df525ac4e3432b1b"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_018",
+      "title": "Reputation Calculation Division by Zero Vulnerability",
+      "description": "The setReputation() function contains a division operation that can divide by zero when totalProposalRequest is 0. The code checks if totalProposalRequest > 1000, but if it's exactly 0, the else branch uses division by 1000. However, if reputation < 6 * factor, the function increments reputation without division. But when reputation >= 6 * factor and totalProposalRequest is 0, the code path reputation += (reputation - 6 * factor) / 1000 is safe. The real issue is that if totalProposalRequest becomes 0 after being non-zero (unlikely but possible in edge cases), the division could cause precision loss. However, the more critical issue is the mathematical logic: when reputation is exactly 6 * factor, the increment becomes 0, effectively freezing reputation growth at this threshold.",
+      "severity": "medium",
+      "original_id": "7426e0ef5007589a"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_019",
+      "title": "Missing Access Control on upgradeProject() Allows Project Reset by Any User",
+      "description": "The upgradeProject() function is public and lacks access control, allowing any user to reset any project's state (requestProposalID, requestDeploymentID, proposedSolverAddr) to zero/dummy values. This enables malicious actors to disrupt ongoing projects by resetting their critical state variables, potentially causing deployment failures, loss of proposal data, and disruption of project workflows. The function only checks if the project exists but doesn't verify that the caller is the project owner or has appropriate permissions.",
+      "severity": "high",
+      "original_id": "af16884c361f855a"
+    },
+    {
+      "id": "sherlock_crestal-network_2025_03_tool_020",
+      "title": "State Desynchronization in Multiple Deployment Request Handling",
+      "description": "In createMultipleDeploymentRequest(), the projectDeploymentID variable is not properly initialized and managed across loop iterations. The function uses a conditional check 'if (projectDeploymentID != 0)' but projectDeploymentID starts as 0 (default value for bytes32). This creates a race condition where the first iteration sets projectDeploymentID, but subsequent iterations may behave unexpectedly. Additionally, the function sets projects[projectId].requestDeploymentID = projectDeploymentID after the loop, but if the loop has multiple iterations with different projectDeploymentId values, only the last one is stored, potentially desynchronizing the deployment tracking.",
+      "severity": "medium",
+      "original_id": "28ea319302c624ae"
+    }
+  ],
+  "input_tokens": 2501,
+  "output_tokens": 83,
+  "cached_tokens": 45
+}

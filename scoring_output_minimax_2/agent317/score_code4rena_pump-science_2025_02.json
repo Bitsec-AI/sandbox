@@ -1,0 +1,282 @@
+{
+  "project": "code4rena_pump-science_2025_02",
+  "agent": "agent317",
+  "status": "success",
+  "timestamp": "2026-04-06T14:19:48.693086",
+  "elapsed_seconds": 272.5,
+  "total_expected": 2,
+  "total_found": 35,
+  "true_positives": 1,
+  "false_negatives": 1,
+  "false_positives": 34,
+  "detection_rate": 0.5,
+  "precision": 0.02857142857142857,
+  "f1_score": 0.05405405405405405,
+  "matched_findings": [
+    {
+      "id": "code4rena_pump-science_2025_02_expected_000",
+      "expected": "Thelock_pooloperation can be DoS",
+      "matched": "Front-Running Attack on Lock Escrow Creation",
+      "confidence": 0.9,
+      "justification": "FINDING 1 directly matches the expected vulnerability. It describes a front-running attack where an attacker pre-creates the lock_escrow account at the expected PDA address, causing the create_lock_escrow call to fail when the legitimate lock_pool transaction executes. This is exactly the DoS vulnerability described in the expected finding - the lock_pool operation fails because the lockEscrow account already exists.",
+      "severity": "high",
+      "expected_description": "Submitted by\nshaflow2\n, also found by\nSpearmint\n\nhttps://github.com/code-423n4/2025-01-pump-science/blob/768ef58478724bf6b464c9f0952e3e5a3b2a2613/programs/pump-science/src/instructions/migration/lock_pool.rs#L149\n\nThe\nlock_pool\noperation requires the creation of a\nlockEscrow\naccount. However, a malicious actor could preemptively create the\nlockEscrow\naccount, causing the\ncreate_lock_escrow\ntransaction to fail and resulting in a Denial of Service (DoS) for the\nlock_pool\noperation.\n\nDuring the\nlock_pool\nprocess, the\ncreate_lock_escrow\nfunction is called to create the\nlock_escrow\naccount.\n\n// Create Lock Escrow\nlet\nescrow_accounts =\nvec!\n[\nAccountMeta::\nnew\n(ctx.accounts.pool.\nkey\n(),\nfalse\n),\nAccountMeta::\nnew\n(ctx.accounts.lock_escrow.\nkey\n(),\nfalse\n),\nAccountMeta::\nnew_readonly\n(ctx.accounts.fee_receiver.\nkey\n(),\nfalse\n),\nAccountMeta::\nnew_readonly\n(ctx.accounts.lp_mint.\nkey\n(),\nfalse\n),\nAccountMeta::\nnew\n(ctx.accounts.bonding_curve_sol_escrow.\nkey\n(),\ntrue\n),\n// Bonding Curve Sol Escrow is the payer/signer\nAccountMeta::\nnew_readonly\n(ctx.accounts.system_program.\nkey\n(),\nfalse\n),\n];\nlet\nescrow_instruction = Instruction {\nprogram_id: meteora_program_id,\naccounts: escrow_accounts,\ndata:\nget_function_hash\n(\n\"global\"\n,\n\"create_lock_escrow\"\n).\ninto\n(),\n};\ninvoke_signed\n(\n&escrow_instruction,\n&[\nctx.accounts.pool.\nto_account_info\n(),\nctx.accounts.lock_escrow.\nto_account_info\n(),\nctx.accounts.fee_receiver.\nto_account_info\n(),\nctx.accounts.lp_mint.\nto_account_info\n(),\nctx.accounts.bonding_curve_sol_escrow.\nto_account_info\n(),\n// Bonding Curve Sol Escrow is the payer/signer\nctx.accounts.system_program.\nto_account_info\n(),\n],\nbonding_curve_sol_escrow_signer_seeds,\n)?;\n\nHowever, the\nlock_escrow\naccount is derived using the\npool\nand\nowner\nas seeds, and its creation does not require the owner\u2019s signature. This means that a malicious actor could preemptively create the\nlock_escrow\naccount to perform a DoS attack on the\nlock_pool\noperation.\n\n/// Accounts for create lock account instruction\n#[derive(Accounts)]\npub\nstruct\nCreateLockEscrow\n<\n'info\n> {\n/// CHECK:\npub\npool: UncheckedAccount<\n'info\n>,\n/// CHECK: Lock account\n#[account(\ninit,\nseeds = [\n\"lock_escrow\"\n.as_ref(),\npool.key().as_ref(),\nowner.key().as_ref(),\n],\nspace =\n8\n+ std::mem::\nsize_of\n::<LockEscrow>(),\nbump,\npayer = payer,\n)]\npub\nlock_escrow: UncheckedAccount<\n'info\n>,\n/// CHECK: Owner account\n@>\npub\nowner: UncheckedAccount<\n'info\n>,\n/// CHECK: LP token mint of the pool\npub\nlp_mint: UncheckedAccount<\n'info\n>,\n/// CHECK: Payer account\n#[account(mut)]\npub\npayer: Signer<\n'info\n>,\n/// CHECK: System program.\npub\nsystem_program: UncheckedAccount<\n'info\n>,\n}\n\nIn the\nlock_pool\nprocess, check if the\nlock_escrow\nexists. If it exists, skip the creation process.\n\nKulture (Pump Science) confirmed",
+      "found_description": "The function creates a lock escrow account without checking if it already exists. An attacker can front-run the transaction by pre-creating the lock_escrow account at the expected PDA address. When the legitimate transaction executes, the create_lock_escrow call will fail because the account already exists, but the function may continue execution or fail in an unpredictable way. This could be exploited to block legitimate migration operations or cause the bonding curve escrow to be drained without proper locking of LP tokens.",
+      "found_id": "db264b1e00491992",
+      "tool_finding_index": 13
+    }
+  ],
+  "missed_findings": [
+    {
+      "id": "code4rena_pump-science_2025_02_expected_001",
+      "title": "Missing Update ofmigration_token_allocationonGlobalStruct",
+      "description": "Submitted by\nD1r3Wolf\n, also found by\n0x_kmr_\nand\nSpearmint\n\nhttps://github.com/code-423n4/2025-01-pump-science/blob/768ef58478724bf6b464c9f0952e3e5a3b2a2613/programs/pump-science/src/state/global.rs#L119-L132\n\nhttps://github.com/code-423n4/2025-01-pump-science/blob/768ef58478724bf6b464c9f0952e3e5a3b2a2613/programs/pump-science/src/state/global.rs#L66\n\nDuring the audit, it was identified that the\nmigration_token_allocation\nvariable on the\nGlobal\nstruct is not updated in the\nGlobal::update_settings\nfunction. This creates a critical issue as the\nmigration_token_allocation\nvalue, which is used during the migration process in the\ncreate_pool\ninstruction, will remain uninitialized or stuck at its default value indefinitely.\n\nThe\nupdate_settings\nfunction is executed within the\nset_params\ninstruction, making it a central mechanism for modifying key global settings. However, due to the missing update logic for\nmigration_token_allocation\n, any updates intended for this variable via\nGlobalSettingsInput\nare ignored. As a result, the\nmigration_token_allocation\non the\nGlobal\nstruct is never updated, leading to a persistent and incorrect value that could disrupt the migration process.\n\nNotes: Execute the test case in src/state/bonding_curve/tests.rs\n\n#[test]\nfn\ntest_global_update_settings\n() {\nuse\ncrate\n::GlobalSettingsInput;\nlet\nmut\nglobal = Global::\ndefault\n();\nlet\nnew_mint_decimals =\n8\n;\nlet\nnew_migration_token_allocation =\n123_000_000\n;\nlet\nmut\nparams = GlobalSettingsInput {\ninitial_virtual_token_reserves:\n0\n,\ninitial_virtual_sol_reserves:\n0\n,\ninitial_real_token_reserves:\n0\n,\ntoken_total_supply:\n0\n,\nmint_decimals: new_mint_decimals,\nmigrate_fee_amount:\n0\n,\nmigration_token_allocation: new_migration_token_allocation,\nfee_receiver: Pubkey::\ndefault\n(),\nwhitelist_enabled:\nfalse\n,\nmeteora_config: Pubkey::\ndefault\n(),\n};\nglobal.\nupdate_settings\n(params,\n0\n);\nassert_eq!\n(global.mint_decimals, new_mint_decimals);\n// Passes\nassert_eq!\n(global.migration_token_allocation, new_migration_token_allocation);\n// Fails as the variables not updated\n}\n\nImpact:\n\nThe\nmigration_token_allocation\nwill retain its default value indefinitely, regardless of any intended updates.\n\nTo resolve this issue, we recommend the following steps:\n\nImplement the logic to update\nmigration_token_allocation\nin the\nGlobal::update_settings\nfunction.\nThis should retrieve the value from the\nGlobalSettingsInput\nparameter provided to the\nupdate_settings\nfunction.\nTest and Validate the Fix:\nEnsure unit tests are added to confirm the successful update of Global struct with the values from the\nGlobalSettingsInput\n.\n\nKulture (Pump Science) confirmed",
+      "severity": "high",
+      "reason": "Closest candidate index=24 (title='Missing Access Control on Critical State Modification Functions') with confidence=0.60."
+    }
+  ],
+  "undecided_findings": [],
+  "extra_findings": [
+    {
+      "id": "code4rena_pump-science_2025_02_tool_000",
+      "title": "Front-Running Whitelist Account Creation",
+      "description": "The AddWl instruction creates a Whitelist account using deterministic PDA derivation without checking if the account already exists. An attacker can front-run the transaction by pre-creating the Whitelist account at the same PDA, causing the legitimate admin's transaction to fail permanently. This prevents legitimate creators from being whitelisted, disrupting protocol functionality.",
+      "severity": "high",
+      "original_id": "be1a2fca28bd4e80"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_001",
+      "title": "Missing Input Validation on Whitelist Creator",
+      "description": "The AddWl instruction accepts a new_creator parameter without validation. While the instruction creates a Whitelist account for the provided key, there is no validation to ensure the creator is not the zero address, a system program, or already whitelisted. This could lead to whitelisting invalid addresses or duplicate entries if the same creator is added multiple times (though the PDA collision would normally prevent duplicates, the lack of explicit validation creates ambiguity).",
+      "severity": "medium",
+      "original_id": "9f84e046e793a5ad"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_002",
+      "title": "Incorrect Token Amount Calculation Leads to Protocol Insolvency",
+      "description": "The token amount calculations for pool initialization incorrectly subtract fixed amounts from reserves without proper validation, potentially leaving the protocol with insufficient reserves to cover user redemptions. The calculation for token_a_amount subtracts a fixed 40,000,000 lamports from the real_sol_reserves after subtracting the migrate_fee_amount, but there's no validation that these subtractions don't exceed available reserves. Similarly, token_b_amount calculation subtracts migration_token_allocation from token_total_supply minus initial_real_token_reserves without ensuring the result is positive and sufficient for pool operations.",
+      "severity": "high",
+      "original_id": "1ca6c03ce76be14e"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_003",
+      "title": "Missing Validation for Insufficient Reserves",
+      "description": "The function does not validate that the calculated token amounts are positive and sufficient for pool initialization. If real_sol_reserves is less than migrate_fee_amount + 40,000,000, the subtraction will underflow or result in zero/negative amounts. Similarly, if token_total_supply is less than initial_real_token_reserves + migration_token_allocation, the token_b_amount calculation will fail. This could lead to protocol insolvency where the pool is initialized with insufficient liquidity to honor user redemptions.",
+      "severity": "high",
+      "original_id": "dcc042994c1b342c"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_004",
+      "title": "Incorrect Signer for Pool Creation Invocation",
+      "description": "The pool creation invocation uses sol_escrow_signer_seeds for signing, but the AccountMeta for bonding_curve_sol_escrow is marked as a signer (true). However, the actual signer should be the bonding curve authority, not the sol escrow. This mismatch could cause the pool creation to fail or create a pool with incorrect authority settings, potentially allowing unauthorized access to pool funds.",
+      "severity": "high",
+      "original_id": "b67e3abbc484cac9"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_005",
+      "title": "Incorrect Fee Calculation in Buy Path Leads to Protocol Insolvency",
+      "description": "The buy path incorrectly calculates the fee by applying it to the exact_in_amount instead of the actual sol_amount used for the bonding curve calculation. This creates a mismatch where users pay fees on the full input amount but the bonding curve only receives the reduced amount after fees, leading to protocol insolvency as the bonding curve accumulates less SOL than it should.",
+      "severity": "high",
+      "original_id": "aedbaeb34b6eefc2"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_006",
+      "title": "Missing Slippage Protection for Fee-Deducted Amount in Sell Path",
+      "description": "The sell path applies slippage protection to the net amount after fees (sell_amount_minus_fee) instead of the gross amount before fees. This allows the protocol to take excessive fees while still passing slippage checks, enabling the protocol to extract more value from users than intended while appearing to respect slippage limits.",
+      "severity": "high",
+      "original_id": "0bf331fb55c2db5c"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_007",
+      "title": "Insufficient SOL Balance Check in Buy Path",
+      "description": "The buy path checks if the user has enough SOL for the exact_in_amount plus rent, but fails to account for the additional fee_lamports that will be deducted. This allows users to initiate buys they cannot complete, potentially causing failed transactions or allowing partial execution attacks.",
+      "severity": "medium",
+      "original_id": "5f652abd7bdfa301"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_008",
+      "title": "Missing Metadata Account Validation Allows Front-Running Attack",
+      "description": "The `CreateBondingCurve` instruction does not validate that the metadata account is uninitialized before creating metadata. An attacker can front-run the transaction by pre-creating a metadata account at the predictable PDA address derived from the mint key. When the legitimate creator's transaction executes, the `create_metadata_accounts_v3` call will fail because the metadata account already exists, permanently preventing the bonding curve from being properly initialized with metadata. The metadata PDA is deterministically calculated as `[b\"metadata\", token_metadata_program_id, mint_key]` using the standard Metaplex derivation. This allows attackers to predict the address and pre-create it.",
+      "severity": "high",
+      "original_id": "76a8aa700e6c7908"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_009",
+      "title": "Missing Mint Authority Revocation Check Allows Unlimited Token Minting",
+      "description": "After minting the initial token supply, the code calls `locker.revoke_mint_authority()` but does not verify that the mint authority was successfully revoked. If the revocation fails silently or is front-run, the bonding curve could retain mint authority, allowing malicious actors to mint unlimited tokens. The mathematical impact is severe: if an attacker gains mint authority, they can mint tokens arbitrarily, breaking the bonding curve's tokenomics. For example, if the bonding curve starts with 1,000,000 tokens and 100 SOL reserves, an attacker could mint 1,000,000,000 tokens, making the original tokens nearly worthless (price per token drops from 0.0001 SOL to 0.0000001 SOL).",
+      "severity": "high",
+      "original_id": "facc8f0fb80680b0"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_010",
+      "title": "Insufficient Whitelist Validation Allows Bypass via Uninitialized Account",
+      "description": "The whitelist validation checks if `whitelist.is_some()` but does not verify that the whitelist account is properly initialized. An attacker could create an uninitialized whitelist account at the expected PDA (`[Whitelist::SEED_PREFIX, creator.key()]`) that passes the `is_some()` check but contains invalid data. Since the code uses `whitelist.unwrap().creator` without validating the account's initialized state, it could read garbage data that matches the creator's key by chance, bypassing whitelist protection. The probability depends on key space, but with 32-byte keys, there's a 1/2^256 chance of random match, though specific implementations might have higher probabilities.",
+      "severity": "medium",
+      "original_id": "0810439132f3f6aa"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_011",
+      "title": "Unauthorized Access to Bonding Curve SOL Escrow Funds",
+      "description": "The `lock_pool` function transfers all remaining lamports from the bonding_curve_sol_escrow account to the fee_receiver without any validation that the escrow account should be drained. This allows the migration_authority to drain SOL funds from the bonding curve escrow account even if they shouldn't have access to those funds. The function only validates that the caller is the migration_authority, but doesn't validate that the escrow should be emptied or that the lock operation was successful. An attacker who gains control of the migration_authority key can drain all SOL from the bonding curve escrow.",
+      "severity": "high",
+      "original_id": "07ac1e1aca038a16"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_012",
+      "title": "Missing Validation of External Call Results",
+      "description": "The function performs two critical cross-program invocations (create_lock_escrow and lock_lp) but doesn't validate their return values or check if the operations were successful. If either external call fails silently or returns an error that's not properly handled, the function continues execution and transfers all lamports from the bonding curve escrow. This could allow an attacker to drain funds even when the lock operation fails, or exploit partial failure states where the escrow is drained but the LP tokens aren't properly locked.",
+      "severity": "high",
+      "original_id": "8957de2e255271b5"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_014",
+      "title": "Missing Access Control on Critical Pool Management Functions",
+      "description": "The `create_pool`, `lock_pool`, `add_wl`, and `remove_wl` functions lack proper access control modifiers, allowing any unauthorized user to call these privileged operations. This enables attackers to manipulate pool creation, locking, and whitelist management without authorization.\n\n**Attack Vector Analysis:**\n- Unauthorized Access: All four functions can be called by any user\n- Exploitation Scenario: An attacker can call `create_pool` to create malicious pools, `lock_pool` to freeze legitimate pools, `add_wl` to add themselves to whitelists, and `remove_wl` to remove legitimate creators\n- Financial Impact: Protocol takeover, fund theft through malicious pools, denial of service by locking legitimate pools\n\n**Mathematical Proof:**\nThe vulnerability is structural - no mathematical proof needed as the access control is completely missing. The functions modify critical protocol state without any authorization checks.\n\n**Specific Attack Examples:**\n1. Attacker calls `create_pool()` to create a pool with malicious parameters\n2. Attacker calls `lock_pool()` on a legitimate pool, freezing all user funds\n3. Attacker calls `add_wl(attacker_pubkey)` to grant themselves whitelist privileges\n4. Attacker calls `remove_wl()` to remove legitimate creators from whitelist",
+      "severity": "critical",
+      "original_id": "6477088701be5a14"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_015",
+      "title": "Incomplete remove_wl Implementation Allows Whitelist Manipulation",
+      "description": "The `remove_wl` function has an empty implementation that always returns `Ok(())` without performing any actual removal operation. This creates a critical logic flaw where the function appears to remove whitelist entries but actually does nothing.\n\n**Attack Vector Analysis:**\n- Control Flow Manipulation: Function signature suggests removal capability but implementation is empty\n- State Desynchronization: Protocol state expects whitelist entries to be removed when function is called\n- Exploitation Scenario: Admin calls `remove_wl` to remove a malicious creator, but the function does nothing, allowing the attacker to continue operating\n- Financial Impact: Malicious actors remain whitelisted despite attempted removal, enabling continued exploitation\n\n**Mathematical Proof:**\nFunction analysis:\n```rust\npub fn remove_wl(_ctx: Context<RemoveWl>) -> Result<()> {\n    Ok(())\n}\n```\nThe function takes a `RemoveWl` context but ignores it completely, performing zero state modifications and returning success.",
+      "severity": "high",
+      "original_id": "c59504d398377c3f"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_016",
+      "title": "Missing Parameter Validation in Global Settings Functions",
+      "description": "The `initialize` and `set_params` functions accept `GlobalSettingsInput` parameters without visible validation logic in the main module. Critical protocol parameters could be set to malicious values that break protocol invariants.\n\n**Attack Vector Analysis:**\n- Parameter Injection: Attackers with admin privileges (or through compromised keys) can set destructive parameters\n- Edge Case Exploitation: Zero fees, maximum fees, invalid addresses, or extreme numerical values can be injected\n- Exploitation Scenario: Malicious admin sets protocol fees to 100%, draining all user funds, or sets critical addresses to attacker-controlled accounts\n- Financial Impact: Complete protocol takeover, fund theft, protocol insolvency\n\n**Mathematical Proof:**\nWhile the actual validation may occur in handler functions, the main module shows no parameter validation. For example, if fee parameters can be set to extreme values:\n- Fee percentage = 100%: All user swaps result in complete fund loss\n- Fee percentage = 0%: Protocol earns no revenue, becomes unsustainable\n- Invalid treasury address: Fees sent to attacker-controlled account",
+      "severity": "high",
+      "original_id": "4f5b6921cd49f962"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_017",
+      "title": "Missing Access Control on Critical Token Authority Functions",
+      "description": "The BondingCurveLockerCtx struct provides functions to lock/unlock token accounts and revoke mint/freeze authorities, but there is no access control mechanism to prevent unauthorized calls. These functions use the bonding curve PDA as a signer, but the context itself can be constructed by anyone with the bonding curve account and bump. An attacker can call these functions directly to freeze/unfreeze the bonding curve's token account or revoke critical authorities, potentially locking funds or disabling protocol functionality.\n\n**Mathematical Proof**: The vulnerability exists because the struct methods are public and can be called by anyone who can construct a BondingCurveLockerCtx. The signer derivation uses only public information (bonding_curve_bump and mint address), which can be easily obtained. There are no additional checks to verify the caller has permission to perform these operations.\n\n**Exploitation Scenario**: An attacker can:\n1. Obtain the bonding curve account and bump (public on-chain data)\n2. Construct a BondingCurveLockerCtx with these parameters\n3. Call lock_ata() to freeze the bonding curve's token account, preventing any token transfers\n4. Call revoke_mint_authority() to permanently disable minting capabilities\n5. Call revoke_freeze_authority() to remove freeze authority permanently\n\n**Financial Impact**: This can lead to permanent protocol failure by freezing the bonding curve's liquidity or disabling critical token operations. User funds could be permanently locked in the bonding curve, and the protocol's core functionality would be disabled.",
+      "severity": "high",
+      "original_id": "bab5d94ace9c2fce"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_018",
+      "title": "Incorrect Signer Derivation in Cross-Contract Calls",
+      "description": "The get_signer() function returns a fixed-size array [&[u8]; 3], but the signer_seeds are constructed as &[&signer[..]] which creates a slice of slices with length 1. This may not properly pass all three seed components to the CPI context, potentially causing the signer verification to fail or use incorrect seeds.\n\n**Mathematical Proof**: The get_signer() returns [seed1, seed2, seed3] but signer_seeds = &[&signer[..]] creates a single slice containing all three seeds concatenated. The SPL token program expects the PDA seeds to be passed as separate slices, not concatenated. This could lead to failed signature verification or incorrect authority checks.\n\n**Exploitation Scenario**: When the bonding curve attempts to perform token operations (freeze/thaw/set_authority), the signer derivation may fail, causing the CPI calls to revert. Alternatively, if the seeds are incorrectly parsed, an attacker might be able to craft a malicious call that passes signature verification with different seeds.\n\n**Financial Impact**: Protocol operations could fail unexpectedly, preventing legitimate freezing/thawing operations or authority changes. This could leave the protocol in an inconsistent state where critical security measures cannot be properly enforced.",
+      "severity": "high",
+      "original_id": "898dd00b4de1ce2d"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_019",
+      "title": "Critical Precision Loss in Fee Calculation Leading to Zero Fees",
+      "description": "The fee calculation in Phase 2 (slots 150-250) uses integer arithmetic that can result in zero fees due to precision loss, allowing attackers to avoid paying fees entirely. The calculation `fee_bps = (-8_300_000_i64 * slots_passed + 2_162_600_000) / 100_000` can round down to zero for certain slot values, particularly when the intermediate result is less than 100,000. This violates the intended fee schedule and allows attackers to exploit the bonding curve without paying the required fees.\n\nMathematical Proof:\n- At slot 250: fee_bps = (-8,300,000 * 250 + 2,162,600,000) / 100,000 = (-2,075,000,000 + 2,162,600,000) / 100,000 = 87,600,000 / 100,000 = 876 bps (8.76%)\n- At slot 249: fee_bps = (-8,300,000 * 249 + 2,162,600,000) / 100,000 = (-2,066,700,000 + 2,162,600,000) / 100,000 = 95,900,000 / 100,000 = 959 bps (9.59%)\n- At slot 260 (should be Phase 3 but demonstrates precision issue): fee_bps = (-8,300,000 * 260 + 2,162,600,000) / 100,000 = (-2,158,000,000 + 2,162,600,000) / 100,000 = 4,600,000 / 100,000 = 46 bps (0.46%)\n- The critical issue occurs when the numerator becomes less than 100,000, causing the division to round down to zero. For example, if the linear calculation produces a numerator of 99,999, the result would be 0 bps instead of the intended ~1 bps.\n\nExploitation Scenario: An attacker can monitor the bonding curve and execute trades precisely when the calculated fee_bps rounds to zero, avoiding fees entirely. This allows them to extract value from the curve without contributing to the fee pool.\n\nFinancial Impact: The protocol loses expected fee revenue. For a trade of 100 SOL, the attacker would avoid paying fees that should range from 1% to 99% (1-99 SOL), resulting in direct financial loss to the protocol.",
+      "severity": "critical",
+      "original_id": "24016b2c05a86171"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_020",
+      "title": "Incorrect Decimal Scaling in Token Calculations Leading to Precision Loss",
+      "description": "The functions `get_sol_for_sell_tokens` and `get_tokens_for_buy_sol` incorrectly handle decimal scaling, potentially causing significant precision loss in token calculations. The code scales token amounts by multiplying by 1,000,000,000 and then dividing by 1,000,000, which effectively multiplies by 1,000. However, this scaling is applied inconsistently and can lead to rounding errors that attackers can exploit.\n\nMathematical Proof:\n- For a token amount of 1 (with 6 decimals), the scaling: 1 * 1,000,000,000 / 1,000,000 = 1,000\n- For a token amount of 999 (with 6 decimals), the scaling: 999 * 1,000,000,000 / 1,000,000 = 999,000\n- The issue arises when small token amounts are used. For example, if a user tries to sell 1 token (0.000001 tokens in real terms), the calculation would scale it to 1,000, but the constant product formula may round this to zero due to the large virtual reserves.\n\nExploitation Scenario: An attacker can perform many small trades that exploit the rounding behavior. By making repeated trades with amounts that round down to zero, they can effectively drain the pool without paying the appropriate price.\n\nFinancial Impact: The bonding curve loses value as attackers extract tokens or SOL without proper compensation. The precision loss can be exploited to gain unfair advantages in trading.",
+      "severity": "high",
+      "original_id": "d9ee114bcd2df7bd"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_021",
+      "title": "State Desynchronization in ApplyBuy Function During Final Purchase",
+      "description": "The `apply_buy` function has a critical flaw in its handling of the final purchase that can lead to state desynchronization and incorrect SOL amount calculation. When `token_amount >= self.real_token_reserves`, the function temporarily modifies virtual reserves, calculates a recomputed SOL amount, then restores the original state. However, this approach can lead to inconsistencies between virtual and real reserves.\n\nMathematical Proof:\n- Initial state: virtual_token_reserves = 1000, virtual_sol_reserves = 1000, real_token_reserves = 100\n- Attacker buys with sol_amount that would give token_amount = 150 (exceeding real_token_reserves)\n- Function sets token_amount = 100 (real_token_reserves)\n- Temporarily sets virtual_token_reserves = 900, virtual_sol_reserves = 115,005,359,056\n- Recomputes sol_amount using these temporary values\n- Restores original virtual reserves but uses the recomputed sol_amount\n- This can create a mismatch between the actual trade economics and the recorded state\n\nExploitation Scenario: An attacker can trigger the final purchase condition in a way that exploits the temporary state manipulation to get a more favorable exchange rate, or to cause the bonding curve to enter an inconsistent state where virtual and real reserves don't align properly.\n\nFinancial Impact: The protocol may lose funds if the recomputed SOL amount doesn't accurately reflect the true value of the tokens being purchased. This could allow attackers to acquire tokens at below-market rates.",
+      "severity": "high",
+      "original_id": "a39f2720095dc53a"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_022",
+      "title": "Hardcoded Final SOL Reserve Value in ApplyBuy Function",
+      "description": "The `apply_buy` function hardcodes the final virtual SOL reserves to 115,005,359,056 during the final purchase calculation. This hardcoded value represents a significant vulnerability as it doesn't dynamically calculate based on the actual state of the bonding curve.\n\nMathematical Proof:\n- The code sets: `self.virtual_sol_reserves = 115_005_359_056; // Total raise amount at end`\n- This value is used to recompute the SOL amount for the final purchase\n- However, if the actual accumulated SOL in the pool is different from this hardcoded value, the calculation will be incorrect\n- For example, if the pool only accumulated 50,000,000 SOL but uses 115,005,359,056 in the calculation, the recomputed SOL amount will be artificially inflated\n\nExploitation Scenario: An attacker can monitor the bonding curve and time their final purchase to exploit the discrepancy between the hardcoded value and the actual accumulated SOL. This could allow them to acquire the remaining tokens for less SOL than they should cost.\n\nFinancial Impact: The protocol may lose significant value if the hardcoded final SOL reserve doesn't match the actual accumulated funds. This represents a fundamental flaw in the bonding curve economics.",
+      "severity": "high",
+      "original_id": "856cc78288fb4877"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_023",
+      "title": "Missing Critical Parameter Validation in Global Settings Update",
+      "description": "The `update_settings` function does not validate input parameters before updating the global state, allowing an authorized user to set invalid parameters that break protocol invariants. While `validate_settings` exists, it's not called within `update_settings`, creating a critical gap where validated parameters can be bypassed. This enables parameter injection attacks that could make the protocol insolvent or enable theft.",
+      "severity": "high",
+      "original_id": "7301bf7b128408ee"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_024",
+      "title": "Insufficient Token Supply Validation Allows Protocol Insolvency",
+      "description": "The `validate_settings` function contains flawed validation logic for token supply parameters. The check `token_total_supply.saturating_sub(migration_token_allocation) > initial_real_token_reserves` is mathematically incorrect and allows configurations where the protocol becomes insolvent. The validation should ensure that the sum of initial_real_token_reserves and migration_token_allocation does not exceed token_total_supply, but the current logic uses inequality in the wrong direction.",
+      "severity": "high",
+      "original_id": "3d45a4333dc86863"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_025",
+      "title": "Missing Access Control on Critical State Modification Functions",
+      "description": "The `update_settings` and `update_authority` functions lack explicit access control checks within the struct implementation. While these functions may be called from external instructions with proper authorization, the absence of internal checks creates a risk that if these functions are accidentally exposed or called from unauthorized contexts, critical protocol parameters could be modified by attackers.",
+      "severity": "medium",
+      "original_id": "ab37ec02c36819c4"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_026",
+      "title": "Incorrect Function Signature Serialization in get_lock_lp_ix_data",
+      "description": "The get_lock_lp_ix_data function incorrectly serializes only the user_lock_amount field instead of the entire CpiLockArg struct. This creates a mismatch between the expected function signature and the actual data passed to the external contract. The function should serialize the args struct (args.serialize(&mut buf).unwrap()) but instead serializes only the field (args.user_lock_amount.serialize(&mut buf).unwrap()). This will cause the external contract's lock function to receive malformed data, potentially leading to incorrect LP token locking amounts or complete transaction failure.",
+      "severity": "high",
+      "original_id": "80c15a572f76965a"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_027",
+      "title": "Missing Input Validation in Pool Creation Data Generation",
+      "description": "The get_pool_create_ix_data function accepts any u64 values for amount_a and amount_b without validation. This allows attackers to create pools with malicious parameters such as zero amounts, extremely imbalanced ratios, or maximum u64 values that could break pool mathematics. For example, an attacker could create a pool with token_a_amount = 0 and token_b_amount = 1, which would create a mathematically invalid pool where division operations would fail or round to zero. This could be exploited to manipulate price calculations or cause arithmetic overflows in downstream calculations.",
+      "severity": "medium",
+      "original_id": "75b017f3cd18b805"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_028",
+      "title": "Missing Input Validation in LP Locking Data Generation",
+      "description": "The get_lock_lp_ix_data function accepts any u64 value for lp_amount without validation. This allows attackers to attempt locking zero LP tokens or excessive amounts that may exceed actual LP token balances. While the external contract should validate these parameters, the lack of client-side validation creates a potential attack vector where malformed transactions could be submitted, potentially wasting gas or causing unexpected behavior in the external locking mechanism.",
+      "severity": "medium",
+      "original_id": "fe73c6ad7f5d5439"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_029",
+      "title": "Incorrect Reserve Updates in Bonding Curve Sell Operation",
+      "description": "The test `test_apply_sell` reveals a critical state desynchronization vulnerability in the bonding curve's sell operation. When selling tokens, the `real_sol_reserves` is updated by subtracting the `sol_amount` from the `curve_initial.real_sol_reserves`. However, the test shows that after a buy operation, the `real_sol_reserves` equals the purchase amount (1 SOL = 1000000000 lamports), not the initial reserves plus the purchase amount. This indicates that the sell operation incorrectly assumes `real_sol_reserves` accumulates all purchases, when in reality it only tracks the current reserve amount. This desynchronization between the expected reserve state and actual state would allow attackers to exploit the curve by selling tokens when reserves are insufficient, potentially draining the protocol.\n\n**Mathematical Proof:**\n- Initial state: real_sol_reserves = 0\n- After buying 1 SOL: real_sol_reserves = 1000000000\n- Test attempts: curve_initial.real_sol_reserves - result.sol_amount = 0 - 1000000000 = -1000000000 (impossible)\n- Actual calculation should be: current real_sol_reserves - result.sol_amount = 1000000000 - 1000000000 = 0\n\n**Exploitation Scenario:** An attacker could front-run sell operations when reserves are low, causing the protocol to attempt to pay out more SOL than available, leading to insolvency or incorrect accounting.\n\n**Financial Impact:** Protocol insolvency - users may not receive owed SOL from sell operations, or the protocol may become mathematically inconsistent, allowing arbitrage attacks.",
+      "severity": "high",
+      "original_id": "989c784402ffffc9"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_030",
+      "title": "Incomplete Reserve Synchronization in Bonding Curve Completion",
+      "description": "The test `test_buy_and_sell_too_much` demonstrates that when the bonding curve completes (all tokens sold), the virtual reserves are not properly synchronized with real reserves. After the curve completes, both real_token_reserves and virtual_token_reserves are set to 0, but the test shows virtual_sol_reserves being updated while real_sol_reserves tracks the actual SOL collected. This creates a permanent desynchronization where virtual reserves no longer accurately represent the curve state, breaking the mathematical invariants of the bonding curve model.\n\n**Mathematical Proof:**\n- Complete curve state: real_token_reserves = 0, virtual_token_reserves = 0\n- But: real_sol_reserves = 85005359057, virtual_sol_reserves = initial + buy_result.sol_amount\n- This violates the constant product formula (x * y = k) that bonding curves typically maintain\n\n**Exploitation Scenario:** After curve completion, any subsequent operations (like the attempted sell in the test) would use incorrect virtual reserve values, allowing attackers to manipulate prices or exploit the broken invariants for profit.\n\n**Financial Impact:** Permanent protocol insolvency - the bonding curve mathematics become invalid, allowing arbitrage attacks and potentially enabling infinite minting or draining of reserves.",
+      "severity": "high",
+      "original_id": "c9e7e6c1a36094ff"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_031",
+      "title": "Precision Loss in Fee Calculation with Small Amounts",
+      "description": "The `calculate_fee` function uses integer division which can lead to precision loss, particularly with small amounts. The test shows calculations like `amount * 9900 / 10000` which for small amounts can round down to zero. While the tests use 1000000 (1 million) as amount, smaller amounts would suffer from significant precision loss.\n\n**Mathematical Proof:**\n- For amount = 100 (small purchase): 100 * 9900 / 10000 = 990000 / 10000 = 99 (99% fee preserved)\n- For amount = 10: 10 * 9900 / 10000 = 99000 / 10000 = 9 (90% fee, incorrect)\n- For amount = 1: 1 * 9900 / 10000 = 9900 / 10000 = 0 (100% fee loss)\n\n**Exploitation Scenario:** Attackers could make many small transactions to exploit the rounding errors, effectively paying lower fees than intended or causing the fee mechanism to fail entirely for micro-transactions.\n\n**Financial Impact:** Fee evasion - attackers could avoid paying proper protocol fees, reducing protocol revenue. For very small amounts, the fee calculation could round to zero, allowing free transactions.",
+      "severity": "medium",
+      "original_id": "691fa36c30b4aa05"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_032",
+      "title": "Inconsistent Price Calculation in Get Functions",
+      "description": "The tests `test_get_sol_for_sell_tokens` and `test_get_tokens_for_buy_sol` show inconsistencies between the getter functions and actual apply operations. The getter functions return slightly different values than what's actually executed in apply operations, indicating potential rounding differences or formula inconsistencies that could be exploited through price manipulation.\n\n**Mathematical Proof:**\n- test_get_sol_for_sell_tokens: Expected 1000000000, got 1000000022 (0.000022% difference)\n- This small difference, when scaled across many transactions, could allow MEV bots to exploit the discrepancy through front-running or arbitrage.\n\n**Exploitation Scenario:** MEV bots could monitor the difference between quoted prices and actual execution prices, front-running transactions when the discrepancy is profitable.\n\n**Financial Impact:** MEV extraction - attackers could profit from price discrepancies at the expense of regular users, reducing overall protocol efficiency and user trust.",
+      "severity": "medium",
+      "original_id": "f466f81e99d09a75"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_033",
+      "title": "Division Rounding to Zero Enables Protocol Fee Evasion",
+      "description": "The `bps_mul` and `bps_mul_raw` functions perform division operations that can round down to zero when the numerator is smaller than the denominator. This allows attackers to evade protocol fees or receive incorrect rewards by manipulating input values. The vulnerability occurs because the division operation truncates fractional results, and when `(value * bps) < divisor`, the result becomes zero. This can be exploited in fee calculations, reward distributions, or any financial operation where small values are multiplied by basis points.\n\n**Mathematical Proof:**\n- Let value = 1 (smallest possible non-zero value)\n- Let bps = 1 (0.01% fee/reward rate)\n- Let divisor = 10,000 (BASIS_POINTS_DIVISOR)\n- Calculation: (1 * 1) / 10,000 = 0.0001 \u2192 truncated to 0\n\n**Exploitation Scenario:**\n1. Protocol charges a 0.01% fee on small transactions\n2. Attacker sends 1 unit of token (smallest denomination)\n3. Fee calculation: bps_mul(1, 1, 10000) = 0\n4. Attacker pays zero fee instead of 0.0001 units\n5. If repeated across many small transactions, attacker evades significant fees\n\n**Financial Impact:**\n- Protocol loses expected fee revenue\n- Small transactions become fee-free, enabling fee evasion strategies\n- Reward distributions to small stakeholders round to zero, effectively stealing their rewards\n- Impact scales with transaction volume and frequency",
+      "severity": "high",
+      "original_id": "53912071ded14094"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_034",
+      "title": "Integer Overflow in Multiplication Before Division",
+      "description": "The `bps_mul_raw` function performs multiplication before division, which can cause integer overflow when dealing with large values. While the function uses u128 for intermediate calculations, the inputs are u64 values that can still overflow when multiplied. The maximum u64 value is 18,446,744,073,709,551,615. When two large u64 values are multiplied, the result can exceed u128::MAX (340,282,366,920,938,463,463,374,607,431,768,211,455), causing overflow and potential panic or incorrect results.\n\n**Mathematical Proof:**\n- Maximum u64 value: 18,446,744,073,709,551,615\n- Multiply two maximum u64 values: 18,446,744,073,709,551,615 \u00d7 18,446,744,073,709,551,615\n- Result: \u2248 3.4028e+38, which exceeds u128::MAX (3.4028e+38) by a small margin\n- Actual calculation: 18,446,744,073,709,551,615\u00b2 = 340,282,366,920,938,463,463,374,607,431,768,211,225\n- This is 230 less than u128::MAX, but demonstrates the boundary condition\n\n**Exploitation Scenario:**\n1. Protocol handles large token amounts (e.g., total supply calculations)\n2. Attacker provides maximum u64 values for both parameters\n3. Multiplication overflows u128, causing panic or undefined behavior\n4. Protocol operations fail, potentially locking funds or causing denial of service\n\n**Financial Impact:**\n- Protocol operations fail when processing large values\n- Potential denial of service attacks\n- Funds could be locked if overflow occurs during critical operations\n- Impact depends on protocol's maximum expected values",
+      "severity": "high",
+      "original_id": "b26cb5537019dbe6"
+    }
+  ],
+  "input_tokens": 11388,
+  "output_tokens": 3154,
+  "cached_tokens": 1229
+}

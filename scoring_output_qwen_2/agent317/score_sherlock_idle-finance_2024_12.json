@@ -1,0 +1,737 @@
+{
+  "project": "sherlock_idle-finance_2024_12",
+  "agent": "agent317",
+  "status": "success",
+  "timestamp": "2026-04-09T12:56:30.560501",
+  "elapsed_seconds": 78.4,
+  "total_expected": 2,
+  "total_found": 100,
+  "true_positives": 1,
+  "false_negatives": 1,
+  "false_positives": 99,
+  "detection_rate": 0.5,
+  "precision": 0.01,
+  "f1_score": 0.0196078431372549,
+  "matched_findings": [
+    {
+      "id": "sherlock_idle-finance_2024_12_expected_000",
+      "expected": "Asingledepositorcangriefother",
+      "matched": "Incorrect Instant Withdrawal Detection Logic",
+      "confidence": 0.9,
+      "justification": "Finding 9 describes a vulnerability in the withdrawal request claiming logic where withdrawals can be incorrectly classified due to flawed detection logic. This matches the expected vulnerability where requested withdrawals can be claimed right away due to insufficient validation. The core issue is the same: incorrect logic in the claimWithdrawRequest function allowing premature withdrawal claims.",
+      "severity": "high",
+      "expected_description": "Source: https://github.com/sherlock-audit/2024-12-idle-finance-judging/issues/52\n\n**Summary:**\nAfterthe CDOisinitialized, depositsareallowedtoprovidetheliquiditythatwillbeused forthefirstepoch. Duringthissameperiod, beforethefirstepochisstarted, withdrawals arealsoallowed (theyareenabledwhenthecontractisinitialized), thismakessense, a depositorcouldrequestawithdrawalthatwouldbewithdrawableassoonasthefirst epochisover, thisdepositormayhaveintentionstoonlyseedliquidityforasingleepoch, pointis, depositorsareallowedtorequestawithdrawal. Theproblemthatallowstheexploitisthattherequestedwithdrawalscanactuallybe claimedrightaway, the Idle Credit Vault.claim Withdraw Request () reliesonacondition thatdoesn'tpreventwithdrawalrequeststobeclaimedbeforethefirstepochends. function claim Withdraw Request (address _user) external returns (uint 256 amount){ ... //@audit-issue => Before the first epoch is started, `epoch End Date is 0`. //@audit-issue => Because `epoch End Date == 0`, it does not matter if the last Withdraw Request was made on the current epoch. (`false && whatever` will always evaluate to false),\u2192 ,\u2192 //@audit-issue => This allows withdraw requests before the first epoch ends to be claimed without needing to wait for finalization of the first epoch ,\u2192 if (IIdle CDOEpoch Variant (idle CDO).epoch End Date ()!=0&&(epoch Number <= last Withdraw Request [_user])){ ,\u2192 revert Not Allowed (); } ... } Thisflawallowsfortheattackdescribedonthe Attack Pathsectiontobepossible, causingtoallthedepositor'sliquiditytobestolen. Asdemonstratedonthecoded Po Cprovidedonthe Po Csection, asingledepositorcan continouslydeposit, requestawithdrawandclaimtherequestedwithdrawbeforethe firstepochstarts. 4 \u2022Therequestedwithdrawclaimstheintereststhatwould'vebeenearntduringthe firstepoch, but, withoutneedingtowaitforthefirstepochtoend. \u2013Thatextraclaimedamountcomesfromthedepositsoftheotherdepositors. Sincealldepositsaresentdirectlytothe Credit Vault, alltheextraliquidity takenbythegrieffercomesfromtheliquidityoftheotherdepositors. Root Cause Initilizationofthe CDOcontractsetsthecontract'sstateinsuchawaythatitallows depositorstoclaimnormalrequestedwithdrawalswithoutneedingtowaituntilthefirst epochisover. Internal Pre-conditions Noepochhasstartedonthe CDO. Liquidity (deposits) tostartthefirstepochisbeing collectedbeforestartingthefirstepoch. External Pre-conditions None. Attack Path 1. Depositorsprovidesliquidityonthe CDOcontractbeforethefirstepochstarts. 2. Adepositorrequestawithdrawforallhisdeposits. 3. Depositorclaimsrightawaytherequestedwithdraw. 4. Thedepositorreceiveshisprincipal+theinterestitwouldearnduringthefirst epoch. 5.rinse&&repeatsteptocontinuedrainingtheprincipaloftheotherdepositors.\n\n**Impact:**\nDepositsmadebeforethefirstepochcanbestolen Po C Addthenext Po Conthe Idle Credit Vault.t.soltestfile: function test_deposits Befor First Epoch Starts Can Be Stolen Po C () external { uint 256 deposit Amount =10000*ONE_SCALE ; Idle CDOEpoch Variant CDO=Idle CDOEpoch Variant (address (idle CDO)); 5 assert Eq (CDO.paused (), false,\"Pause is True\" ); assert Eq (CDO.epoch End Date (),0,\"epoch End Date != 0\" ); Idle Credit Vault strategy =Idle Credit Vault (CDO.strategy ()); assert (strategy .get Apr ()!=0); address underlying Token =CDO.token (); address Tranch Token AA =CDO. AATranche (); address user 1=make Addr (\"user 1\"); address user 2=make Addr (\"user 2\"); address user 3=make Addr (\"user 3\"); { deal (underlying Token , user 1, deposit Amount ); deal (underlying Token , user 2, deposit Amount ); deal (underlying Token , user 3, deposit Amount ); vm.start Prank (user 1); IERC 20 (underlying Token ).approve (address (CDO), type (uint 256).max); CDO.deposit AA (deposit Amount ); vm.stop Prank (); vm.start Prank (user 2); IERC 20 (underlying Token ).approve (address (CDO), type (uint 256).max); CDO.deposit AA (deposit Amount ); vm.stop Prank (); vm.start Prank (user 3); IERC 20 (underlying Token ).approve (address (CDO), type (uint 256).max); CDO.deposit AA (deposit Amount ); vm.stop Prank (); } uint 256 initial Strategy Underling Balance =3*deposit Amount ; uint 256 strategy Underlying Balance_before = IERC 20 (underlying Token ).balance Of (address (strategy )); ,\u2192 assert Eq (strategy Underlying Balance_before , initial Strategy Underling Balance ); //@audit-info => User 3 has 0 underlying balance because he depositted everything on the CDO! ,\u2192 uint 256 user 3 Underlying Balance_before = IERC 20 (underlying Token ).balance Of (address (user 3)); ,\u2192 assert Eq (user 3 Underlying Balance_before ,0); { vm.start Prank (user 3); CDO.request Withdraw (0, Tranch Token AA ); CDO.claim Withdraw Request (); CDO.deposit AA (IERC 20 (underlying Token ).balance Of (address (user 3))); 6 CDO.request Withdraw (0, Tranch Token AA ); CDO.claim Withdraw Request (); CDO.deposit AA (IERC 20 (underlying Token ).balance Of (address (user 3))); CDO.request Withdraw (0, Tranch Token AA ); CDO.claim Withdraw Request (); vm.stop Prank (); } //@audit-info => User 3 has more balance than what he deposited because when he claim the withdraw request, he claimed the interests as if the epoch would have ended!,\u2192 ,\u2192 uint 256 user 3 Underlying Balanc_after = IERC 20 (underlying Token ).balance Of (address (user 3)); ,\u2192 assert Gt (user 3 Underlying Balanc_after , deposit Amount ); //@audit-info => Credit Vault has less than the 2 deposits made by user 1 and user 2. //@audit-info => All the `interest` extracted by user 3 came from the Principal of User 1 and User 2 ,\u2192 uint 256 strategy Underlying Balance_after = IERC 20 (underlying Token ).balance Of (address (strategy )); ,\u2192 assert Lt (strategy Underlying Balance_after ,2*deposit Amount ); } Runtheprevious Po Cwiththenextcommand: forge test --match-test test_deposits Befor First Epoch Starts Can Be Stolen Po C -vvvv Mitigation Themoststraightforwardmitigationisto initializethe epoch End Date to block.timestamp whenthe CDOisinitialized. \u2022Thiswillmakethatthevalidationonthe Idle Credit Vault.claim Withdraw Request () tocorrectlypreventclaimingwithdrawalrequestsbeforethefirstepochends. Idle CDOEpoch Variant._additional Init () function _additional Init () internal virtual override { ... + epoch End Date = block.timestamp; }",
+      "found_description": "The processWithdrawRequests function detects instant withdrawals by comparing _strategy.pendingWithdraws() before and after calling _cdo.requestWithdraw(). However, this logic is flawed because pendingWithdraws() could change for reasons unrelated to instant withdrawals, such as concurrent withdrawals from other sources. This can lead to misclassification of withdrawal types and incorrect claim processing.\n\nMathematical Proof:\n- Before call: _pendingWithdraws = 1000\n- _cdo.requestWithdraw(500, tranche) is called\n- If another withdrawal occurs concurrently, after call: _strategy.pendingWithdraws() = 1500\n- isEpochInstant[_epoch] = (1500 == 1000) = false (incorrectly classified as normal)\n- But if it was actually an instant withdrawal, claimInstantWithdrawRequest() won't be called\n\nExploitation: Normal protocol operation with concurrent withdrawals can cause misclassification. If an instant withdrawal is incorrectly classified as normal, users must wait longer to claim, and if a normal withdrawal is incorrectly classified as instant, the claim will fail.\n\nFinancial Impact: Users experience delayed access to funds or failed claims, potentially locking funds temporarily or requiring manual intervention.",
+      "found_id": "56fd88cb96c0e942",
+      "tool_finding_index": 19
+    }
+  ],
+  "missed_findings": [
+    {
+      "id": "sherlock_idle-finance_2024_12_expected_001",
+      "title": "Depositingto Idle CDOisvulner-",
+      "description": "Source: https://github.com/sherlock-audit/2024-12-idle-finance-judging/issues/59\n\n**Summary:**\nDepositingto Idle CDOisvulnerabletoin\ufb02ationattacks. Attackercaninflatetheshare pricetoaverybigvaluebydonatingassetsintocontractandthenuser'swouldlosetheir assetswhiledepositingassetsincontract. Root Cause https://github.com/sherlock-audit/2024-12-idle-finance/blob/main/idle-tranches/cont racts/Idle CDO.sol#L 128 https://github.com/sherlock-audit/2024-12-idle-finance/blob/ main/idle-tranches/contracts/Idle CDO.sol#L 270 https://github.com/sherlock-audit/2024-12-idle-finance-Mhttps://github.com/sherlock- audit/2024-12-idle-finance/blob/main/idle-tranches/contracts/Idle CDO.sol#L 188 D-Yas h Shah 1923/blob/main/idle-tranches/contracts/Idle CDO.sol#L 315 Internal Pre-conditions No response External Pre-conditions Total Supplyof LPtokenshouldbe Zero Attack Path \u2022Whentotalsupplyiszeroanattackergoesaheadandexecutesthefollowingsteps: \u2013Depositafewassets (1 wei) through deposit AA () or deposit BB () \u2013Since Attackeristhefirstdepositor (total Supplyis 0&&total Assetsis 0), attackergetsminted 1 weiofashare \u2013Afterwardstheattackerwouldwaitforuserwhowantstodepositsome numberofassets. 9 \u2013Let'ssuppose Bobwantstodeposit 10 e 18 underlyingasset. \u2013Nowattackerwouldseethetransactioninmempoolandfrontrunthe Bob's transactionanddonates 100 e 18 underlyingassetstocontractthusinflating thetotalassetsincontract. \u2013Nowwhenattackertransactiongetsexecutedhewouldbeminted 0 sharesin againstofproviding 10 e 18 duetoinflationofsharesincontractsoatotalloss of 10 e 18 touser. \u2013Afterthatattackerclaimshis 1 shareworthof 110 e 18+1 ofunderlyingassets. \u2013Letmedigmoredeeperwhythiswouldhappen. \u2013During Depositthrough deposit AA () or deposit BB () _deposit () getscalled wherefirstwetransferunderlyingtokento Idle CDOEpoch Variant (Idle CDO) contract. function _deposit (uint 256 _amount, address _tranche , address _referral ) internal virtual when Not Paused returns (uint 256 _minted){ ,\u2192 if (_amount ==0){ return_minted; } // check that we are not depositing more than the contract available limit _guarded (_amount); // set _last Caller Block hash _update Caller Block (); // check if _strategy Price decreased _check Default (); // interest accrued since last deposit XX/withdraw XX/harvest is splitted between AA and BB ,\u2192 // according to tranche APRSplit Ratio. NAVs of AA and BB are updated and tranche ,\u2192 // prices adjusted accordingly _update Accounting (); // check if depositor has enough stk IDLE for the amount to be deposited _check Stk IDLEBal (_tranche ,_amount); // get underlyings from sender address _token=token; uint 256 _pre Bal =_contract Token Balance (_token); IERC 20 Detailed (_token).safe Transfer From (msg.sender , address (this), _amount); ,\u2192 // mint tranche tokens according to the current tranche price _minted =_mint Shares (_contract Token Balance (_token)-_pre Bal, msg.sender , _tranche ); ,\u2192 // update tranche APRSplit Ratio _update Split Ratio (_get AARatio (true)); if (direct Deposit ){ IIdle CDOStrategy (strategy ).deposit (_amount); } 10 if (_referral !=address (0)){ emit Referral (_amount,_referral ); } } \u2013Afterthat _mint Shares () getscalledwiththeamountofassetswehave passed. \u2013Inside_mint Shareswehavetoinflatetranche Pricesothatuserwouldgetmint zeroshares. function _tranche Price (address _tranche ) internal viewreturns (uint 256){ if (Idle CDOTranche (_tranche ).total Supply ()==0){ returnone Token ; } return_tranche ==AATranche ?price AA : price BB; } \u2013Wehavetoinflateprice AAorprice BBaacordingtothetranche. \u2013Thispricehavebeenupdatedin _update Accounting () function _update Accounting () internal virtual { uint 256 _last NAVAA =last NAVAA ; uint 256 _last NAVBB =last NAVBB ; uint 256 _last NAV =_last NAVAA +_last NAVBB ; uint 256 nav=get Contract Value (); uint 256 _apr Split Ratio =tranche APRSplit Ratio ; // If gain is > 0, then collect some fees in `unclaimed Fees` if (nav>_last NAV ){ unclaimed Fees +=(nav-_last NAV )*fee/FULL_ALLOC ; } @>(uint 256 _price AA , int 256_total AAGain )=_virtual Price Aux (AATranche , nav, _last NAV ,_last NAVAA ,_apr Split Ratio ); ,\u2192 (uint 256 _price BB , int 256_total BBGain )=_virtual Price Aux (BBTranche , nav, _last NAV ,_last NAVBB ,_apr Split Ratio ); ,\u2192 last NAVAA =uint 256 (int 256 (_last NAVAA )+_total AAGain ); // if we have a loss and it's gte last junior NAV we trigger a default if (_total BBGain <0&&-_total BBGain >=int 256 (_last NAVBB )){ // revert with 'default' error (4) if skip Default Check is false, as seniors will have a loss too not covered. ,\u2192 // `update Accounting` should be manually called to distribute loss require (skip Default Check ,\"4\"); // This path will be called when a default happens and guardian calls // `update Accounting` after setting skip Default Check or when skip Default Check is already set to true ,\u2192 last NAVBB =0; // if skip Default Check is set to true prior a default (eg because AA is used as collateral and needs to be liquid), ,\u2192 11 // emergency Shutdown won't prevent the current deposit/redeem (the one that called this _update Accounting) and is ,\u2192 // still correct because: // - deposit BB will revert as price BB is 0 // - deposit AA won't revert (unless the loss is 100% of TVL) and user will get ,\u2192 // correct number of share at a price AA already post junior default // - withdraw BB will redeem 0 and burn BB tokens because price BB is 0 // - withdraw AA will redeem the correct amount of underlyings post junior default ,\u2192 // We pass true as we still want AA to be redeemable in any case even after a junior default ,\u2192 _emergency Shutdown (true); }else{ // we add the gain to last saved NAV last NAVBB =uint 256 (int 256 (_last NAVBB )+_total BBGain ); } price AA =_price AA ; price BB =_price BB ; } \u2013Theprice AAandprice BBgetsupdatedin _virtual Price Aux andthemainroot causeisthatwhilecalculating_virtual Price Auxnavgetscalculatedusing balance Of (address (this)) whichiswherethemainproblemis. uint 256 nav = get Contract Value (); function _contract Token Balance (address _token) internal viewreturns (uint 256){ ,\u2192 return IERC 20 Detailed (_token).balance Of (address (this)); } \u2013Duetothisattackercaninflatethesharepricebydonating.\n\n**Impact:**\n\u2022Thisattackhastwoimplications: Implicitminimum Amountandfundslostdueto roundingerrors \u2013Ifanattackerissuccessfulinmaking 1 shareworthzassetsandausertriesto mintsharesusingk*zassetsthen, *Ifk<1, thentheusergetszeroshareandtheyloosealloftheirtokenstothe attacker *Ifk>1, thenusersstillgetsomesharesbuttheylose (k-floor (k))*z) ofassets whichgetproportionallydividedbetweenexistingshareholders (including theattacker) duetoroundingerrors. *Thismeansthatforuserstonotlosevalue, theyhavetomakesurethatkis 12 aninteger. Po C \u2022Addthistestinside Idle Credit Vault.t.solandchange USDCaadressto DAIaddress 0 x 6 B 175474 E 89094 C 44 Da 98 b 954 Eede AC 495271 d 0 F address internal constant USDC = 0 x 6 B 175474 E 89094 C 44 Da 98 b 954 Eede AC 495271 d 0 F; function test Share Inflation Via Donating () external { // Attacker deposits 1 wei of Underlying Token uint 256 amount=1; vm.start Prank (address (attacker )); // Approving assets underlying .approve (address (idle CDO), type (uint).max); // Depositing to AA tranche idle CDO.deposit AA (amount); assert Eq (Idle Credit Vault (address (strategy )).tot Epoch Deposits (), amount, \"tot Epoch Deposits after AA deposit\" ); ,\u2192 // Attacker then donating 100 e 18 underlying asset IERC 20 Detailed (USDC).transfer (address (idle CDO),100 e 18); vm.stop Prank (); // Now Users transaction gets executed vm.start Prank (address (user)); // approving tokens underlying .approve (address (idle CDO), type (uint).max); // User deposits 10 e 18 assets idle CDO.deposit AA (10 e 18); vm.stop Prank (); assert Eq (idle CDO.get Contract Value (),110000000000000000001 ); //User gets minted 0 shares assert Eq (IERC 20 (AAtranche ).balance Of (address (user)),0); assert Eq (IERC 20 (AAtranche ).balance Of (address (attacker )),1); } Mitigation\n\n**Recommendation:**\n\u2022Ilikehow Balancer V 2 and Uniswap V 2 doit. some MINIMUMamountofsharesget burntwhenthefirstminthappens. 13",
+      "severity": "high",
+      "reason": "Not found"
+    }
+  ],
+  "undecided_findings": [],
+  "extra_findings": [
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_000",
+      "title": "Incorrect Rate Calculation Allows Permanent Fund Loss",
+      "description": "The `setIsActive` function calculates the redemption rate as `rate = token.balanceOf(this) * ONE_TRANCHE / trancheToken.totalSupply()`. This calculation is vulnerable to precision loss when the token balance is small relative to the total supply, potentially setting the rate to zero. If the rate becomes zero, users will receive zero underlying tokens when claiming, permanently losing their funds. The calculation should use a more precise formula that avoids premature rounding.",
+      "severity": "high",
+      "original_id": "27969162f0b504ba"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_001",
+      "title": "Missing Reentrancy Protection in Claim Function",
+      "description": "The `claim` function transfers tokens to the user after receiving tranche tokens, but does not follow the checks-effects-interactions pattern. A malicious ERC20 token with a hook in `transferFrom` or `transfer` could re-enter the contract and manipulate state or drain funds. Although the contract uses OpenZeppelin's SafeERC20, which should prevent reentrancy for standard tokens, custom tokens with non-standard behavior could still exploit this.",
+      "severity": "high",
+      "original_id": "812f0aa8c83b0f38"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_002",
+      "title": "Owner Can Drain Funds via transferToken During Active Claims",
+      "description": "The `transferToken` function allows the owner to transfer any ERC20 token from the contract without restrictions, even when claims are active. This can be used to drain the underlying token being distributed, making the redemption rate incorrect and preventing users from claiming their rightful share. The function should be restricted to non-active states or exclude the distribution token.",
+      "severity": "high",
+      "original_id": "bca659b1eb298713"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_003",
+      "title": "Missing Access Control on Critical State-Changing Function",
+      "description": "The _setLimit function is missing the onlyOwner modifier and relies on an internal _checkOnlyOwner function that uses tx.origin instead of msg.sender for authorization. This creates a critical vulnerability where any contract can bypass ownership checks by calling through a proxy, allowing unauthorized parties to modify the TVL limit. Additionally, the transferToken function has the same issue, enabling theft of all contract funds by any contract caller.",
+      "severity": "critical",
+      "original_id": "717d7a78879604de"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_004",
+      "title": "Incorrect Authorization Check Using tx.origin",
+      "description": "The _checkOnlyOwner function uses require(owner() == msg.sender, '6') which incorrectly checks msg.sender instead of using the intended tx.origin logic mentioned in the comment. While the current implementation correctly uses msg.sender, the comment suggests it was meant to prevent same-tx-origin calls, indicating potential logic confusion. However, the actual vulnerability is that the function should use the onlyOwner modifier instead of a custom check to ensure standard OpenZeppelin ownership patterns are followed.",
+      "severity": "high",
+      "original_id": "6aa5e2c02291d83b"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_005",
+      "title": "Missing Reentrancy Protection on Fund Transfer",
+      "description": "The transferToken function transfers ERC20 tokens to the recovery fund without reentrancy protection, despite inheriting from ReentrancyGuardUpgradeable. While the function has the nonReentrant modifier available through inheritance, it's not applied. If the governanceRecoveryFund is a malicious contract with a token fallback, it could re-enter and potentially bypass other security checks.",
+      "severity": "medium",
+      "original_id": "4a4183197c62a777"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_006",
+      "title": "Reward Rate Calculation Error in depositReward Function",
+      "description": "The depositReward function incorrectly calculates the new reward rate when adding rewards during an active reward period. The formula `rewardRate = (reward + leftover) / rewardsDuration` fails to account for the fact that leftover rewards should be distributed over the remaining time of the current period, not the full duration. This leads to incorrect reward distribution where rewards are either over-distributed (causing insolvency) or under-distributed (stealing from users).",
+      "severity": "high",
+      "original_id": "1bfcce67f3d1e0db"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_007",
+      "title": "Incorrect Reward Balance Check in depositReward Function",
+      "description": "The depositReward function checks `rewardRate <= balance / rewardsDuration` to prevent overflow, but uses the wrong balance value. It checks the balance AFTER transferring in the new rewards, but should check the balance BEFORE the transfer to ensure the contract has sufficient funds to cover the entire reward distribution period. This allows the rewardsDistribution to deposit rewards it doesn't actually have, leading to protocol insolvency.",
+      "severity": "high",
+      "original_id": "68db898377de290b"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_008",
+      "title": "Whitelist Bypass Through _stake Function Parameter Manipulation",
+      "description": "The _stake function checks whitelist status of msg.sender but uses _user parameter for reward accounting. An attacker can call _stake directly (if exposed) or through a contract that calls it, specifying a whitelisted address as _user while being a non-whitelisted msg.sender. This allows non-whitelisted users to stake on behalf of whitelisted users, bypassing the access control.",
+      "severity": "high",
+      "original_id": "4a29fd7b70ff7c30"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_009",
+      "title": "Rounding Error in _mintShares Allows Free Token Minting",
+      "description": "The _mintShares function subtracts _amount / oneToken from the deposit amount to 'avoid rounding issues'. However, this subtraction can reduce the amount to zero for small deposits, allowing attackers to mint tranche tokens for free. The calculation _amount -= _amount / oneToken can result in _amount becoming 0 when _amount < oneToken, enabling minting of tokens without depositing any underlying assets.",
+      "severity": "high",
+      "original_id": "047ae64635069d2d"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_010",
+      "title": "State Desynchronization Between lastNAV Updates and Strategy Deposits",
+      "description": "The _deposit function updates lastNAV state variables through the parent _mintShares call, but the strategy.deposit(_amount) call happens after. If strategy.deposit reverts (e.g., during epoch transitions), the lastNAV will have been increased but no actual funds will be deposited in the strategy. This creates a permanent desynchronization where the protocol accounting shows more assets than actually exist in the strategy, potentially allowing attackers to exploit the inflated NAV.",
+      "severity": "high",
+      "original_id": "8a3c480e24423bdc"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_011",
+      "title": "Permanent Lock of Senior Tranche (AA) Funds",
+      "description": "The contract permanently locks senior tranche (AA) funds by disabling AA withdrawals entirely and only allowing AA deposits when totalSupply is zero. This creates a critical vulnerability where once AA tokens are deposited, they can never be withdrawn. The _withdraw function has a hardcoded requirement that only allows BB tranche withdrawals, making AA funds permanently inaccessible. This violates the fundamental expectation that deposited funds should be redeemable and represents a permanent loss of user funds.",
+      "severity": "critical",
+      "original_id": "a44ff0d384629312"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_012",
+      "title": "AA Deposit Race Condition Leading to Permanent Lock",
+      "description": "The AA deposit function has a race condition where multiple users can attempt to deposit simultaneously when totalSupply is zero, but only the first transaction will succeed. Subsequent transactions will fail permanently with \"disable depositAA\" error. This creates a situation where users can lose gas fees and potentially have their transactions fail after approval, but more importantly, it creates an unpredictable deposit environment. If two users attempt to be the first AA depositor simultaneously, one will succeed and the other will permanently lose the ability to deposit to AA tranche.",
+      "severity": "high",
+      "original_id": "2a3ae50229afc381"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_013",
+      "title": "Array Length Corruption in replaceProtectedContracts",
+      "description": "The replaceProtectedContracts function uses assembly to directly overwrite the protectedContracts array length without properly handling the existing array data. This causes state desynchronization between the array length and the actual stored elements. When the new array is shorter than the original, the contract will read garbage data from storage slots that no longer belong to the array, potentially leading to calling arbitrary addresses as IIdleCDO contracts.\n\n**Mathematical Proof:**\n- Original protectedContracts array has length N with elements stored at storage slots [array_slot, array_slot+1, ..., array_slot+N-1]\n- New array has length M where M < N\n- Assembly `sstore(protectedContracts.slot, mload(_protectedContracts))` sets length to M\n- Loop writes M new elements to slots [array_slot, array_slot+1, ..., array_slot+M-1]\n- Slots [array_slot+M, array_slot+M+1, ..., array_slot+N-1] remain with old data\n- When pauseAll() iterates up to length M, it reads correct new addresses\n- But if M < N, slots beyond M contain old addresses that could be attacker-controlled\n\n**Exploitation Scenario:**\n1. Attacker becomes owner through governance attack or privilege escalation\n2. Calls replaceProtectedContracts with a short array (M=1) containing a legitimate contract\n3. Storage slots beyond index 0 contain old addresses that may be attacker-controlled contracts\n4. When pauseAll() is called, it only iterates up to M=1, but if the contract is later extended or if there's a bug in iteration, the old addresses could be called\n\n**Financial Impact:** Medium - While the immediate impact is limited due to the loop bound, this creates a persistent state corruption that could lead to unexpected behavior and potential loss of funds if the contract logic changes or if there are bugs in future iterations.",
+      "severity": "medium",
+      "original_id": "c7bd6d26d36ac925"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_014",
+      "title": "Missing Array Bounds Validation in replaceProtectedContracts",
+      "description": "The replaceProtectedContracts function does not validate that the new array length matches the storage allocation, leading to potential out-of-bounds writes when the new array is longer than the original. This can corrupt adjacent storage variables.\n\n**Mathematical Proof:**\n- Original array length: N, storage slots used: [array_slot, array_slot+N-1]\n- New array length: M where M > N\n- Assembly sets length to M without allocating additional storage\n- Loop writes M elements, but only first N slots are properly allocated to the array\n- Writes to slots [array_slot+N, array_slot+M-1] will overwrite other state variables\n- Storage layout: protectedContracts (slot 1), pauser (slot 0), Ownable variables in subsequent slots\n- If M > N and N is small, could overwrite critical contract state\n\n**Exploitation Scenario:**\n1. Attacker becomes owner\n2. Calls replaceProtectedContracts with very large array (M >> N)\n3. Storage writes beyond the original array bounds corrupt other state variables\n4. Could overwrite pauser address, owner address, or other critical state\n\n**Financial Impact:** High - Direct control over contract state could allow attacker to bypass access controls or take ownership of the contract.",
+      "severity": "high",
+      "original_id": "6142f42951bf87b1"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_015",
+      "title": "Unbounded Gas Consumption in pauseAll with Large Arrays",
+      "description": "The pauseAll function iterates over all protectedContracts without any gas limit or batch size restriction. If the array becomes very large, the function will consume excessive gas and may fail to complete, preventing emergency shutdown functionality.\n\n**Mathematical Proof:**\n- Each IIdleCDO.emergencyShutdown() call consumes gas (estimate: 30,000-100,000 gas)\n- Block gas limit: ~30,000,000 gas\n- Maximum contracts processable in one transaction: 30,000,000 / 100,000 = 300 contracts\n- If protectedContracts array exceeds 300 addresses, pauseAll() will fail\n- Attacker could add many fake contracts to DOS emergency functionality\n\n**Exploitation Scenario:**\n1. Attacker becomes owner through governance attack\n2. Calls addProtectedContracts with hundreds of addresses (could be fake or expensive contracts)\n3. When legitimate pauser tries to call pauseAll(), transaction runs out of gas\n4. Emergency shutdown mechanism becomes unusable\n\n**Financial Impact:** High - Critical emergency functionality can be permanently disabled, preventing protocol from responding to crises.",
+      "severity": "high",
+      "original_id": "9ddc06ff29208370"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_016",
+      "title": "Incorrect Epoch Price Calculation in processDeposits",
+      "description": "The processDeposits function calculates epochPrice as _pending * ONE_TRANCHE / _trancheMinted, but this calculation can be exploited when the CDO contract returns fewer tranche tokens than expected due to fees or other deductions. This leads to users receiving fewer tranche tokens than they deposited when claiming, resulting in permanent loss of user funds. The vulnerability occurs because the contract assumes the CDO deposit returns tranche tokens in exact proportion to the underlying amount, but external factors can affect the actual minted amount.\n\nMathematical Proof:\n- User deposits 1000 underlying tokens (pending = 1000)\n- CDO deposits 1000 underlying but returns 990 tranche tokens due to 1% fee (_trancheMinted = 990)\n- epochPrice = 1000 * 1e18 / 990 = 1.010101010101010101e18\n- When user claims: amount * ONE_TRANCHE / epochPrice = 1000 * 1e18 / 1.010101010101010101e18 = 990 tranche tokens\n- User effectively loses 10 underlying tokens worth of value\n\nExploitation: Normal protocol operation with any CDO that charges fees or has slippage will cause this loss. The loss is permanent and affects all users who deposit through the queue.\n\nFinancial Impact: Users lose the difference between their deposited underlying amount and the actual tranche tokens received. The lost value goes to the protocol/CDO contract.",
+      "severity": "high",
+      "original_id": "b0f851f0bef2a054"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_017",
+      "title": "Division by Zero in processWithdrawRequests",
+      "description": "The processWithdrawRequests function calculates _epochPrice = _underlyingsRequested * ONE_TRANCHE / _pending without checking if _pending is zero. If _pending is zero, this will cause a division by zero error, permanently blocking withdrawal processing for that epoch. While _pending is checked to be non-zero earlier in the function, the state could change between the check and the calculation if the function is called multiple times or if state is modified during execution.\n\nMathematical Proof:\n- Function checks _pending != 0 and proceeds\n- External call to _cdo.requestWithdraw(_pending, tranche) could potentially modify state\n- If _pending becomes 0 after the check but before calculation, division by zero occurs\n- Calculation: _epochPrice = _underlyingsRequested * 1e18 / 0 \u2192 Division by zero revert\n\nExploitation: An attacker could potentially manipulate the state through reentrancy or front-running to cause _pending to become zero after the initial check but before the division operation.\n\nFinancial Impact: Permanent blocking of withdrawal processing for the epoch, preventing users from claiming their withdrawals and locking funds indefinitely.",
+      "severity": "high",
+      "original_id": "1cd5d860424f7ee0"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_018",
+      "title": "State Desynchronization in processWithdrawRequests",
+      "description": "The processWithdrawRequests function sets pendingClaims = true but only resets it in processWithdrawalClaims. However, if processWithdrawalClaims fails or is not called, the pendingClaims flag remains true forever, blocking all future processWithdrawRequests calls. This creates a permanent denial-of-service condition for withdrawal processing.\n\nExploitation Scenario:\n1. processWithdrawRequests is called successfully for epoch 10, setting pendingClaims = true\n2. processWithdrawalClaims for epoch 10 fails due to external conditions or is never called\n3. All subsequent calls to processWithdrawRequests will revert due to pendingClaims check\n4. Withdrawal processing is permanently disabled\n\nFinancial Impact: Permanent locking of all future withdrawal requests. Users cannot process new withdrawals through the queue mechanism, and their funds remain stuck in the contract indefinitely.",
+      "severity": "high",
+      "original_id": "ffbe459d4cd8b852"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_020",
+      "title": "Unauthorized CDO Deployment",
+      "description": "The deployCDO function lacks access control, allowing any user to deploy TransparentUpgradeableProxy instances with arbitrary implementation contracts, admin addresses, and initialization data. This enables attackers to deploy malicious CDO contracts that appear legitimate, potentially leading to phishing attacks, fund theft, or protocol impersonation. While the factory itself doesn't hold funds, the deployed proxies could be used to deceive users into depositing funds into malicious contracts. The financial impact depends on user deception success, but could result in complete loss of deposited funds if users are tricked into interacting with malicious proxies.",
+      "severity": "high",
+      "original_id": "9da8ec0384bec150"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_021",
+      "title": "Incorrect Interest Calculation in Withdraw Request Leads to Protocol Insolvency",
+      "description": "The _calcInterestWithdrawRequest function incorrectly calculates interest for withdrawal requests by using the wrong base amount. It calculates interest based on the current tranche balance (lastNAVAA/lastNAVBB) but applies it to the user's withdrawal amount. This creates a mathematical inconsistency where users withdrawing from a tranche with depleted NAV can receive disproportionately high interest, potentially draining the protocol.\n\nMathematical Proof:\n- Let lastNAVAA = 1000, user AA balance = 100, total interest for epoch = 100\n- Function calculates: totTrancheInterest = 100 * (trancheAPRSplitRatio / FULL_ALLOC) = 100 * (5000 / 10000) = 50\n- Then calculates: userInterest = 100 * 50 / 1000 = 5\n- But if the tranche has been heavily withdrawn and lastNAVAA is only 10, then: userInterest = 100 * 50 / 10 = 500\n- The user receives 500 interest on a 100 principal, which is impossible given the total interest is only 100\n\nExploitation Scenario:\n1. Attacker deposits into AA tranche when lastNAVAA is high\n2. Other users withdraw heavily from AA tranche, reducing lastNAVAA to a small amount\n3. Attacker requests withdrawal when lastNAVAA is artificially low\n4. Attacker receives massively inflated interest calculation\n5. Protocol becomes insolvent as it pays out more interest than exists\n\nFinancial Impact: Protocol insolvency where the contract pays out more funds than it holds. Attackers can drain the entire protocol by exploiting the incorrect interest calculation.",
+      "severity": "critical",
+      "original_id": "cda0a3ea3832f819"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_022",
+      "title": "Missing Access Control on Critical stopEpoch Function Allows Unauthorized Interest Override",
+      "description": "The stopEpoch function allows overriding the expected interest with a user-provided _interest parameter, but lacks proper validation that the override is legitimate. An attacker can call stopEpoch with _interest=1 to trigger the 'special case' where all funds are requested from the borrower, potentially causing a false default or protocol shutdown.\n\nExploitation Scenario:\n1. Attacker calls stopEpoch(_newApr=0, _interest=1) when they shouldn't be authorized\n2. Function enters the special case path requesting all funds from borrower\n3. If borrower cannot fulfill the request immediately, protocol enters default state\n4. All operations are paused, funds may be permanently locked\n\nFinancial Impact: Protocol shutdown and potential permanent fund locking. Legitimate users cannot withdraw their funds while the protocol is in default state.",
+      "severity": "high",
+      "original_id": "4222ff9ab66c77c9"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_023",
+      "title": "State Desynchronization in Interest Accounting During Withdrawal Requests",
+      "description": "The interestForOverUnderPerformance state variable tracks performance adjustments but can become desynchronized when multiple withdrawal requests occur. The variable is updated additively without considering that previous adjustments may have already accounted for certain funds, leading to double-counting or incorrect performance calculations.\n\nMathematical Proof:\n- Initial state: interestForOverUnderPerformance = 0\n- User A withdraws AA tranche causing diff = +100\n- interestForOverUnderPerformance becomes +100\n- User B withdraws AA tranche causing diff = +50  \n- interestForOverUnderPerformance becomes +150\n- But the actual overperformance should be calculated based on the remaining funds, not cumulatively\n\nExploitation Scenario:\n1. Multiple users coordinate withdrawal requests during the same epoch\n2. The cumulative interestForOverUnderPerformance becomes artificially inflated\n3. At startEpoch, expectedEpochInterest is incorrectly increased by the inflated amount\n4. Borrower may be asked to repay more than actually owed\n5. If borrower defaults due to inflated repayment request, protocol enters emergency state\n\nFinancial Impact: Incorrect interest calculations leading to borrower default or protocol paying incorrect amounts to withdrawing users.",
+      "severity": "high",
+      "original_id": "babd742ad79effb1"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_024",
+      "title": "Division Rounding Error in _scaleAprWithBuffer Can Zero Out Interest",
+      "description": "The _scaleAprWithBuffer function performs division that can round down to zero when the buffer period is large relative to epoch duration. This can cause the scaled APR to be calculated as zero even when the intended APR is non-zero, resulting in zero interest accrual for lenders.\n\nMathematical Proof:\n- Let epochDuration = 1 day, bufferPeriod = 365 days, intended APR = 1%\n- Scaled APR = 1% * (1 + 365) / 1 = 366%\n- But if intended APR is very small, say 0.01%\n- Scaled APR = 0.01% * 366 / 1 = 3.66%\n- However, if APR is 0.001% (100 basis points): 0.001 * 366 / 1 = 0.366 which rounds to 0\n- Lenders receive 0 interest despite expecting some return\n\nExploitation Scenario:\n1. Manager sets very small APR during market conditions where minimal returns are expected\n2. Due to large buffer period relative to epoch duration, scaled APR rounds to zero\n3. Lenders receive no interest for the epoch\n4. Protocol appears to be functioning normally but lenders are effectively losing value to inflation\n\nFinancial Impact: Lenders receive zero interest when they should receive positive returns, effectively losing purchasing power.",
+      "severity": "medium",
+      "original_id": "ca82664ada1e52b0"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_025",
+      "title": "Incorrect NAV Update During Withdrawal Creates Protocol Insolvency",
+      "description": "The _withdraw function incorrectly updates the lastNAVAA and lastNAVBB state variables by subtracting the USDe redemption amount (toRedeem) instead of the actual SUSDe amount removed from the protocol. This creates a permanent desynchronization between the protocol's accounting and the actual assets held, leading to protocol insolvency where the protocol appears to have more assets than it actually holds.\n\nMathematical Proof:\nLet's assume:\n- _strategyPrice() = 1.1 * 10^18 (SUSDe price in USDe)\n- _tranchePrice(_tranche) = 1.05 * 10^18 (tranche price in USDe)\n- _amount = 1000 * 10^18 (tranche tokens)\n- ONE_TRANCHE_TOKEN = 10^18\n\nCalculations:\n1. toRedeem = (1000 * 10^18 * 1.05 * 10^18) / 10^18 = 1050 * 10^18 USDe\n2. SUSDeRedeemed = (1050 * 10^18 * 10^18) / (1.1 * 10^18) = 954.545 * 10^18 SUSDe\n\nBug: The function subtracts toRedeem (1050 * 10^18 USDe) from lastNAVAA/lastNAVBB, but only removes SUSDeRedeemed (954.545 * 10^18 SUSDe) from the protocol. This means the protocol's accounting shows 1050 - 954.545 = 95.455 USDe worth of assets that don't exist.\n\nExploitation: An attacker can repeatedly withdraw and deposit to amplify this accounting error. Each withdrawal creates phantom assets in the protocol's accounting. When many users withdraw, the protocol will become insolvent - it will show more assets than it actually holds, and later withdrawals will receive less than their fair share.\n\nFinancial Impact: All protocol users lose funds as the protocol becomes insolvent. The loss is distributed across all remaining depositors proportionally to their share of the incorrectly inflated NAV.",
+      "severity": "high",
+      "original_id": "d055a06c43418614"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_026",
+      "title": "Missing Existence Check for Pre-Created Cooldown Contracts Enables Front-Running Attack",
+      "description": "The _withdraw function uses ClonesWithImmutableArgs to create cooldown contracts with deterministic addresses based on (address(this), msg.sender, msg.value). An attacker can front-run withdrawal transactions by pre-creating contracts at these addresses, causing the withdrawal to fail when the contract attempts to transfer SUSDe to the clone.\n\nExploitation Scenario:\n1. User prepares a withdrawal transaction\n2. Attacker observes the transaction in mempool and calculates the contract address: keccak256(abi.encodePacked(address(cdo), user_address, msg.value))\n3. Attacker pre-deploys a contract at this address with a malicious fallback function\n4. When the user's transaction executes, the safeTransfer to the clone address will fail because the address already contains code\n5. The withdrawal fails but the tranche tokens have already been burned, permanently locking the user's funds\n\nMathematical Proof:\nThe contract address is deterministically calculated using ClonesWithImmutableArgs. For any given (cdo_address, user_address, msg_value) tuple, the resulting contract address is predictable. An attacker can compute this address and deploy a contract there before the legitimate withdrawal executes.\n\nFinancial Impact: User funds are permanently locked when withdrawal transactions fail after burning tranche tokens. The attacker can target large withdrawals to maximize damage.",
+      "severity": "high",
+      "original_id": "5f5aa427d6b76710"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_027",
+      "title": "Division Rounding Error in SUSDe Redemption Calculation",
+      "description": "The SUSDe redemption calculation uses integer division which can round down to zero when the redemption amount is small relative to the strategy price, causing users to lose funds.\n\nMathematical Proof:\nSUSDeRedeemed = toRedeem * ONE_TRANCHE_TOKEN / _strategyPrice()\n\nIf toRedeem * ONE_TRANCHE_TOKEN < _strategyPrice(), then SUSDeRedeemed = 0 due to integer division rounding down.\n\nExample with small amounts:\n- _strategyPrice() = 1.1 * 10^18\n- toRedeem = 1 (1 wei USDe)\n- ONE_TRANCHE_TOKEN = 10^18\n- SUSDeRedeemed = (1 * 10^18) / (1.1 * 10^18) = 0 (due to integer division)\n\nThe user burns their tranche tokens but receives 0 SUSDe in return, losing their entire investment.\n\nExploitation: While this affects small amounts primarily, it can be exploited if the protocol allows dust amounts or if price fluctuations create this condition. The vulnerability is particularly dangerous because it occurs after the tranche tokens are burned, making the loss irreversible.\n\nFinancial Impact: Users withdrawing small amounts lose their entire investment due to rounding errors.",
+      "severity": "medium",
+      "original_id": "26f046d7b8d934d2"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_028",
+      "title": "Incorrect Mint Price Calculation Allows NAV Inflation",
+      "description": "The `_mintShares` function uses the higher of current price or last price for minting, but updates NAV with the full deposit amount. This creates a mismatch where users mint fewer shares when prices are high, but the NAV increases by the full deposit amount, artificially inflating the NAV per share and enabling exploitation through strategic deposits.",
+      "severity": "high",
+      "original_id": "817ee60709dc8ab1"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_029",
+      "title": "State Desynchronization Between Price and NAV Updates",
+      "description": "The contract maintains separate price tracking (lastAAPrice/lastBBPrice) and NAV tracking (lastNAVAA/lastNAVBB) that can become desynchronized. When minting occurs at a price higher than current price, the price is updated but the NAV is increased by the full deposit amount, creating inconsistent state that can be exploited during withdrawals or accounting updates.",
+      "severity": "high",
+      "original_id": "8683f5e5e526fa83"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_030",
+      "title": "Inconsistent Price Calculation Between Minting and Value Functions",
+      "description": "The `getContractValueForMint()` function uses a different price calculation logic than the regular `getContractValue()` function, creating inconsistencies in protocol accounting. This allows manipulation where the mint price can be artificially inflated while the actual contract value remains lower, enabling exploitation of the price differential.",
+      "severity": "medium",
+      "original_id": "b7cddc07ff6a5bf8"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_031",
+      "title": "First Deposit Liquidity Burning Vulnerability",
+      "description": "The mint function burns MIN_LIQUIDITY (1000 tokens) on the first deposit by subtracting it from the amount parameter. However, if the initial deposit amount is less than or equal to MIN_LIQUIDITY, the subtraction will underflow, causing the transaction to revert. This prevents the protocol from being initialized with small initial deposits and could be exploited by front-running the first deposit with a dust amount to permanently brick the contract.\n\nMathematical proof:\n- MIN_LIQUIDITY = 1000\n- If first deposit amount = 1000: amount -= 1000 \u2192 1000 - 1000 = 0 \u2192 _mint(account, 0) \u2192 valid but no tokens minted to user\n- If first deposit amount = 500: amount -= 1000 \u2192 500 - 1000 = (underflow) \u2192 transaction reverts\n- If first deposit amount = 1500: amount -= 1000 \u2192 1500 - 1000 = 500 \u2192 _mint(account, 500) \u2192 user gets 500 tokens\n\nExploitation scenario: An attacker can monitor for deployment of new IdleCDOTranche contracts and front-run the legitimate first deposit with a transaction that deposits exactly MIN_LIQUIDITY or less. This would either mint zero tokens to the legitimate depositor (if amount = MIN_LIQUIDITY) or revert the transaction (if amount < MIN_LIQUIDITY), preventing protocol initialization.\n\nFinancial impact: Protocol cannot be initialized, permanently bricking the contract and preventing any future usage. All deployment costs are lost.",
+      "severity": "high",
+      "original_id": "b3e9d2a3759caa82"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_032",
+      "title": "State Desynchronization in NAV Accounting During Withdrawal",
+      "description": "The _withdraw function updates the lastNAVAA or lastNAVBB state variables after calling _liquidate, but the _liquidate function may return a different amount than the original toRedeem calculation. This creates a state desynchronization where the NAV is reduced by the original toRedeem amount while the actual amount withdrawn may be different. Attackers can exploit this by causing the _liquidate function to return a different value than expected, leading to incorrect NAV tracking and potential protocol insolvency.\n\nMathematical Proof:\n1. Initial state: lastNAVAA = 1000 ETH, user withdraws 100 AA tranche tokens at price 1.1 ETH/token\n2. toRedeem = (100 * 1.1) / 1e18 = 110 ETH (calculated)\n3. _liquidate(110) is called but returns 105 ETH (due to slippage or other factors)\n4. lastNAVAA -= 110 ETH (becomes 890 ETH) but only 105 ETH was actually withdrawn\n5. Protocol now shows 890 ETH in NAV but actually has 895 ETH, creating a 5 ETH accounting error\n\nExploitation: An attacker can repeatedly withdraw when _liquidate returns less than expected, gradually inflating the apparent NAV deficit. When the protocol tries to reconcile, it may incorrectly calculate available funds.\n\nFinancial Impact: Protocol insolvency where the accounting shows less funds than actually available, potentially leading to incorrect interest calculations and unfair distribution of rewards.",
+      "severity": "high",
+      "original_id": "5ecc9e80bbcca4ef"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_033",
+      "title": "Incorrect NFT Transfer Logic in Batch Withdrawal Scenario",
+      "description": "The _withdraw function transfers the last NFT token (tokenIds[tokenIds.length - 1]) to the user without ensuring this NFT corresponds to the specific withdrawal amount. If multiple withdrawals occur in the same block or transaction, the function may transfer an NFT that belongs to a different withdrawal request, leading to incorrect asset distribution.\n\nMathematical Proof:\n1. User A withdraws 100 ETH, receives NFT #1 (worth 100 ETH)\n2. User B withdraws 50 ETH in same block, receives NFT #2 (worth 50 ETH)\n3. Due to the array indexing, User B gets NFT #1 (worth 100 ETH) instead of NFT #2\n4. User B receives 50 ETH more than entitled\n\nExploitation: Attackers can front-run withdrawals or use flash loans to execute multiple withdrawals in the same transaction, deliberately causing NFT misassignment to steal funds.\n\nFinancial Impact: Direct theft of user funds where attackers receive more valuable NFTs than entitled. The protocol loses the difference between the actual withdrawal amount and the NFT value transferred.",
+      "severity": "high",
+      "original_id": "2f2712b33514898a"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_034",
+      "title": "Missing Validation on stMatic.poLidoNFT() Return Value",
+      "description": "The contract calls stMatic.poLidoNFT().getOwnedTokens(address(this)) and assumes it returns at least one token, but there's no validation that the returned NFT actually corresponds to the withdrawal amount. An attacker could front-run the withdrawal by transferring a worthless or incorrect NFT to the contract address, causing the withdrawal to transfer the wrong asset.\n\nMathematical Proof:\n1. User attempts to withdraw 100 ETH\n2. Attacker front-runs by transferring NFT #999 (worth 0.001 ETH) to contract\n3. Contract calls getOwnedTokens() and gets [NFT #999] instead of the expected withdrawal NFT\n4. Contract transfers NFT #999 (worth 0.001 ETH) instead of the actual withdrawal NFT (worth 100 ETH)\n5. User loses 99.999 ETH\n\nExploitation: Attackers can monitor the mempool for withdrawal transactions and front-run them with NFT transfers to the contract address.\n\nFinancial Impact: Direct theft of user funds where users receive worthless NFTs instead of their actual withdrawal value.",
+      "severity": "high",
+      "original_id": "61d39c6ce1c5596b"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_035",
+      "title": "Incorrect NAV Update During Withdrawal with Fee",
+      "description": "The _withdraw function incorrectly updates the lastNAVAA and lastNAVBB state variables by subtracting the full redemption amount (_want) instead of the actual amount transferred to the user (toRedeem). This causes the protocol's net asset value tracking to become desynchronized from reality when withdrawal fees are applied. The discrepancy equals the withdrawal fee amount, which accumulates over time and can be exploited by attackers to manipulate tranche pricing and steal funds.\n\nMathematical Proof:\n- User withdraws 1000 tokens with a 1% fee (10 tokens)\n- _want = 1000 (full redemption amount before fee)\n- toRedeem = 990 (actual amount sent to user after fee)\n- lastNAVAA/lastNAVBB is decreased by 1000 instead of 990\n- NAV tracking now shows 10 fewer tokens than actually exist\n- Over multiple withdrawals, this discrepancy accumulates\n\nExploitation Scenario:\n1. Attacker monitors withdrawal transactions\n2. When NAV becomes significantly understated due to accumulated fee discrepancies\n3. Attacker deposits funds when tranche prices are artificially low\n4. Attacker withdraws when prices correct, profiting from the mispricing\n\nFinancial Impact: Protocol insolvency through NAV tracking errors, allowing attackers to extract value from other users' deposits. The loss grows proportionally with withdrawal volume and fee percentage.",
+      "severity": "high",
+      "original_id": "1c9bd0f8a1a5c014"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_036",
+      "title": "Inconsistent Fee Application Between Balance Scenarios",
+      "description": "The _withdraw function applies withdrawal fees inconsistently depending on whether the redemption comes from contract balance or requires liquidation. When toRedeem > balanceUnderlying, the fee is subtracted after liquidation, but when toRedeem <= balanceUnderlying, the fee is subtracted before the transfer. This creates different accounting treatments that can be exploited.\n\nMathematical Proof:\nScenario 1 (toRedeem > balanceUnderlying):\n- _want = 1000, balanceUnderlying = 500\n- Liquidate 500 tokens, pay fee of 5 tokens (1%)\n- toRedeem = 500 (from balance) + 495 (from liquidation) = 995\n- User receives 995 tokens\n\nScenario 2 (toRedeem <= balanceUnderlying):\n- _want = 1000, balanceUnderlying = 1500\n- toRedeem = 1000 - 10 (1% fee) = 990\n- User receives 990 tokens\n\nExploitation Scenario:\nAttackers can monitor contract balance and time withdrawals to maximize received amount by exploiting the inconsistent fee application logic.\n\nFinancial Impact: Users may receive different amounts for identical withdrawal requests based on contract balance state, violating protocol fairness and enabling timing attacks.",
+      "severity": "medium",
+      "original_id": "6a7d3b5ab3169bbb"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_037",
+      "title": "Potential Rounding to Zero in Fee Calculation",
+      "description": "The _calcUnderlyingProtocolFee function performs division by 1e6 which could round small redemption amounts to zero fees, allowing attackers to avoid paying withdrawal fees on small transactions.\n\nMathematical Proof:\n- Withdrawal fee percentage = 10000 (1% in 1e4 basis points)\n- _toRedeem = 999 (just below threshold)\n- _expectedFee = 999 * 10000 / 1000000 = 9990000 / 1000000 = 9.99 \u2192 rounds to 9\n- _toRedeem = 1000 (at threshold)\n- _expectedFee = 1000 * 10000 / 1000000 = 10000000 / 1000000 = 10\n\nFor very small redemptions:\n- _toRedeem = 99\n- _expectedFee = 99 * 10000 / 1000000 = 990000 / 1000000 = 0.99 \u2192 rounds to 0\n\nExploitation Scenario:\nAttackers can split large withdrawals into many small transactions to avoid paying withdrawal fees, extracting value from the protocol.\n\nFinancial Impact: Loss of protocol revenue from withdrawal fees, reducing overall protocol profitability and potentially affecting other users.",
+      "severity": "medium",
+      "original_id": "7d269e800d29a938"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_038",
+      "title": "Incorrect Fee Calculation Leading to Protocol Insolvency",
+      "description": "The _updateFeeInfo() function mints fee tokens based on the difference between current and last NAV, but the calculation incorrectly uses the total supply in the minting formula. This causes the protocol to mint more fee tokens than the actual fee amount, diluting all token holders and potentially making the protocol insolvent.\n\nMathematical Proof:\n- Let lastNAV = 1000, currentNAV = 1100, fee = 10% (10000), totalSupply = 1000\n- Fees = (1100 - 1000) * 10000 / 100000 = 100 * 0.1 = 10\n- But mint amount = 10 * 1000 / (1100 - 10) = 10 * 1000 / 1090 \u2248 9.17 tokens\n- The protocol mints 9.17 tokens worth 10 underlying, but only collected 10 in fees\n- This creates an imbalance where feeAddress receives more value than the actual fees\n\nExploitation: An attacker can trigger rebalances or mints/redeems to repeatedly call _updateFeeInfo(), causing continuous dilution of all token holders. Over time, this makes the protocol insolvent as the minted fee tokens exceed the actual fee revenue.\n\nFinancial Impact: All token holders lose value through dilution. The protocol becomes insolvent as the total underlying value cannot cover the minted token supply.",
+      "severity": "high",
+      "original_id": "1f4eb66800b100ec"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_039",
+      "title": "Incorrect NAV Update in Redeem Function Allows Theft of Protocol Funds",
+      "description": "The _redeemIdleToken function subtracts the redeemed amount from lastNAV before transferring tokens, but if the actual redemption fails or returns less than expected, lastNAV becomes incorrectly reduced. This allows attackers to artificially inflate the token price and steal funds.\n\nMathematical Proof:\n- Suppose lastNAV = 1000, totalSupply = 1000, tokenPrice = 1.0\n- Attacker redeems 500 tokens expecting 500 underlying\n- Due to liquidity issues, only 400 underlying is actually redeemed\n- But lastNAV is updated to 1000 - 500 = 500 (incorrect, should be 1000 - 400 = 600)\n- New tokenPrice = 500 / 500 = 1.0 (should be 600 / 500 = 1.2)\n- Attacker can now mint tokens at artificially low price\n\nExploitation: An attacker can redeem when protocols have low liquidity, causing partial redemptions. The incorrect NAV update artificially deflates the NAV, allowing the attacker to mint tokens at below-market price and immediately redeem for profit.\n\nFinancial Impact: Protocol loses funds to arbitrage attacks. All token holders suffer dilution from incorrect pricing.",
+      "severity": "high",
+      "original_id": "d352439cdaac3a05"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_040",
+      "title": "Rebalance Function Allows Partial State Updates Leading to Fund Locking",
+      "description": "The _rebalance function can set lowLiquidity = true and skip updating lastAllocations, but still proceeds with partial minting operations. This creates inconsistent state where the protocol believes allocations haven't changed but funds have been moved, potentially locking funds in protocols.\n\nMathematical Proof:\n- Suppose current allocations: [5000, 5000] for protocols A and B\n- New allocations: [10000, 0] \n- Protocol B has low liquidity, so lowLiquidity = true\n- Protocol B redemption only recovers 80% of funds due to liquidity issues\n- lastAllocations remains [5000, 5000] but funds are now [10000 + 0.8*5000, 0] = [14000, 0]\n- Protocol becomes desynchronized - NAV calculations will be incorrect\n\nExploitation: Attackers can trigger rebalances during low liquidity periods to create permanent state desynchronization. This can lock funds in protocols or create arbitrage opportunities from incorrect pricing.\n\nFinancial Impact: Funds can become permanently locked in protocols. Token pricing becomes inaccurate, enabling theft through mints/redemptions at wrong prices.",
+      "severity": "high",
+      "original_id": "0151e0b94b10b117"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_041",
+      "title": "Incorrect Rounding in _amountsFromAllocations Can Lock Funds",
+      "description": "The _amountsFromAllocations function uses integer division which can round down allocations, leaving dust amounts unallocated. When combined with the last-element special case, this can permanently lock funds in the contract.\n\nMathematical Proof:\n- Total to allocate: 1000, allocations: [33333, 33333, 33334] (each ~33.333%)\n- First allocation: 1000 * 33333 / 100000 = 333.33 \u2192 rounds to 333\n- Second allocation: 1000 * 33333 / 100000 = 333.33 \u2192 rounds to 333  \n- Third allocation gets: 1000 - 333 - 333 = 334 (should be 333.34)\n- 0.66 units remain unaccounted for and get locked in the last allocation\n- Repeated rebalances accumulate these rounding errors\n\nExploitation: Attackers can craft allocation patterns that maximize rounding errors through repeated rebalances. The locked funds accumulate over time and can be extracted through precise manipulation.\n\nFinancial Impact: Funds get permanently locked in the contract through rounding error accumulation. Over time, significant value can be lost.",
+      "severity": "high",
+      "original_id": "2d8a2902eb7bbbf7"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_042",
+      "title": "Incorrect Strategy Token Calculation in Withdrawal Leads to Underlying Asset Theft",
+      "description": "The _withdraw function incorrectly calculates the amount of strategy tokens to redeem by using the total supply of strategy tokens instead of the actual balance held by the CDO. This creates a discrepancy between the protocol's accounting and the actual underlying assets, allowing attackers to redeem more underlying assets than they are entitled to when the strategy token balance is lower than the total supply. The vulnerability occurs because the function uses `IERC20Detailed(strategyToken).totalSupply()` to represent the CDO's share of the strategy, but this value includes strategy tokens held by other addresses, not just the CDO. When the CDO's actual strategy token balance is lower than the total supply, the calculation `_strategyTokensForTranche * _amount / _selectedTranche.totalSupply()` will overestimate the redemption amount, enabling theft of underlying assets.",
+      "severity": "high",
+      "original_id": "539749a2fedf840a"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_043",
+      "title": "State Desynchronization Between NAV Updates and Actual Asset Balances",
+      "description": "The _withdraw function updates lastNAVAA and lastNAVBB state variables by subtracting the redeemed amount, but this update is not synchronized with the actual decrease in underlying assets. The vulnerability occurs because the NAV update happens after the underlying transfer, but the calculation uses the pre-withdrawal state. When multiple withdrawals occur in sequence, the NAV values can become desynchronized from the actual asset balances, leading to incorrect interest calculations and potential fund misallocation. Specifically, the function subtracts `toRedeem` from the NAV without verifying that this matches the actual decrease in the strategy's value, creating an accounting inconsistency that attackers can exploit through sequential withdrawals.",
+      "severity": "high",
+      "original_id": "400ab057c8c7ffbe"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_044",
+      "title": "Unauthorized Contract Initialization",
+      "description": "The initialize() function lacks access control, allowing any attacker to reinitialize the contract with their own merkle root and token address. This enables complete takeover of the contract and theft of all deposited funds. An attacker can call initialize() after the legitimate deployment to set a new merkle root containing only their address, then call claim() to drain all tokens from the contract. The check `require(token == address(0))` only prevents reinitialization if token is already set, but an attacker can call initialize() immediately after deployment before legitimate setup.",
+      "severity": "critical",
+      "original_id": "4449e2d9ec5c9db3"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_045",
+      "title": "Incorrect Merkle Leaf Construction",
+      "description": "The claim() function constructs the merkle leaf using `keccak256(bytes.concat(keccak256(abi.encode(to, amount))))` which differs from the standard OpenZeppelin MerkleTree implementation. The standard approach uses a single keccak256 hash of the packed parameters. The double hashing creates a mismatch with standard merkle tree generation tools, making it impossible for legitimate users to generate valid proofs. This effectively locks all funds in the contract permanently since no one can successfully claim tokens.",
+      "severity": "high",
+      "original_id": "dd0a52340a5a57d2"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_046",
+      "title": "Missing Token Balance Validation in Claim",
+      "description": "The claim() function transfers tokens without checking if the contract has sufficient balance. If the contract lacks sufficient tokens, the transfer will fail silently (for some ERC20 implementations) or revert. However, the state `hasClaimed[to] = true` is already set, permanently preventing the user from claiming their legitimate allocation. This creates a permanent loss scenario where users lose their claim rights even when the contract is underfunded.",
+      "severity": "high",
+      "original_id": "2222669ccd9a1a9f"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_047",
+      "title": "Sweep Function Allows Early Drainage",
+      "description": "The sweep() function's timestamp check `block.timestamp > deployTime + 60 days` can be bypassed if an attacker calls initialize() to reset deployTime. Since initialize() lacks access control, an attacker can call it to set deployTime to a much earlier value, making the 60-day requirement immediately satisfiable. This allows immediate drainage of all tokens from the contract before legitimate users can claim.",
+      "severity": "high",
+      "original_id": "0006f111ce99a276"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_048",
+      "title": "Incorrect Share Calculation in _redeem Function Leads to Permanent Fund Loss",
+      "description": "The _redeem function incorrectly calculates burntShares by subtracting the current idleToken balance from the balance before redemption. However, this calculation is flawed because the idleToken balance decreases by exactly the shares parameter when redeemIdleToken is called. The function should use the shares parameter directly as burntShares, but instead it recalculates it from balance changes. This creates a vulnerability where if the contract holds idleTokens from previous deposits (e.g., dust amounts, unclaimed rewards, or previous failed transactions), the burntShares calculation will be incorrect, potentially burning more shares than intended or returning incorrect withdrawal amounts.\n\nMathematical Proof:\n- Suppose contract holds 100 idleTokens from previous operations\n- User redeems 50 shares\n- Before balance: 100 idleTokens\n- After redeemIdleToken(50): balance becomes 50 idleTokens\n- burntShares = 100 - 50 = 50 (correct in this case)\n- But if contract receives 10 idleTokens as rewards between transactions:\n- Before balance: 110 idleTokens\n- After redeemIdleToken(50): balance becomes 60 idleTokens\n- burntShares = 110 - 60 = 50 (still correct)\n- However, if there's a partial failure or external transfer:\n- Before balance: 100 idleTokens\n- External transfer in: +10 idleTokens (total 110)\n- redeemIdleToken(50) fails partially, only burns 40 tokens\n- After balance: 70 idleTokens\n- burntShares = 100 - 70 = 30 (should be 40)\n- User's shares are burned incorrectly\n\nExploitation: An attacker could exploit this by causing the contract to receive idleTokens during the redemption process, manipulating the balance difference calculation. This could lead to users receiving incorrect amounts of underlying tokens while having incorrect amounts of shares burned.\n\nFinancial Impact: Users could lose funds permanently if shares are burned without receiving corresponding underlying tokens, or receive more underlying tokens than their share entitlement warrants.",
+      "severity": "high",
+      "original_id": "5d4758d9767a1377"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_049",
+      "title": "Incorrect Asset Tracking in _deposit Function Allows Fund Theft",
+      "description": "The _deposit function tracks deposited amount by comparing token balances before and after minting idleTokens. However, this approach is vulnerable to external token transfers that can occur during the transaction. If tokens are transferred to the contract between the initial transfer and the balance comparison, the deposited amount calculation will be incorrect.\n\nMathematical Proof:\n- User deposits 100 tokens\n- Contract receives 100 tokens from user\n- Attacker front-runs and sends 50 tokens to contract\n- Before balance check: contract has 150 tokens\n- mintIdleToken(100) is called\n- After balance: contract has 50 tokens remaining\n- deposited = 150 - 50 = 100 tokens (appears correct)\n- But actual user deposit was 100, attacker's 50 tokens were used instead\n- Attacker can then withdraw their 50 tokens plus earned shares\n\nAlternative exploitation:\n- User deposits 100 tokens\n- Contract receives 100 tokens\n- Before balance: 100 tokens\n- mintIdleToken(100) is called but only uses 80 tokens (partial execution)\n- External transfer out of 20 tokens occurs\n- After balance: 0 tokens\n- deposited = 100 - 0 = 100 tokens (incorrect, should be 80)\n- User is credited for 100 tokens but only 80 were actually deposited\n\nFinancial Impact: Attackers can steal funds by manipulating token balances during deposit operations, or users may be credited for more deposits than actually occurred, leading to protocol insolvency.",
+      "severity": "high",
+      "original_id": "6834a591c936dc60"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_050",
+      "title": "Rounding Error in previewMint Function Allows Free Share Minting",
+      "description": "The previewMint function adds 1 to the calculated assets required to mint shares. This rounding-up mechanism is intended to ensure users deposit at least the required amount, but it creates a vulnerability when the conversion calculation already rounds up due to integer division. In certain price conditions, this can allow users to mint shares with fewer assets than intended.\n\nMathematical Proof:\n- Suppose tokenPrice() returns 1.000000000000000001 (1e18 + 1)\n- User wants to mint 1e18 shares\n- convertToAssets(1e18) = (1e18 * (1e18 + 1)) / 1e18 = 1e18 + 1 (after division)\n- previewMint adds 1: 1e18 + 1 + 1 = 1e18 + 2 assets required\n- But actual assets needed for 1e18 shares at this price: exactly 1e18 + 1\n- User can provide 1e18 + 1 assets (1 less than previewMint suggests)\n- _deposit will successfully mint the shares since the actual requirement is met\n- User gains 1 asset worth of value for free\n\nThis becomes more significant with larger share amounts:\n- For 1e20 shares at the same price:\n- convertToAssets(1e20) = (1e20 * (1e18 + 1)) / 1e18 = 1e20 + 100\n- previewMint suggests: 1e20 + 100 + 1 = 1e20 + 101\n- Actual needed: 1e20 + 100\n- User gains 1 asset per 1e18 shares minted\n\nFinancial Impact: Attackers can systematically mint shares with slightly less than the required assets, gradually draining value from the protocol and other users.",
+      "severity": "high",
+      "original_id": "c318bf20cb6820d0"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_051",
+      "title": "Insufficient Validation in Withdraw Function Allows Total Share Redemption Bypass",
+      "description": "The withdraw function allows assets = type(uint256).max to redeem all shares, but it uses previewWithdraw(assets) which will overflow when assets is max uint256. However, the function has a special case that uses balanceOf(owner) when assets is max. The issue is that there's no validation to ensure that when assets is not max, the calculated shares don't exceed the owner's balance.\n\nMathematical Proof:\n- User has 100 shares worth 100 assets (1:1 ratio)\n- Attacker calls withdraw(200, receiver, owner) with insufficient allowance\n- previewWithdraw(200) returns 200 shares\n- _redeem(200, receiver, owner) is called\n- _burnFrom checks allowance: owner only approved 100 shares\n- Transaction reverts due to InsufficientAllowance\n- But if owner approved 200 shares (or is msg.sender):\n- _redeem will attempt to burn 200 shares but owner only has 100\n- The burn will fail or behave unexpectedly\n\nWorse scenario with price manipulation:\n- If tokenPrice() can be manipulated to be very low:\n- previewWithdraw(assets) could return an extremely large share amount\n- This could lead to burning more shares than exist\n\nFinancial Impact: Users could have their entire share balance redeemed unexpectedly if price calculations are manipulated or if there are rounding issues in the share calculation.",
+      "severity": "medium",
+      "original_id": "b6fc04dc36475be4"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_052",
+      "title": "Reward Rate Calculation Error Leading to Permanent Fund Loss",
+      "description": "The depositReward function contains a critical mathematical error in the reward rate calculation when extending an active reward period. The formula `rewardRate = (reward + leftover) / rewardsDuration` incorrectly adds new rewards to leftover rewards without accounting for the fact that leftover rewards are already accounted for in the remaining time. This causes the reward rate to be inflated, leading to over-issuance of rewards and potential protocol insolvency.\n\nMathematical Proof:\n- Current state: rewardRate = 100 tokens/day, periodFinish in 0.5 days, leftover = 50 tokens\n- New deposit: reward = 100 tokens\n- Incorrect calculation: rewardRate = (100 + 50) / 1 = 150 tokens/day\n- Correct calculation should be: rewardRate = 100 / 1 = 100 tokens/day (new rewards only for new duration)\n- Impact: Over 1 day, 150 tokens will be distributed instead of 100 tokens, creating 50 extra tokens from nothing\n\nExploitation: An attacker (rewardsDistribution) can repeatedly deposit small rewards during active periods to artificially inflate the reward rate. When combined with staking and unstaking, this allows extraction of more rewards than deposited.\n\nFinancial Impact: Protocol becomes insolvent as more rewards are distributed than exist in the contract. Users receive inflated rewards initially, but later users find insufficient funds to withdraw their earned rewards.",
+      "severity": "high",
+      "original_id": "be80333f6a3d714f"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_053",
+      "title": "Incorrect Reward Balance Check Allows Over-Issuance",
+      "description": "The balance check in depositReward uses the wrong token balance for validation. The function checks `rewardsToken.balanceOf(address(this))` but this includes both staking tokens and reward tokens when shouldTransfer is false. When shouldTransfer is true, it transfers rewards but then checks the balance after transfer, which includes the newly transferred tokens.\n\nMathematical Proof:\n- Initial state: rewardsToken balance = 100, stakingToken balance = 1000\n- Deposit reward = 200 with shouldTransfer = true\n- After transfer: rewardsToken balance = 300\n- Check: rewardRate = 200/day, rewardsDuration = 1 day\n- Validation: 200 <= 300/1 = 300 (passes)\n- But actual available rewards = 100 (initial) + 200 (new) = 300, while scheduled rewards = 200\n- If shouldTransfer = false, balance includes staking tokens, making check meaningless\n\nExploitation: When shouldTransfer=false, the balance check is completely broken as it includes staking token balance. When shouldTransfer=true, the check is ineffective because it includes the newly deposited tokens.\n\nFinancial Impact: Protocol can schedule more rewards than actually available, leading to insolvency when users try to claim rewards.",
+      "severity": "high",
+      "original_id": "2f3c1409bccbf9df"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_054",
+      "title": "Missing Access Control on stakeFor Function",
+      "description": "The stakeFor function is intended to be called only by rewardsDistribution to stake on behalf of users, but it lacks proper access control. While it has a require statement checking msg.sender == rewardsDistribution, the rewardsDistribution address can be changed by the owner without any timelock or safeguards.\n\nExploitation Scenario:\n1. Malicious owner sets rewardsDistribution to attacker-controlled address\n2. Attacker calls stakeFor with inflated amounts for themselves or accomplices\n3. Attacker receives disproportionate rewards based on artificially inflated stake\n4. Attacker withdraws both principal and inflated rewards\n\nFinancial Impact: Protocol rewards are drained by malicious owner or through owner compromise. Legitimate users receive reduced rewards due to dilution from artificially inflated stakes.",
+      "severity": "high",
+      "original_id": "8164336792e954e0"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_055",
+      "title": "Division Rounding Error in Reward Distribution",
+      "description": "The rewardPerToken calculation uses integer division which rounds down, and this rounding error accumulates over time. When combined with the incorrect reward rate calculation, this can lead to significant reward accounting errors.\n\nMathematical Proof:\n- _totalSupply = 3, rewardRate = 100, timeDelta = 1\n- rewardPerToken increment = (1 * 100 * 1e18) / 3 = 33333333333333333333.333... (rounds down to 33333333333333333333)\n- For 3 users with 1 token each, total rewards calculated = 3 * 33333333333333333333 / 1e18 = 0.099999999999999999 tokens\n- Actual rewards owed = 100 * 1 / 3 * 3 = 100 tokens (massive discrepancy)\n\nExploitation: Attackers can manipulate stake timing to maximize rounding errors in their favor, especially when combined with the inflated reward rate from the first vulnerability.\n\nFinancial Impact: Reward distribution becomes mathematically incorrect, with some users receiving more rewards than deserved while others receive less. Protocol accrues unaccounted reward liabilities.",
+      "severity": "medium",
+      "original_id": "33739ce430246bf5"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_056",
+      "title": "Incorrect Share Burning in _redeem Function",
+      "description": "The _redeem function incorrectly calculates the number of shares to burn by comparing tranche token balances before and after withdrawal. This creates a state desynchronization vulnerability where the actual shares burned may not match the requested shares, allowing attackers to manipulate share accounting and potentially steal funds.\n\n**Mathematical Proof:**\n1. Let requested shares = 1000\n2. Before withdrawal: tranche balance = 5000\n3. After withdrawal: tranche balance = 4000\n4. burntShares = 5000 - 4000 = 1000 (correct)\n\n**Attack Scenario 1 (External Transfer In):**\n1. Attacker transfers 1000 tranche tokens to contract\n2. Before withdrawal: tranche balance = 6000\n3. After withdrawal: tranche balance = 5000\n4. burntShares = 6000 - 5000 = 1000 (but only 500 shares were actually withdrawn)\n5. Attacker's shares are burned incorrectly\n\n**Attack Scenario 2 (External Transfer Out):**\n1. Attacker calls withdraw with 1000 shares\n2. Before withdrawal: attacker transfers out 500 tranche tokens\n3. Before withdrawal: tranche balance = 4500\n4. After withdrawal: tranche balance = 3500\n5. burntShares = 4500 - 3500 = 1000 (but contract only had 500 shares to burn)\n6. Protocol burns more shares than exist\n\n**Financial Impact:** In Scenario 1, users lose shares without proper redemption. In Scenario 2, the protocol burns non-existent shares, corrupting share accounting. Both scenarios enable theft of user funds through share manipulation.",
+      "severity": "high",
+      "original_id": "45835c3d4d6de4b8"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_057",
+      "title": "Incorrect Asset Tracking in _deposit Function",
+      "description": "The _deposit function incorrectly calculates deposited assets by comparing token balances before and after the CDO deposit. This creates a state desynchronization vulnerability where external token transfers can manipulate the deposited amount calculation, allowing attackers to mint shares without depositing the correct amount of assets.\n\n**Mathematical Proof:**\n1. Normal deposit: User deposits 1000 tokens\n2. Before deposit: token balance = 0\n3. After deposit: token balance = 0 (all tokens sent to CDO)\n4. deposited = 0 - 0 = 0 (incorrect - should be 1000)\n\n**Attack Scenario:**\n1. Attacker transfers 500 tokens to contract before calling deposit\n2. Attacker calls deposit with 1000 tokens\n3. Before deposit: token balance = 500 (from attacker's transfer)\n4. After deposit: token balance = 500 (1000 deposited, but 500 remained from transfer)\n5. deposited = 500 - 500 = 0\n6. Attacker gets shares for 1000 tokens but deposited amount recorded as 0\n7. Event logs show incorrect deposit amount\n\n**Financial Impact:** While the actual token transfer still occurs, the accounting becomes corrupted. External monitoring systems relying on deposit events will see incorrect values, and the internal accounting mismatch could be exploited in combination with other vulnerabilities to steal funds.",
+      "severity": "high",
+      "original_id": "763129c7ec28d2ed"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_058",
+      "title": "Missing Access Control on clone Function",
+      "description": "The clone function can be called by any address since it only checks that the caller is the original contract, but doesn't restrict who can deploy new instances. This allows attackers to create unauthorized TrancheWrapper instances tied to arbitrary IdleCDO contracts and tranches.\n\n**Exploitation Scenario:**\n1. Attacker calls clone() with a malicious IdleCDO contract address\n2. Contract deploys a new TrancheWrapper instance tied to the malicious CDO\n3. Attacker can now trick users into depositing funds into the malicious wrapper\n4. Since the wrapper approves the CDO for unlimited tokens, the malicious CDO can drain all deposited funds\n\n**Financial Impact:** Users who interact with attacker-deployed wrappers can have their funds stolen by malicious CDO contracts. The attack leverages the trust users place in the TrancheWrapper pattern to steal funds through unauthorized instances.",
+      "severity": "high",
+      "original_id": "7a0ff93283a680af"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_059",
+      "title": "Incorrect Asset Tracking in _deposit Function Leads to Potential Fund Loss",
+      "description": "The _deposit function incorrectly tracks the amount of wstETH deposited by calculating the difference in wstETH balance before and after unwrapping. However, this calculation is flawed because the unwrap operation burns wstETH and returns stETH, but the contract might already have some wstETH balance from previous operations. The function uses `deposited = wBalBefore - ERC20Upgradeable(WSTETH).balanceOf(address(this))` which assumes all wstETH balance decrease is due to the unwrap operation, but if there were existing wstETH in the contract, this calculation would be incorrect. Additionally, the function then overwrites the `amount` variable with the stETH balance, which might include stETH already in the contract, leading to incorrect deposit amounts to IdleCDO.",
+      "severity": "high",
+      "original_id": "0740e36cd45495e0"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_060",
+      "title": "Mathematical Precision Error in convertToAssets and convertToShares",
+      "description": "The convertToAssets and convertToShares functions perform division operations that can lead to precision loss and rounding errors. Specifically, when shares are small relative to the virtualPrice or when assets are small relative to the stEthPerToken, the division can round down to zero. This can be exploited by attackers to deposit minimal amounts and receive zero shares, or redeem small shares for zero assets, potentially allowing manipulation of the share price or causing loss of funds for users with small balances. For example, if shares * virtualPrice < stEthPerToken, convertToAssets returns 0, meaning users get no assets for their shares. Similarly, if assets * stEthPerToken < virtualPrice, convertToShares returns 0.",
+      "severity": "medium",
+      "original_id": "0d3005c1069d3cbf"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_061",
+      "title": "Potential Reentrancy in _deposit and _redeem Despite ReentrancyGuard",
+      "description": "Although the contract inherits from ReentrancyGuardUpgradeable, the _deposit and _redeem functions perform multiple external calls (unwrap, wrap, depositAA/depositBB, withdrawAA/withdrawBB) which could potentially be exploited if the called contracts are malicious or compromised. The functions do not use the nonReentrant modifier explicitly, and while the parent might have it, the specific flow here involves state changes before and after external calls, which could be manipulated if reentrancy occurs. For instance, in _deposit, after unwrapping wstETH, the contract calculates the stETH balance and then deposits to IdleCDO. If the unwrap call reenters, the stETH balance calculation could be manipulated.",
+      "severity": "medium",
+      "original_id": "f9ccc7ebb2d5d01e"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_062",
+      "title": "Incorrect APR Calculation Formula",
+      "description": "The getApr() function incorrectly calculates APR by multiplying interestRate() and utilization() without proper scaling. The formula returns interestRate * utilization * 1e18 / (10000 * 100) but this doesn't match the intended APR calculation. The comment states 'apr is multiplied by 1e18 so to have 1% == 1e18' but the actual calculation would produce incorrect results. For example, if interestRate() returns 1e18 (representing 100%) and utilization() returns 5000 (representing 50%), the calculation would be: 1e18 * 5000 * 1e18 / (10000 * 100) = 5e39 / 1e6 = 5e33, which is astronomically incorrect. The correct calculation should likely be interestRate * utilization / BASIS_PRECISION to get the effective rate.",
+      "severity": "high",
+      "original_id": "1344ae022c967767"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_063",
+      "title": "Uniswap V3 Path Validation Bypass Allows Arbitrary Token Swaps",
+      "description": "The _sellReward function accepts a _path parameter from external calls without validation, allowing attackers to specify arbitrary Uniswap V3 swap paths. This enables unauthorized token swaps that can drain contract funds by swapping valuable tokens for worthless ones. The function lacks validation that the _path parameter correctly corresponds to the intended _rewardToken and tokenOut, allowing parameter injection attacks.\n\nMathematical Proof:\n- Contract holds 1000 USDC (worth $1000)\n- Attacker calls _sellReward with _rewardToken = USDC, _path = [USDC -> worthless token]\n- _amount = 1000 (full balance)\n- _minAmount = 1 (minimum output)\n- Result: Contract receives 1 worthless token, loses 1000 USDC\n\nExploitation Scenario:\nAn attacker calls the function (either directly if accessible or through other exposed functions) with a malicious _path that routes through worthless tokens. The swap executes successfully because _minAmount can be set to 1, and the contract approves and transfers the full token balance.\n\nFinancial Impact: Complete drainage of any token balance held by the contract. The attacker receives the valuable tokens, while the contract receives worthless tokens in return.",
+      "severity": "high",
+      "original_id": "90418ef2ec3be2ba"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_064",
+      "title": "Unvalidated Deadline Allows Stale Price Exploitation",
+      "description": "The _sellReward function uses a fixed deadline of block.timestamp + 100 seconds without validation, making it vulnerable to MEV attacks and stale price exploitation. Attackers can front-run swaps when prices are unfavorable, causing the contract to execute trades at manipulated prices.\n\nMathematical Proof:\n- Normal price: 1 ETH = 2000 USDC\n- Attacker manipulates price to: 1 ETH = 100 USDC\n- Contract tries to sell 10 ETH for USDC with deadline 100 seconds in future\n- Attacker front-runs with price manipulation\n- Contract receives 1000 USDC instead of 20000 USDC\n- Loss: 19000 USDC\n\nExploitation Scenario:\nAttackers monitor the mempool for _sellReward calls. When a swap is pending, they manipulate prices through large trades or other MEV techniques, then allow the transaction to execute with the manipulated prices within the 100-second window.\n\nFinancial Impact: Significant value loss due to unfavorable exchange rates. The contract receives substantially less value than expected when swapping tokens.",
+      "severity": "high",
+      "original_id": "226e5cbf53709cd6"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_065",
+      "title": "Missing Slippage Control Allows Minimal Output Extraction",
+      "description": "The _sellReward function accepts _minAmount as a parameter without validation against reasonable slippage limits. Attackers can set _minAmount = 1, allowing them to extract nearly all value from token swaps while leaving the contract with minimal returns.\n\nMathematical Proof:\n- Contract holds 1000 DAI (worth $1000)\n- Normal swap would yield 0.5 ETH (worth $1000)\n- Attacker sets _minAmount = 1 wei of ETH\n- Swap executes with manipulated price: 1000 DAI -> 1 wei ETH\n- Value extracted: $1000 - $0.000000000000000001 = ~$1000\n\nExploitation Scenario:\nWhen the function is called (either directly or through parent contract functions), attackers provide an extremely low _minAmount value. Combined with price manipulation or normal market conditions, this allows near-total extraction of value from the contract's token holdings.\n\nFinancial Impact: Near-complete loss of value in token swaps. The contract receives minimal output while losing significant input value.",
+      "severity": "high",
+      "original_id": "42260b16ef4d090a"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_066",
+      "title": "Uniswap V3 Path Validation Bypass Leading to Arbitrary Token Burns",
+      "description": "The _sellReward function uses Uniswap V3's exactInput method with a user-provided _path parameter without validating that the path ends with the expected token. An attacker can craft a malicious path that burns tokens instead of swapping them, resulting in permanent loss of funds. The function returns the amount received from the swap without verifying it matches the expected token, allowing attackers to steal protocol funds by providing paths that route tokens to burn addresses or malicious contracts.\n\nMathematical Proof:\n- Protocol has 1000 DAI reward tokens to sell\n- Attacker calls _sellReward with path: DAI -> burn address (0x000...dead)\n- Uniswap router transfers 1000 DAI to burn address\n- Function returns (1000, 0) but protocol logic may interpret this as successful swap\n- 1000 DAI permanently burned, protocol loses value\n\nExploitation: Any external caller can trigger reward selling with malicious path parameters. The function lacks validation that the path ends with the correct token address or that the recipient is actually receiving the swapped tokens.\n\nFinancial Impact: Permanent loss of all reward tokens sent through malicious swaps. The protocol's reward accumulation mechanism becomes a vector for fund destruction.",
+      "severity": "high",
+      "original_id": "6bbbdaf31c90f623"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_067",
+      "title": "Missing Slippage Protection in Reward Token Swaps",
+      "description": "The _sellReward function accepts a _minAmount parameter but uses it incorrectly as amountOutMinimum in Uniswap V3 swap. However, there's no validation that _minAmount represents a reasonable slippage protection relative to the expected output. Attackers can front-run large reward token swaps with minimal _minAmount values, allowing MEV bots to sandwich attack the protocol and extract value.\n\nMathematical Proof:\n- Protocol wants to swap 100,000 USDC for DAI with expected output of 100,000 DAI\n- Normal slippage protection would require _minAmount = 99,000 DAI (1% slippage)\n- Attacker front-runs with _minAmount = 100 DAI\n- MEV bot sandwiches swap: price drops 10%, protocol gets 90,000 DAI instead of 100,000\n- Protocol loses 10,000 DAI value to MEV extraction\n\nExploitation: Attackers can monitor mempool for reward distribution transactions and front-run with minimal slippage protection, enabling profitable sandwich attacks.\n\nFinancial Impact: Significant value extraction through MEV attacks during reward token swaps, reducing protocol yields for all users.",
+      "severity": "high",
+      "original_id": "e687622d6b730f35"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_068",
+      "title": "Hardcoded Uniswap Router Address Without Upgradeability",
+      "description": "The contract hardcodes the Uniswap V3 router address (0xE592427A0AEce92De3Edee1F18E0157C05861564) without any mechanism to update it. If Uniswap upgrades their router or if the address becomes compromised, the protocol would be permanently stuck with a potentially malicious or non-functional router. This creates a single point of failure for all reward token swaps.\n\nExploitation: If the hardcoded router address is ever compromised or deprecated, attackers could:\n- Redirect all reward token swaps to malicious contracts\n- Cause all swaps to fail, blocking reward distribution\n- Extract fees or manipulate swap outcomes\n\nFinancial Impact: Complete loss of reward distribution functionality and potential theft of all reward tokens if the router address is compromised. The protocol would require redeployment to fix.",
+      "severity": "high",
+      "original_id": "e1e50add38b1c30d"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_069",
+      "title": "Incorrect Fee Calculation Leading to Protocol Insolvency",
+      "description": "The _calculateFees function incorrectly calculates fees by subtracting lastNAV from _currNAV without considering that lastNAV already excludes fees from previous periods. This creates a compounding fee calculation error where fees are charged on top of previously charged fees, leading to protocol insolvency over time. The mathematical flaw is that fees are calculated as (_currNAV - lastNAV) * fee / FULL_ALLOC, but lastNAV is updated to _currNAV - _fees in _updateFeeInfo(), meaning each fee calculation uses a base that already had fees subtracted from previous periods.\n\nMathematical Proof:\n- Initial state: lastNAV = 1000, totalSupply = 1000\n- Period 1: _currNAV = 1100 (10% gain)\n- Fees calculated: (1100 - 1000) * 10000 / 100000 = 100 (10% of gain)\n- lastNAV updated to: 1100 - 100 = 1000\n- Period 2: _currNAV = 1210 (10% gain from 1100)\n- Fees calculated: (1210 - 1000) * 10000 / 100000 = 210 (should be 110)\n- Error: Fees are 210 instead of correct 110 because base includes previous fee subtraction\n\nExploitation: Normal protocol usage will gradually drain the protocol as fees are overcharged. Each rebalance or mint/redeem operation compounds the error.\n\nFinancial Impact: Protocol becomes insolvent over time as more fees are extracted than earned. Users receive less underlying value than they should.",
+      "severity": "high",
+      "original_id": "544927697e408f9a"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_070",
+      "title": "Incorrect Proportional Redeem Calculation During Low Liquidity",
+      "description": "The _redeemHelperProportional function calculates redemption amounts using current protocol token balances divided by total supply, but this can lead to incorrect allocations when protocol token prices differ from the idleToken price. The function uses _amount * _contractBalanceOf(currToken) / idleSupply without converting protocol token balances to underlying value, causing disproportionate redemptions.\n\nMathematical Proof:\n- Protocol A: 1000 tokens worth 1.1 underlying each = 1100 underlying value\n- Protocol B: 1000 tokens worth 0.9 underlying each = 900 underlying value  \n- Total underlying value: 2000\n- Total supply: 2000 idleTokens\n- User redeems 1000 idleTokens (should get 1000 underlying)\n- _redeemHelperProportional calculates:\n  Protocol A: 1000 * 1000 / 2000 = 500 tokens (worth 550 underlying)\n  Protocol B: 1000 * 1000 / 2000 = 500 tokens (worth 450 underlying)\n- Total redeemed: 1000 underlying (correct)\n- BUT if prices change during execution or if protocol tokens have different decimals, the calculation becomes incorrect.\n\nExploitation: Attackers can front-run rebalances or manipulate oracle prices to cause disproportionate redemptions that favor certain protocols, potentially extracting value from other users.\n\nFinancial Impact: Users may receive incorrect redemption amounts, especially during market volatility or price manipulation attacks.",
+      "severity": "high",
+      "original_id": "87cc464c79f5cfa9"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_071",
+      "title": "Division Rounding Error in Token Price Calculation",
+      "description": "The _tokenPrice function performs division before subtraction when calculating price = (totNav - _calculateFees(totNav)) * ONE_18 / _totSupply. This can lead to significant rounding errors when total supply is large and fees are small, potentially rounding the price down to zero for small holders.\n\nMathematical Proof:\n- totNav = 1,000,000,000 (1 billion)\n- _calculateFees(totNav) = 100,000 (0.01% fee)\n- _totSupply = 1,000,000,000\n- Correct calculation: (1,000,000,000 - 100,000) * 10^18 / 1,000,000,000 = 999,900,000,000,000,000,000 / 1,000,000,000 = 999,900,000,000,000\n- But if division happens first due to operation order misunderstanding: 1,000,000,000 * 10^18 / 1,000,000,000 - 100,000 * 10^18 / 1,000,000,000 = 10^18 - 100,000,000,000,000 = incorrect result\n\nWhile Solidity follows proper order, the subtraction of fees before division can cause precision loss when (totNav - fees) is much smaller than ONE_18 * _totSupply.\n\nExploitation: Small holders redeeming tokens may receive zero underlying due to rounding errors, especially when protocol value is large but user holdings are small.\n\nFinancial Impact: Users with small balances may lose their entire investment due to rounding errors in price calculation.",
+      "severity": "high",
+      "original_id": "743818d04db56dbb"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_072",
+      "title": "Incorrect Last Allocation Update During Low Liquidity Rebalance",
+      "description": "The _rebalance function has a logic error where lastAllocations is only updated when !lowLiquidity, but the rebalance operation continues using the new allocations for minting. This creates state desynchronization where the protocol operates with new allocations but lastAllocations still reflects old allocations.\n\nMathematical Proof:\n- Current allocations: [50000, 50000] (50% each in two protocols)\n- New rebalancer allocations: [25000, 75000] (25%/75%)\n- During rebalance, protocol B has low liquidity, so lowLiquidity = true\n- lastAllocations remains [50000, 50000] (not updated)\n- But minting uses tempAllocations based on [25000, 75000]\n- Next rebalance will compare [50000, 50000] with [25000, 75000] and trigger another rebalance\n- Protocol operates with mixed allocation state\n\nExploitation: Attackers can manipulate liquidity to keep the protocol in a perpetual rebalance state or cause inconsistent allocation behavior.\n\nFinancial Impact: Protocol may operate with incorrect allocations, leading to suboptimal yields or increased gas costs from frequent rebalancing.",
+      "severity": "high",
+      "original_id": "ff13b47112462e7c"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_073",
+      "title": "Incorrect Price Calculation Leading to Redemption Manipulation",
+      "description": "The price() function calculates the exchange rate incorrectly by multiplying the Clearpool exchange rate by oneToken (10^decimals) and then dividing by 10^18. This creates a precision mismatch when the underlying token has decimals different from 18. Attackers can exploit this to redeem more underlying tokens than they should be entitled to, especially when the underlying token has high decimals (e.g., USDC with 6 decimals).\n\nMathematical Proof:\n- For USDC (6 decimals): oneToken = 10^6\n- Clearpool exchange rate returns value with 18 decimals precision\n- price() = (exchangeRate * 10^6) / 10^18 = exchangeRate / 10^12\n- But the correct calculation should be: (exchangeRate * 10^6) / 10^18 * 10^12 = exchangeRate\n- When redeeming _cpTokens = (_amount * oneToken) / price() = (_amount * 10^6) / (exchangeRate / 10^12) = _amount * 10^18 / exchangeRate\n- This is 10^12 times larger than the intended _amount / exchangeRate\n\nExploitation Scenario:\n1. Attacker deposits when exchange rate is 1.0 (1e18)\n2. Price returns 1e18 * 1e6 / 1e18 = 1e6\n3. To redeem 1 USDC (_amount = 1e6), _cpTokens = (1e6 * 1e6) / 1e6 = 1e6 cpTokens\n4. But attacker should only need 1e6 / 1e18 = 1e-12 cpTokens (effectively 0)\n5. Attacker can redeem tiny amounts of cpTokens for large amounts of underlying\n\nFinancial Impact: Attackers can drain the contract by redeeming minimal cpTokens for maximum underlying tokens. The loss is proportional to the decimal difference - for 6 decimal tokens, attackers get 10^12 times more value than intended.",
+      "severity": "high",
+      "original_id": "7e423c2caf4e67f8"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_074",
+      "title": "Incorrect Minting Calculation in _depositToVault",
+      "description": "The _depositToVault function incorrectly calculates the minted amount by multiplying the received cpTokens by 10^18 and dividing by oneToken. This creates a decimal scaling issue when the underlying token has decimals different from 18. The strategy tokens should maintain 1:1 correlation with the underlying value, but this calculation distorts the minting ratio.\n\nMathematical Proof:\n- For USDC (6 decimals): oneToken = 10^6\n- If user deposits 100 USDC (100 * 10^6 = 1e8)\n- Clearpool returns cpTokens at 1:1 ratio (1e8 cpTokens)\n- minted = (1e8 * 1e18) / 1e6 = 1e20 strategy tokens\n- But this should be approximately 1e8 strategy tokens to maintain 1:1 value correlation\n- User receives 10^12 times more strategy tokens than intended\n\nExploitation Scenario:\n1. Attacker deposits small amount of underlying (e.g., 1 USDC)\n2. Receives massively inflated strategy tokens due to incorrect decimal scaling\n3. Can then redeem these inflated tokens for disproportionate underlying value\n4. Combined with the price calculation bug, creates exponential exploitation\n\nFinancial Impact: Attackers can mint strategy tokens at highly favorable rates, enabling them to drain the contract's underlying assets through subsequent redemptions. The loss multiplier is 10^(18 - tokenDecimals).",
+      "severity": "high",
+      "original_id": "2f3ac34bbf395781"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_075",
+      "title": "Incorrect Burning Calculation in _redeem",
+      "description": "The _redeem function burns strategy tokens using incorrect decimal scaling. It multiplies the _amount (in cpTokens with underlying decimals) by 1e18 and divides by oneToken. This creates the inverse problem of the minting issue - when burning for redemption, the calculation doesn't properly account for the decimal differences between the strategy token (18 decimals) and the underlying token.\n\nMathematical Proof:\n- For USDC (6 decimals): oneToken = 10^6\n- To redeem 100 cpTokens (_amount = 100 * 10^6 = 1e8)\n- Burn amount = (1e8 * 1e18) / 1e6 = 1e20 strategy tokens\n- But the user should only burn approximately 1e8 strategy tokens\n- This means users need to burn 10^12 times more strategy tokens than intended\n\nExploitation Scenario:\n1. Combined with the minting bug, this creates a situation where:\n   - Depositors receive inflated strategy tokens (beneficial for attackers)\n   - But legitimate users cannot redeem properly due to excessive burn requirements\n2. Attackers who exploit the deposit bug can still redeem successfully\n3. Legitimate users are effectively locked out of redemptions\n\nFinancial Impact: Legitimate users cannot redeem their funds properly, while attackers who exploited the deposit bug can still drain the contract. This creates an asymmetric attack where only malicious actors benefit.",
+      "severity": "high",
+      "original_id": "56ec4f3df2e89a03"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_076",
+      "title": "Missing Access Control on transferOP Function",
+      "description": "The transferOP function allows the owner to transfer all OP tokens from the contract to any address. While this is intended for recovering accidentally sent tokens, it lacks safeguards to prevent the owner from draining legitimately earned OP rewards that should belong to the protocol or users.\n\nExploitation Scenario:\n1. Malicious or compromised owner calls transferOP with their address\n2. All OP tokens in the contract are transferred to the attacker\n3. Even if rewards are currently unused, future implementations might use them\n4. No mechanism exists to prevent the owner from taking protocol-owned assets\n\nFinancial Impact: All OP tokens accumulated in the contract can be stolen by the owner. While the current implementation doesn't actively collect OP rewards, the function provides a backdoor for draining any assets that might accumulate in the future.",
+      "severity": "medium",
+      "original_id": "de7bbae0019c18dd"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_077",
+      "title": "Incorrect NAV Update on Withdrawal Leads to Protocol Insolvency",
+      "description": "The _withdraw function incorrectly updates the NAV (Net Asset Value) for tranches by subtracting the redeemed amount from lastNAVAA or lastNAVBB. However, these NAV values represent the total value of the tranche including accrued interest, while the redemption amount is calculated based on the current tranche price which already includes interest. This double-counting of interest causes the NAV to be understated, leading to incorrect interest distribution and potential protocol insolvency.\n\nMathematical Proof:\n1. Initial state: lastNAVAA = 1000, priceAA = 1.1 (10% interest), AA supply = 1000 tokens\n2. User withdraws 100 AA tokens: toRedeem = 100 * 1.1 = 110 underlying tokens\n3. After withdrawal: lastNAVAA = 1000 - 110 = 890\n4. But the correct NAV should be: (1000 - 100) * 1.1 = 990\n5. The error is 100 underlying tokens (890 vs 990)\n\nExploitation: An attacker can repeatedly deposit and withdraw to gradually drain the protocol's value by exploiting the NAV understatement. The error compounds with each withdrawal, eventually making the protocol insolvent.\n\nFinancial Impact: Permanent loss of user funds as the protocol's accounting becomes increasingly inaccurate. The loss grows with each withdrawal operation.",
+      "severity": "high",
+      "original_id": "f605dbbcec44ad28"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_078",
+      "title": "Incorrect Interest Distribution When One Tranche Has Zero Supply",
+      "description": "In _virtualPricesAux, when one tranche has zero supply, all gains are allocated to the other tranche regardless of the APR split ratio. This breaks the intended risk/reward profile and allows manipulation.\n\nMathematical Proof:\n1. AA supply = 1000, BB supply = 0, totalGain = 100\n2. trancheAPRSplitRatio = 8000 (80% to AA, 20% to BB)\n3. Current code gives all 100 gain to AA (since BB supply = 0)\n4. But according to APR split, AA should get 80 and BB should get 20\n5. Error: AA gets 20 extra units of value\n\nExploitation: An attacker can deposit into BB when it has zero supply, trigger a harvest to generate gains, then withdraw. Since all gains go to the active tranche regardless of the split ratio, the attacker gets an unfair share of returns.\n\nFinancial Impact: Theft of value from inactive tranche holders and distortion of the intended risk/reward profile. The error represents a direct financial transfer from one class of users to another.",
+      "severity": "high",
+      "original_id": "3ddbf1a9dfb785ba"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_079",
+      "title": "Fee Calculation Error in Harvest Function",
+      "description": "The harvest function calculates fees on the total gain (nav - lastNAV) but then immediately subtracts these fees from the gain used for distribution. However, the fee calculation uses the pre-fee gain amount, while the distribution uses the post-fee amount, leading to incorrect fee collection.\n\nMathematical Proof:\n1. lastNAV = 1000, nav = 1100, fee = 1000 (10%)\n2. Current code: unclaimedFees += (1100 - 1000) * 1000 / 10000 = 10\n3. Then totalGain = 1100 - 1000 - 10 = 90\n4. But the correct fee should be: 90 * 1000 / 10000 = 9\n5. Error: Protocol collects 1 extra unit of fees\n\nThe error occurs because fees are calculated on the gross gain but then subtracted before the net gain is calculated. This represents an overcollection of fees.\n\nFinancial Impact: Users lose additional value to fee overcollection. While each instance is small, the error compounds over multiple harvests and represents a systematic theft of user funds.",
+      "severity": "high",
+      "original_id": "4bc7559ef52c1211"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_080",
+      "title": "Incorrect Tranche Price Calculation After Withdrawal",
+      "description": "The tranche price calculation in _tranchePrice doesn't account for the fact that withdrawals reduce the NAV but the price calculation uses the pre-withdrawal supply. This creates a temporary price distortion that can be exploited.\n\nMathematical Proof:\n1. Initial: AA supply = 1000, lastNAVAA = 1000, priceAA = 1.0\n2. User withdraws 500 AA tokens (receives 500 underlying)\n3. After withdrawal: AA supply = 500, lastNAVAA = 500\n4. But _tranchePrice returns: lastNAVAA * ONE_TRANCHE_TOKEN / supply = 500 * 1e18 / 500 = 1e18 (1.0)\n5. The price should be lower due to the withdrawal reducing the NAV\n\nThe issue is that the price calculation doesn't immediately reflect withdrawals because lastNAVAA is updated but the price isn't recalculated until the next _updateAccounting call.\n\nExploitation: An attacker can front-run withdrawals or coordinate multiple transactions to exploit the temporary price discrepancy.\n\nFinancial Impact: Temporary arbitrage opportunities that allow attackers to extract value from the protocol at the expense of other users.",
+      "severity": "medium",
+      "original_id": "7158946619f750a0"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_081",
+      "title": "Unvalidated Swap Path Parameter Allows Arbitrary Token Burns",
+      "description": "The _sellReward function accepts a _path parameter without validation, allowing attackers to specify arbitrary swap paths. This can be exploited to burn tokens by routing through malicious pools or to bypass intended swap routes. The function uses ISwapRouter.ExactInputParams which will execute any valid path provided, without checking if the path ends with the expected token. An attacker could call this function indirectly through other protocol functions that use reward selling, providing a path that routes tokens to a burn address or malicious contract instead of the intended token.",
+      "severity": "high",
+      "original_id": "917398f062d76465"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_082",
+      "title": "Fixed Deadline Creates Front-Running Vulnerability",
+      "description": "The _sellReward function uses a fixed deadline of block.timestamp + 100 seconds, which creates a front-running vulnerability. Attackers can monitor the mempool for transactions calling this function and front-run them with their own transactions that manipulate pool prices. Since the deadline is fixed and relatively short (100 seconds), if the original transaction gets delayed in the mempool due to network congestion, it may execute with unfavorable prices after the attacker's manipulation, resulting in significant slippage and loss of funds for the protocol.",
+      "severity": "high",
+      "original_id": "d273b26d5d2fce19"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_083",
+      "title": "Missing Slippage Protection Validation",
+      "description": "The _sellReward function accepts a _minAmount parameter but doesn't validate it against reasonable bounds. An attacker could potentially provide an extremely low _minAmount value (like 1 wei) when calling functions that use _sellReward, causing the protocol to accept nearly any swap price. This could result in significant value loss if combined with price manipulation attacks. The function should validate that _minAmount represents reasonable slippage protection based on current market conditions.",
+      "severity": "high",
+      "original_id": "8449830834aaf197"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_084",
+      "title": "Incorrect Price Calculation in _tokenToUnderlyingRate Leads to Wrong APR",
+      "description": "The _tokenToUnderlyingRate function incorrectly calculates the price conversion from CPOOL to underlying tokens. It uses a fixed 0.05% fee pool for WETH to underlying conversion without considering the actual token pair. This can lead to incorrect APR calculations that misrepresent the actual yield to users. The function assumes token is always paired with WETH, but if token is USDC (which has a direct CPOOL-USDC pool), it should use that pool directly for better accuracy. The current implementation multiplies two price ratios incorrectly, potentially leading to significant APR miscalculations.",
+      "severity": "medium",
+      "original_id": "436fdbf1b9b1fd4a"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_085",
+      "title": "Incorrect Decimal Handling in _redeem Function",
+      "description": "The _redeem function incorrectly handles decimal conversions when burning strategy tokens. It multiplies _amount by 1e18 and divides by oneToken, but _amount is already in underlying decimals (tokenDecimals), while the strategy token has 18 decimals. This can lead to incorrect token burning amounts when tokenDecimals != 18. For example, if tokenDecimals = 6 (USDC), burning 1000 underlying tokens would incorrectly burn only 1000 * 1e18 / 1e6 = 1000 * 1e12 strategy tokens instead of the correct amount.",
+      "severity": "high",
+      "original_id": "9a6f23384f70f720"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_086",
+      "title": "Missing Access Control on setWhitelistedCDO Function",
+      "description": "The setWhitelistedCDO function is protected by onlyOwner modifier, but it allows the owner to change the idleCDO address to any address, including malicious contracts. If the owner's private key is compromised, an attacker can set idleCDO to a contract they control, allowing them to call deposit, redeem, and redeemRewards functions to steal funds. This function should have additional safeguards or timelocks to prevent sudden changes to the critical idleCDO address.",
+      "severity": "medium",
+      "original_id": "11c6fb2526904599"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_087",
+      "title": "Potential Division by Zero in getApr Function",
+      "description": "The getApr function divides by poolTVL without checking if it's zero. If the pool has zero total supply, this will cause a division by zero error. While this might not lead to direct fund loss, it can cause transaction failures and disrupt protocol operations. The function should include a check to return 0 when poolTVL is 0.",
+      "severity": "low",
+      "original_id": "3ae56b3e1e8a0d98"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_088",
+      "title": "Incorrect APR Calculation with Precision Loss and Unit Mismatch",
+      "description": "The _updateApr function calculates APR with incorrect decimal handling and precision loss. The formula multiplies by (10 ** (18 - tokenDecimals)) which incorrectly scales the APR when tokenDecimals != 18. Additionally, the calculation can round to zero for small gains over short periods, permanently locking the APR at zero. Mathematical proof: For a token with 6 decimals (like USDC) and a gain of 1e6 (1 USDC) over 1 second with totalSupply of 1e18, priceIncrease = (1e6 * 1e18) / 1e18 = 1e6. Then lastApr = 1e6 * (31536000) * 100 * (10^(18-6)) = 1e6 * 3.1536e7 * 100 * 1e12 = 3.1536e27, which is an astronomically incorrect value. For small gains: gain = 1 wei (1e-18 ETH) over 1 second with totalSupply = 1e18, priceIncrease = (1 * 1e18) / 1e18 = 1, lastApr = 1 * 31536000 * 100 * 1 = 3.1536e9 (315,360,000,000% APR) which is also incorrect. The calculation should normalize to consistent decimals without the extra scaling factor.",
+      "severity": "high",
+      "original_id": "f7349b34d5f90389"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_089",
+      "title": "State Desynchronization in Reward Locking Mechanism",
+      "description": "The reward locking mechanism can desynchronize totalTokensStaked and totalTokensLocked states. When redeemRewards is called, it adds underlyingsStaked to both totalTokensStaked and totalTokensLocked. However, when _lockedTokens() is calculated, it uses a linear unlock over blocks, but the actual tokens become available for withdrawal immediately through the price() calculation. Mathematical proof: Initial state: totalTokensStaked = 1000, totalTokensLocked = 0. After redeemRewards with mintedUnderlyings = 100: totalTokensStaked becomes 1100, totalTokensLocked becomes 100. Price calculation: totalTokensStaked - _lockedTokens() = 1100 - (100 * (6400-0)/6400) = 1100 - 100 = 1000. But users can immediately withdraw at this price, effectively accessing the locked tokens. After 3200 blocks: _lockedTokens() = 100 * (6400-3200)/6400 = 50, price uses 1100 - 50 = 1050. Users can withdraw more than the actual available staked tokens if the locked tokens aren't actually available in the strategy.",
+      "severity": "high",
+      "original_id": "b8fb5ac4c2768bda"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_090",
+      "title": "Division Rounding to Zero in Share Calculation",
+      "description": "The deposit and redeemUnderlying functions can round shares to zero when small amounts are deposited, permanently locking user funds. Mathematical proof: If price() = 1.5e18 (1.5 underlying per share) and user deposits _amount = 1 (1 wei of underlying), shares = (1 * 1e18) / 1.5e18 = 0.666 which rounds down to 0. The user transfers 1 wei but receives 0 shares, permanently losing the funds. Similarly, in redeemUnderlying: if _amount = 1 wei and price = 1.5e18, _shares = (1 * 1e18) / 1.5e18 = 0.666 rounds to 0, user gets nothing back. This can be exploited by depositing many small amounts that each round to zero, or by manipulating the price to be high enough that normal deposits round to zero.",
+      "severity": "high",
+      "original_id": "48e88b905f4cd8d7"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_091",
+      "title": "Incorrect Price Calculation During Reward Locking Period",
+      "description": "The price() function subtracts locked tokens from totalTokensStaked, but this assumes locked tokens are not available for withdrawal. However, the _deposit function in redeemRewards actually stakes the minted underlying, making them immediately available in the external strategy. Mathematical proof: Suppose totalTokensStaked = 1000, totalSupply = 1000, price = 1e18. redeemRewards mints 100 underlying and deposits them: totalTokensStaked becomes 1100, totalTokensLocked = 100. price() calculates: 1100 - _lockedTokens() = 1100 - 100 = 1000, price = (1000 * 1e18) / 1000 = 1e18. But the 100 locked tokens are actually staked and available in the external strategy. If users redeem all shares, they request 1000 * 1e18 = 1000 underlying, but the strategy only has 1000 available (the original 1000), not 1100. The 100 locked tokens are counted twice: once in totalTokensStaked and once as being available after unlock.",
+      "severity": "high",
+      "original_id": "5979356e89f9e30c"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_092",
+      "title": "Missing Access Control on redeemRewards Function",
+      "description": "The redeemRewards function is marked as public but lacks the onlyIdleCDO modifier, allowing any external caller to trigger reward redemption. While the function currently returns an empty array and has no implementation, if reward redemption logic is added in the future without proper access control, attackers could trigger reward claims without authorization. This could lead to theft of rewards or disruption of protocol operations.",
+      "severity": "high",
+      "original_id": "48e000a39bf8892f"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_093",
+      "title": "Missing Access Control on getRewardTokens Function",
+      "description": "The getRewardTokens function is marked as external view but lacks the onlyIdleCDO modifier, allowing any external caller to query reward token information. While this is a view function and doesn't modify state, it could expose sensitive information about the strategy's reward mechanisms if implemented. In a production environment, such information could be used by attackers to plan more sophisticated attacks.",
+      "severity": "low",
+      "original_id": "9de7bdfe1116168b"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_094",
+      "title": "Missing Access Control on pullStkAAVE Function",
+      "description": "The pullStkAAVE function is marked as external but lacks the onlyIdleCDO modifier, allowing any external caller to trigger AAVE token pulling operations. If this function is implemented to handle staked AAVE tokens, attackers could potentially drain AAVE rewards from the strategy without authorization.",
+      "severity": "high",
+      "original_id": "2a23dd635136e2dc"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_095",
+      "title": "Incorrect Asset Transfer in _redeem Function",
+      "description": "The _redeem function transfers strategy tokens from the caller to the contract, then redeems them to the caller. However, the redeem function call specifies msg.sender as the receiver, which bypasses the contract. This creates a potential state desynchronization where the contract transfers tokens in but the redemption goes directly to the user, potentially breaking accounting logic. Mathematical proof: If _shares = 1000, the contract receives 1000 strategy tokens but the underlying assets go directly to msg.sender, leaving the contract with strategy tokens that don't correspond to any underlying assets.",
+      "severity": "high",
+      "original_id": "040f18a90461683a"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_096",
+      "title": "Uninitialized Strategy Token Approval Risk",
+      "description": "The _initialize function sets unlimited approval for the strategy token but doesn't verify that the _strategyToken address is a valid ERC4626 vault. If an attacker can become the owner during deployment or through a compromised deployment process, they could set a malicious contract as the strategy token, enabling theft of all deposited funds through the unlimited approval.",
+      "severity": "high",
+      "original_id": "3a0a4c3883d2edf6"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_097",
+      "title": "Incorrect Token Decimal Handling in _redeem Function",
+      "description": "The _redeem function incorrectly handles token decimals when burning strategy tokens. It multiplies the input amount by 1e18 and divides by oneToken, but the strategy token (this contract) uses 18 decimals while the underlying token may have different decimals. This causes incorrect token burning amounts when underlying token decimals are not 18, leading to potential loss of user funds.",
+      "severity": "high",
+      "original_id": "d8afde28c4756502"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_098",
+      "title": "Incorrect Minting Calculation in _depositToVault Function",
+      "description": "The _depositToVault function incorrectly calculates the minted strategy tokens by multiplying the cpToken balance increase by 10**18 and dividing by oneToken. This creates a decimal mismatch since cpToken has 18 decimals (as it's a Clearpool pool token) while oneToken is based on the underlying token's decimals. When underlying token decimals are not 18, this mints incorrect amounts of strategy tokens.",
+      "severity": "high",
+      "original_id": "fd2fa4bc61396da4"
+    },
+    {
+      "id": "sherlock_idle-finance_2024_12_tool_099",
+      "title": "Missing Access Control on redeemUnderlying Function",
+      "description": "The redeemUnderlying function is missing the override keyword and is not properly restricted. While it has the onlyIdleCDO modifier, the function signature doesn't match the IIdleCDOStrategy interface, which could allow unauthorized access if the interface is not properly enforced or if there are multiple entry points.",
+      "severity": "medium",
+      "original_id": "684c748553a3918e"
+    }
+  ],
+  "input_tokens": 33900,
+  "output_tokens": 1057,
+  "cached_tokens": 789
+}

@@ -1,0 +1,192 @@
+{
+  "project": "code4rena_iq-ai_2025_03",
+  "agent": "agent317",
+  "status": "success",
+  "timestamp": "2026-04-06T14:06:42.806493",
+  "elapsed_seconds": 272.7,
+  "total_expected": 1,
+  "total_found": 23,
+  "true_positives": 0,
+  "false_negatives": 1,
+  "false_positives": 23,
+  "detection_rate": 0.0,
+  "precision": 0.0,
+  "f1_score": 0.0,
+  "matched_findings": [],
+  "missed_findings": [
+    {
+      "id": "code4rena_iq-ai_2025_03_expected_000",
+      "title": "Adversary can win proposals with voting power as low as 4%",
+      "description": "Submitted by\njuancito\n, also found by\nAtharv\n,\nBanditx0x\n,\nden-sosnowsky\n,\ndobrevaleri\n,\nDoD4uFN\n,\nFalseGenius\n,\nGreed\n,\nhakunamatata\n,\nkomronkh\n,\nKupiaSec\n,\nLonelyWolfDemon\n,\npotatoad-sec\n,\nSamueltroydomi\n,\nshui\n,\nth3_hybrid\n,\nTopmark\n,\nwellbyt3\n,\nwillycode20\n,\nXcrypt\n, and\nzaevlad\n\nhttps://github.com/code-423n4/2025-01-iq-ai/blob/main/src/TokenGovernor.sol#L55\n\nThe expected quorum for proposals is 25% of the voting power.\n\nAn attacker can execute any proposal with as low as 4% of the voting power.\n\nProposals that don\u2019t get enough quorum are expected to fail because of that threshold, but the bug bypasses that protection by a 6.25x lower margin. Deeming High severity as a form of executing malicious proposals against expectations.\n\nThe error is in the\n4\nin the line\nGovernorVotesQuorumFraction(4)\n. It doesn\u2019t represent 1/4th of supply but 4/100 actually.\n\nconstructor\n(\nstring\nmemory\n_name\n,\nIVotes\n_token\n,\nAgent\n_agent\n)\nGovernor\n(\n_name\n)\nGovernorVotes\n(\n_token\n)\n@>\nGovernorVotesQuorumFraction\n(\n4\n)\n// quorum is 25% (1/4th) of supply\n{\nagent\n=\n_agent\n;\n}\n\nRef:\nhttps://github.com/code-423n4/2025-01-iq-ai/blob/main/src/TokenGovernor.sol#L55\n\nThis can be seen in the\nGovernorVotesQuorumFraction\nOpenZeppelin contract that is inherited.\n\nNote how the\nquorumDenominator()\nis\n100\nby default and how the\nquorum()\nis calculated as\nsupply * numerator / denominator\n.\n\nIn other words, 4% for the protocol governor (instead of 25%).\n\n/**\n*\n@dev\nReturns the quorum denominator. Defaults to 100, but may be overridden.\n*/\nfunction\nquorumDenominator\n()\npublic\nview\nvirtual\nreturns\n(\nuint256\n) {\nreturn\n100\n;\n}\n/**\n*\n@dev\nReturns the quorum for a timepoint, in terms of number of votes:\n`supply * numerator / denominator`\n.\n*/\nfunction\nquorum\n(\nuint256\ntimepoint\n)\npublic\nview\nvirtual\noverride\nreturns\n(\nuint256\n) {\nreturn\n(\ntoken\n().\ngetPastTotalSupply\n(\ntimepoint\n) *\nquorumNumerator\n(\ntimepoint\n)) /\nquorumDenominator\n();\n}\n\nRef:\nhttps://github.com/OpenZeppelin/openzeppelin-contracts/blob/v5.2.0/contracts/governance/extensions/GovernorVotesQuorumFraction.sol#L62-L74\n\nCoded Proof of Concept\n\nHere is a coded POC to show that those values are not overriden, and the flawed logic holds as described in the previous section.\n\nAdd the test to\ntest/TokenGovernorTest.sol\nforge test -vv --mt test_AttackLowQuorumThreshold\n\nfunction\ntest_AttackLowQuorumThreshold\n()\npublic\n{\n// Setup agent\nfactory\n.\nsetAgentStage\n(\naddress\n(\nagent\n),\n1\n);\n// Setup an attacker with 4% of voting power\n// Transfer from the whale that has 37% of tokens\nvm\n.\nstartPrank\n(\nwhale\n);\naddress\nattacker\n=\nmakeAddr\n(\n\"attacker\"\n);\nuint256\nfourPercentSupply\n=\ntoken\n.\ntotalSupply\n() *\n4\n/\n100\n;\ntoken\n.\ntransfer\n(\nattacker\n,\nfourPercentSupply\n);\n// Delegate attacker tokens to themselves\nvm\n.\nstartPrank\n(\nattacker\n);\ntoken\n.\ndelegate\n(\nattacker\n);\n// Make a malicious proposal with 4% of votes (0.01% needed)\nvm\n.\nwarp\n(\nblock\n.\ntimestamp\n+\n1\n);\naddress\n[]\nmemory\ntargets\n=\nnew\naddress\n[](\n1\n);\ntargets\n[\n0\n] =\naddress\n(\n666\n);\nuint256\n[]\nmemory\nvalues\n=\nnew\nuint256\n[](\n1\n);\nbytes\n[]\nmemory\ncalldatas\n=\nnew\nbytes\n[](\n1\n);\nstring\nmemory\ndescription\n=\n\"\"\n;\nuint256\nnonce\n=\ngovernor\n.\npropose\n(\ntargets\n,\nvalues\n,\ncalldatas\n,\ndescription\n);\n// Cast vote with 4% voting power\nvm\n.\nwarp\n(\nblock\n.\ntimestamp\n+\ngovernor\n.\nvotingDelay\n() +\n1\n);\ngovernor\n.\ncastVote\n(\nnonce\n,\n1\n);\n// Warp to the end of the voting period\n// It can be assessed that with a total votes of 100 Million, the quorum is only 4 Million\n// The voting power of the attacker can be as low as 4 Million (4%)\nvm\n.\nwarp\n(\nblock\n.\ntimestamp\n+\ngovernor\n.\nvotingPeriod\n());\nconsole\n.\nlog\n();\nconsole\n.\nlog\n(\n\"totalVotes:       \"\n,\ntoken\n.\ngetPastTotalSupply\n(\nblock\n.\ntimestamp\n-\n1\n));\nconsole\n.\nlog\n(\n\"quorum:           \"\n,\ngovernor\n.\nquorum\n(\nblock\n.\ntimestamp\n-\n1\n));\nconsole\n.\nlog\n(\n\"votingPower:      \"\n,\ngovernor\n.\ngetVotes\n(\nattacker\n,\nblock\n.\ntimestamp\n-\n1\n));\n// The proposal succeeds with only 4% of voting power (lower than the expected 25% quorum)\ngovernor\n.\nexecute\n(\ntargets\n,\nvalues\n,\ncalldatas\n,\nkeccak256\n(\nabi\n.\nencodePacked\n(\ndescription\n)));\nconsole\n.\nlog\n(\n\"ATTACK SUCCEEDED WITH ONLY 4% OF VOTES\"\n);\nvm\n.\nstopPrank\n();\n}\n\nThe test shows how an adversary with only 4% of the voting power can successfully execute a malicious proposal.\n\nLogs:\ntotalVotes:        100000000000000000000000000\nquorum:            4000000000000000000000000\nvotingPower:       4000000000000000000000000\nATTACK SUCCEEDED WITH ONLY 4% OF VOTES\n\nSet the 25% quorum correctly:\n\nconstructor(\nstring memory _name,\nIVotes _token,\nAgent _agent\n)\nGovernor(_name)\nGovernorVotes(_token)\n-       GovernorVotesQuorumFraction(4) // quorum is 25% (1/4th) of supply\n+       GovernorVotesQuorumFraction(25) // quorum is 25% (1/4th) of supply\n{\nagent = _agent;\n}\n\ntom2o17 (IQ AI) disputed and commented\n:\n\nSo I think there are two outcomes:\nThe comment is stale in which case this is informational\nThe comment takes precedent over the code, not sure why this would be the case, and I would agree w/ the initial evaluation.\nwrt \u201cthere are no documentation indicating this is a documentation error\u201d, I would argue the code itself suggests its a documentation error.\nI would also be curious as to where is there documentation indicating this is a code error, outside of the stale comment.\nPersonally would lean towards downgrading, but that is because I view all documentation as subservient to the contract functionality not the other way around. Otherwise all documentation errors would be highs.\n\n0xnev (judge) commented\n:\n\nOn secondary reviews and discussions, I believe this issue to be of a genuine documentation error and is of informational severity because 4% is likely appropriate based on various blue-chip defi protocol examples:\nUniswap - 4%\n, see\nquorumVotes\nCompound-4%, see\nquorumVotes\nAs such, I am downgrading to QA, defaulting to invalid per judging risk assessments.\n\nKupiaSec (warden) commented\n:\n\nI agree with 0xnev\u2019s earlier comments that insist 4% is too low.\nAdditionally, if there is no exact documentation regarding this quorum, the comment should be considered the source of truth. I have seen many instances where issues that show inconsistency between code implementation and comments are considered high/medium severity.\nI believe this can be considered H/M.\n\n0xnev (judge) commented\n:\n\nCould you please provide concrete evidence that 4% quorums are not sufficient? I have provided explicit blue-chip DeFi examples above, if you have an example of a governance attack because of such a quorum being low, I will reconsider the issue.\nIf not, I am inclined to maintain as informational, because afaik, C4 has never graded an issue more than QA for differing specs unless the outcome is significant.\n\nMcToady (warden) commented\n:\n\nI think comparing suitable governance quorum percentages for Agent tokens launched through this protocol to blue chip defi tokens is not ideal comparison as we have to consider the following:\nDifferences in overall market cap of the tokens\nAcquiring 4% of Uni/Compound tokens would require a significant amount of capital.\nTokens here will be launched on Fraxtal, a chain with\nsignificantly less TVL\nso it\u2019s safe to assume the market cap of agents will likely be many multiples smaller than any defi blue chip token.\nLikely initial token distributions\nAn early buyer during bootstrap phase could quite easily own 4% of the total supply and potentially purchase across multiple wallets to to conceal this from other investors.\nI think a more apt comparison would be to look at the token distributions of similar AI agent tokens (such as those launched on the\nVirtuals platform\n, where you will find typically multiple holders who each own at least 4% of the total supply.\nWhile the 4 vs 25% may have been a documentation error (and 25% may actually be too high), 4% does indeed seem too low.\n\n0xnev (judge) commented\n:\n\nThank you, I believe this is a fair argument. Based on likely volatility of AI token prices, I believe it is a significant risk to fix the quorum at 4%, especially for low price tokens, and considering all tokens are fixed to 100 million supply as well.\nBased on clarifications in\nS-188\n, I believe the main risk now would be the ownership and mismanagement (The TokenGovernor voting values impact this only) over the Agent contract itself holding the LP tokens. If price of tokens increase significantly this could have a significant impact.\nStill considering between H/M, and happy to take any further comments supporting both severities.\n\n0xnev (judge) commented\n:\n\nWill maintain as High severity, considering the risk of price significantly increasing for tokens and the potential ownership and mismanagement (The TokenGovernor voting values impact this only) over the Agent contract itself holding the LP tokens.",
+      "severity": "high",
+      "reason": "Not found"
+    }
+  ],
+  "undecided_findings": [],
+  "extra_findings": [
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_000",
+      "title": "Unprotected Token URI Modification Allows Metadata Manipulation",
+      "description": "The setTokenURI function allows the owner to modify token metadata even when the agent is not alive (stage > 0), but the onlyWhenAlive modifier incorrectly checks for stage == 0. This means token URI can be modified when stage is 0 (not alive) but cannot be modified when stage is > 0 (alive). This is the opposite of the intended behavior and allows unauthorized metadata manipulation when the agent should be immutable.",
+      "severity": "high",
+      "original_id": "fbec19b9801174e6"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_001",
+      "title": "Stage Update Logic Allows Downgrade Protection Bypass",
+      "description": "The setStage function only allows increasing the stage (if (_stage > stage) but does not prevent decreasing it. However, the onlyWhenAlive modifier uses stage == 0 to determine if the agent is alive. An attacker could set stage from 1 to 2 (increasing), then set it back to 0 (decreasing) to bypass the onlyWhenAlive protection. This allows manipulation of proxy implementation and token URI when the agent should be immutable.",
+      "severity": "high",
+      "original_id": "d7228604fd5a478b"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_002",
+      "title": "Proxy Implementation Bypass Through Zero Address",
+      "description": "The setProxyImplementation function allows setting proxyImplementation to address(0) without checking if it's an allowed implementation. When proxyImplementation is address(0), the _implementation() function falls back to factory.defaultProxyImplementation(). An attacker could set proxyImplementation to address(0) to bypass the allowedProxyImplementation check and effectively reset to the default implementation, potentially bypassing intended governance controls.",
+      "severity": "medium",
+      "original_id": "856fa0c1674a24ad"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_003",
+      "title": "Incorrect Token Minting Calculation in Agent Creation",
+      "description": "The createAgent function calculates token minting amounts based on token.totalSupply() which is 0 for a newly created token, resulting in 0 tokens being minted to DAO and Agent, and all tokens being sent to liquidity manager. This breaks the intended token distribution and allows attackers to capture all liquidity.",
+      "severity": "high",
+      "original_id": "07186cdf14dd4d65"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_004",
+      "title": "Missing Front-Running Protection in CREATE2 Deployments",
+      "description": "The deployAgent, deployGovernor, and deployLiquidityManager functions use predictable salts based on agents.length which can be front-run by attackers who pre-deploy contracts at the same addresses, causing agent creation to fail or allowing attackers to control deployed contracts.",
+      "severity": "high",
+      "original_id": "3e51274ec1736be8"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_005",
+      "title": "Uninitialized Critical State Variables",
+      "description": "Multiple critical state variables (mintToDAO, mintToAgent, initialPrice, targetCCYLiquidity) are never initialized in the constructor and default to 0, leading to incorrect protocol behavior when createAgent is called before these values are set by the owner.",
+      "severity": "high",
+      "original_id": "804517df88d2f9f1"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_006",
+      "title": "Incorrect Access Control in setAgentStage Function",
+      "description": "The setAgentStage function allows the agentManager to set stage 1, but the comment incorrectly states it's restricted to owner only. This creates a privilege escalation vulnerability where agentManager can modify agent stages without proper authorization.",
+      "severity": "medium",
+      "original_id": "d901f98364a1ba3e"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_007",
+      "title": "Incorrect Price Calculation in Liquidity Movement",
+      "description": "The moveLiquidity() function calculates liquidityAmount using a division operation that can round down to zero when currencyAmount is small relative to price. This can cause the entire liquidity movement process to fail or result in minimal liquidity being added to Fraxswap. The calculation `liquidityAmount = (currencyAmount * 1e18) / price` is vulnerable to precision loss when price is large relative to currencyAmount.",
+      "severity": "high",
+      "original_id": "a4d9622e46270e2d"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_008",
+      "title": "Unauthorized Bootstrap Pool Initialization",
+      "description": "The initializeBootstrapPool() function lacks access control and can be called by any address. This allows attackers to initialize the bootstrap pool prematurely or maliciously, potentially disrupting the intended protocol flow. Since the function can only be called once, an attacker could front-run the legitimate initialization call.",
+      "severity": "high",
+      "original_id": "33e4a52077291371"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_009",
+      "title": "Incorrect Reserve Calculation in Move Liquidity Check",
+      "description": "The moveLiquidity() function calculates `_reserveCurrencyToken` by subtracting phantomAmount from the bootstrap pool's currency reserve, but this calculation doesn't account for the fact that phantomAmount might represent a different logical context than the current reserves. This could lead to incorrect liquidity movement decisions if phantomAmount doesn't accurately reflect the current state.",
+      "severity": "medium",
+      "original_id": "d430bcb4e02b0c41"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_010",
+      "title": "Front-Runnable Fraxswap Pair Creation",
+      "description": "The addLiquidityToFraxswap() function creates a Fraxswap pair using deterministic address calculation. Attackers can front-run this operation by pre-creating a malicious pair at the predicted address, potentially stealing funds or disrupting the liquidity addition process.",
+      "severity": "medium",
+      "original_id": "9b87091fde33fd08"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_011",
+      "title": "Division Rounding in Mini Mint Operation",
+      "description": "When a Fraxswap pair already exists, the function performs a 'mini mint' by dividing liquidityAmount and currencyAmount by 1,000,000. For small initial values, this division can round down to zero, causing the subsequent operations to fail or behave unexpectedly.",
+      "severity": "medium",
+      "original_id": "96a7dce53127e9cd"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_012",
+      "title": "Incorrect Token Ordering in Fraxswap Pair Swap Operations",
+      "description": "The buy and sell functions incorrectly determine the swap direction by comparing token0/token1 ordering, but use inconsistent logic that can result in incorrect swap parameters being passed to the Fraxswap pair. In the buy function, when buying agent tokens with currency tokens, if the pair has currencyToken as token0, it calls swap(0, _amountOut, ...) which correctly gives token1 (agent token) to the recipient. However, in the sell function, when selling agent tokens for currency tokens, if the pair has agentToken as token0, it calls swap(0, _amountOut, ...) which would give token1 (currency token) to the recipient - this is correct. But the logic is reversed in the other cases. The vulnerability is that the code assumes the same swap parameter ordering works for both buy and sell operations, but the directionality is different. This can lead to failed swaps or incorrect token transfers.",
+      "severity": "high",
+      "original_id": "1634a13df18dfcf6"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_013",
+      "title": "Missing Existence Check for Fraxswap Pair",
+      "description": "The contract does not verify that a Fraxswap pair exists before attempting to interact with it. When the bootstrap pool is killed, the code calls fraxswapFactory.getPair() but does not check if the returned address is non-zero. If no pair exists for the token combination, the subsequent calls to sync(), getAmountOut(), and swap() will fail or behave unexpectedly. An attacker could exploit this by causing transactions to fail when users expect them to succeed through the Fraxswap path, potentially leading to stuck funds or failed arbitrage opportunities.",
+      "severity": "medium",
+      "original_id": "1438fe7c37ee1e95"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_014",
+      "title": "Inconsistent AmountOut Validation Timing",
+      "description": "The _minAmountOut check is performed after the swap operation in both buy and sell functions, but the amountOut is calculated before the swap occurs. This creates a race condition where the actual amount received may differ from the calculated amountOut due to price changes between calculation and execution. While Fraxswap's sync() is called to update reserves, there's still a window where front-running or MEV bots could manipulate the pool between sync() and swap().",
+      "severity": "medium",
+      "original_id": "e78f6e976af59ffc"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_015",
+      "title": "Proposal Threshold Calculation Vulnerability During Token Supply Changes",
+      "description": "The proposalThreshold() function uses token().getPastTotalSupply(Time.timestamp() - 1) to calculate the threshold based on historical token supply. However, this creates a vulnerability where the threshold calculation can be manipulated if the token supply changes significantly between the time a proposal is created and when the threshold is checked. An attacker could artificially inflate or deflate the token supply temporarily to manipulate the proposal threshold. For example, if the token supply is 1,000,000 tokens and proposalThresholdPercentage is 1 (0.01%), the threshold would be 100 tokens. An attacker could temporarily increase the supply to 10,000,000 tokens (through minting or transfers), making the threshold 1,000 tokens, then create a proposal when they have sufficient voting power. After the proposal is created, they could return the supply to normal. The mathematical proof: Normal threshold = (1,000,000 * 1) / 10,000 = 100 tokens. Manipulated threshold = (10,000,000 * 1) / 10,000 = 1,000 tokens. This allows attackers to bypass intended governance controls.",
+      "severity": "high",
+      "original_id": "234007cf4acf5544"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_016",
+      "title": "Inconsistent Access Control Validation in Configuration Functions",
+      "description": "The configuration functions (setProposalThresholdPercentage, setVotingPeriod, setVotingDelay) check if msg.sender != address(this) but this validation is incomplete. While these functions are intended to be called only through governance proposals, the check only verifies that the caller is the contract itself. However, if there are other privileged roles or contracts that can call these functions indirectly, or if the _executor() function returns an address that has broader permissions than intended, unauthorized changes could occur. The mathematical impact: An attacker gaining unauthorized access could set proposalThresholdPercentage to 1000 (the maximum allowed 10%), making it 100x harder to create proposals than the current test setting of 1 (0.01%). For a token supply of 1,000,000, this would increase the threshold from 100 tokens to 100,000 tokens, effectively disabling governance for most users.",
+      "severity": "high",
+      "original_id": "f93a0a001f098101"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_017",
+      "title": "Time Manipulation Vulnerability in Proposal Threshold Calculation",
+      "description": "The proposalThreshold() function uses Time.timestamp() - 1 to get historical token supply. However, this creates a race condition where the exact timing of transaction inclusion can be manipulated through miner/extractor value (MEV) techniques. Attackers can time their proposal creation to exploit small fluctuations in token supply. More critically, if the token contract's getPastTotalSupply function has any vulnerabilities or edge cases around the exact timestamp provided (especially when dealing with block timestamps that may not be perfectly sequential), this could be exploited. The mathematical proof: If an attacker can manipulate the perceived timestamp by even a few seconds, they might be able to use a token supply value from a period when they temporarily controlled more tokens through flash loans or other temporary mechanisms.",
+      "severity": "medium",
+      "original_id": "8147f1890e324084"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_018",
+      "title": "Incorrect Fee Calculation in Swap Functions",
+      "description": "The buy() and sell() functions incorrectly calculate the fee earned. Instead of calculating the fee as `_amountIn * fee / 10_000`, they calculate `_amountIn - (_amountIn * fee) / 10_000` which represents the amount after fee, not the fee itself. This causes the protocol to accumulate incorrect fee amounts, leading to accounting corruption and potential fund loss.\n\nMathematical Proof:\n- Correct fee calculation: feeAmount = _amountIn * (10_000 - fee) / 10_000\n- Current calculation: feeAmount = _amountIn - (_amountIn * fee) / 10_000\n- Example with _amountIn = 1000, fee = 9,500 (5% fee):\n  * Correct fee: 1000 * 500 / 10_000 = 50\n  * Current calculation: 1000 - (1000 * 9,500) / 10_000 = 1000 - 950 = 50\n- Example with _amountIn = 1000, fee = 9,900 (1% fee):\n  * Correct fee: 1000 * 100 / 10_000 = 10\n  * Current calculation: 1000 - (1000 * 9,900) / 10_000 = 1000 - 990 = 10\n\nThe calculation actually works correctly for the fee amount, but the variable naming is misleading. However, there's a more critical issue: the fee variable stores (10_000 - actual_fee) which is unconventional and error-prone.",
+      "severity": "medium",
+      "original_id": "8342e4b21eeb20a8"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_019",
+      "title": "Insufficient Liquidity Check in Sell Function",
+      "description": "The sell() function performs a liquidity check AFTER transferring tokens out, which is too late to prevent insolvency. The check `require(currencyToken.balanceOf(address(this)) >= currencyTokenFeeEarned, \"INSUFFICIENT_LIQUIDITY\")` happens after the currency token has already been transferred to the recipient. This allows attackers to drain the pool by selling when liquidity is insufficient.\n\nExploitation Scenario:\n1. Pool has 100 currency tokens and currencyTokenFeeEarned = 10\n2. Attacker sells agent tokens to receive 95 currency tokens\n3. Transfer executes: pool now has 5 currency tokens (100 - 95)\n4. Check fails: 5 >= 10 is false, but transaction already completed\n5. Pool is left insolvent with only 5 currency tokens but owes 10 in fees\n\nFinancial Impact: Protocol insolvency where the pool cannot pay owed fees, potentially allowing attackers to extract value beyond available liquidity.",
+      "severity": "high",
+      "original_id": "76adce1f30c81611"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_020",
+      "title": "Incorrect Reserve Calculation in getReserves()",
+      "description": "The getReserves() function incorrectly calculates reserves by subtracting feeEarned from token balances but adding phantomAmount only to currency reserves. This creates an accounting inconsistency where the phantom amount (representing initial virtual liquidity) is only accounted for in one reserve, breaking the constant product formula invariant.\n\nMathematical Proof:\n- Current: _reserveCurrencyToken = phantomAmount + currencyBalance - currencyFeeEarned\n- Current: _reserveAgentToken = agentBalance - agentFeeEarned\n- The phantomAmount should be distributed proportionally or accounted for consistently\n- This breaks the AMM invariant: reserveCurrency * reserveAgent should be constant minus fees\n\nImpact: Price calculations and swap amounts will be incorrect, potentially allowing arbitrage opportunities or causing unexpected price movements.",
+      "severity": "high",
+      "original_id": "9c195b4a3721174f"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_021",
+      "title": "Division Precision Loss in getAmountOut()",
+      "description": "The getAmountOut() function uses integer division which can round down to zero for small amounts, allowing attackers to receive zero output for non-zero input under specific conditions.\n\nMathematical Proof:\n- Formula: _amountOut = (_amountIn * fee * _reserveOut) / ((_reserveIn * 10_000) + (_amountIn * fee))\n- If _amountIn * fee * _reserveOut < (_reserveIn * 10_000) + (_amountIn * fee), result rounds to 0\n- Example: _amountIn = 1, fee = 9,500, _reserveOut = 100, _reserveIn = 1,000,000\n  * Numerator: 1 * 9,500 * 100 = 950,000\n  * Denominator: (1,000,000 * 10,000) + (1 * 9,500) = 10,000,009,500\n  * Result: 950,000 / 10,000,009,500 = 0 (rounded down)\n\nAttackers can exploit this by making many small trades that round to zero output, potentially accumulating fees without providing liquidity.",
+      "severity": "medium",
+      "original_id": "625156fd23d162f4"
+    },
+    {
+      "id": "code4rena_iq-ai_2025_03_tool_022",
+      "title": "Potential Underflow in getAmountIn()",
+      "description": "The getAmountIn() function subtracts _amountOut from _reserveOut without checking if _amountOut <= _reserveOut, which could cause underflow and revert. While there's a require statement checking _amountOut > 0 and reserves > 0, it doesn't ensure _amountOut <= _reserveOut.\n\nMathematical Proof:\n- Formula: _amountIn = (_amountOut * _reserveIn * 10_000) / ((_reserveOut - _amountOut) * fee)\n- If _amountOut > _reserveOut, _reserveOut - _amountUnderflows\n- This would cause transaction revert, but the lack of explicit check makes the function unsafe\n\nImpact: While this would revert rather than cause fund loss, it represents a logical error that could be exploited in complex attack scenarios or cause unexpected reverts.",
+      "severity": "low",
+      "original_id": "7954a1f9e7433b9e"
+    }
+  ],
+  "input_tokens": 6264,
+  "output_tokens": 1611,
+  "cached_tokens": 684
+}

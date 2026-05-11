@@ -1,0 +1,742 @@
+{
+  "project": "cantina_smart-contract-audit-of-tn-contracts_2025_08",
+  "agent": "agent794",
+  "status": "success",
+  "timestamp": "2026-04-09T12:59:35.060990",
+  "elapsed_seconds": 100.1,
+  "total_expected": 3,
+  "total_found": 100,
+  "true_positives": 2,
+  "false_negatives": 1,
+  "false_positives": 98,
+  "detection_rate": 0.6666666666666666,
+  "precision": 0.02,
+  "f1_score": 0.038834951456310676,
+  "matched_findings": [
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_expected_001",
+      "expected": "Missing validators in_getValidators()due to token ID gaps",
+      "matched": "Validator Status Equality Comparison Uses Raw Bits, Not Semantic State",
+      "confidence": 0.9,
+      "justification": "Finding 7 directly references the _getValidators function and describes an issue with incorrect filtering of validator statuses due to raw bit comparison. This aligns with the expected vulnerability's description of problems in the _getValidators function related to validator status handling, though the specific cause (token ID gaps) is not explicitly mentioned.",
+      "severity": "high",
+      "expected_description": "The_getValidators()function retrieves validator information based on their status. It loops through validator IDs from 1 tototalSupplyto find matching validators: The issue arises when a validator's ConsensusNFT is burned, which decreasestotalSupplybut doesn't affect the ID sequence. For example: This problem affects all functions that rely on_getValidators(), including critical functions that manage the validator lifecycle and committee selection.",
+      "found_description": "The _getValidators() function compares ValidatorStatus enum values directly using raw bit comparison. However, ValidatorStatus.Active includes validators in PendingActivation and PendingExit states for eligibility purposes, yet the underlying enum values are distinct. This causes incorrect filtering when status checks are performed externally or in other contexts, leading to inconsistent validator state representation.",
+      "found_id": "3bf94db207cc0e4f",
+      "tool_finding_index": 29
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_expected_002",
+      "expected": "Slashing penalties circumvented due to missing balance reset in_consensusBurn()",
+      "matched": "applySlashes Does Not Protect Against Underflow or Reentrancy",
+      "confidence": 0.9,
+      "justification": "Finding 2 describes the applySlashes function not protecting against underflow or reentrancy, which directly relates to the missing balance reset in _consensusBurn(). The issue in applySlashes is that it does not properly handle the balance reset, leading to potential security vulnerabilities when slashing validators. This aligns with the expected vulnerability's description of the balance not being set to zero before unstaking, causing inconsistencies in the slashing mechanism.",
+      "severity": "high",
+      "expected_description": "The_consensusBurn()function is called fromapplySlashes()when a validator's balance would be reduced to zero after slashing, and also from theburn()function when a validator is forcefully removed. The function is responsible for ejecting the validator from committees, exiting, retiring, and unstaking them. However, it does not set the validator's balance to zero before unstaking. The issue arises from the condition inapplySlashes()that calls_consensusBurn(): Since_consensusBurn()doesn't set the balance to zero, the unstaking process in_unstake()will use the pre-slash balance (bal) which is inconsistent with the intent of the slashing mechanism:",
+      "found_description": "The applySlashes function directly subtracts slash.amount from validator.balance without checking for underflow or using SafeMath. If a slash amount is greater than the validator's balance, it triggers _consensusBurn, which calls _unstake and emits RewardsClaimed. However, _unstake is nonReentrant, but _consensusBurn is not marked nonReentrant. An attacker can call applySlashes with a large slash amount, triggering _consensusBurn, which calls _unstake, which calls _getRecipient and then emits RewardsClaimed. If the RewardsClaimed event triggers a malicious contract that reenters applySlashes, the attacker can drain multiple validators' balances in a single transaction.",
+      "found_id": "26b6fb45861b6715",
+      "tool_finding_index": 16
+    }
+  ],
+  "missed_findings": [
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_expected_000",
+      "title": "Validator can bypass delegator for staking rewards",
+      "description": "TheConsensusRegistrycontract implements delegated staking to allow non-validators to stake on behalf of validators. However, the reward claiming and unstaking functions contain a logical flaw that allows validators to collect rewards and unstaked funds directly, bypassing the delegator who provided the stake. BothclaimStakeRewards()andunstake()functions follow this pattern: This logic sets therecipientto the validator address by default and only checks for delegation if the caller is not the validator. This means that even if a validator has a delegator who provided the stake, the validator can directly call these functions and receive the rewards or unstaked funds for themselves.",
+      "severity": "high",
+      "reason": "Not found"
+    }
+  ],
+  "undecided_findings": [],
+  "extra_findings": [
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_000",
+      "title": "Mint Function Allows Arbitrary Native Token Theft via TokenManager Privilege Escalation",
+      "description": "The `mint` function in InterchainTEL allows any caller who can impersonate the tokenManager to transfer arbitrary native ETH to any address without any balance check or accounting. Since the function only verifies msg.sender == tokenManager and performs a direct call to the recipient with msg.value == nativeAmount, an attacker who gains control of the tokenManager address can drain all ETH held by the contract to any arbitrary address. The contract holds ETH via WETH deposits from doubleWrap() and permitWrap(), and the burn() function withdraws ETH to maintain ledger integrity. However, mint() bypasses all accounting and directly transfers ETH from the contract's balance without deducting any TEL balance or validating the source. This creates a critical vulnerability where the tokenManager can steal any amount of ETH from the contract's balance without any economic cost or audit trail.",
+      "severity": "critical",
+      "original_id": "bb3fd89f512e5eed"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_001",
+      "title": "Burn Function Truncates Amounts Without Accounting for Loss, Leading to Permanent TEL Supply Inflation",
+      "description": "The burn() function truncates nativeAmount by removing the remainder when divided by DECIMALS_CONVERTER (1e16), but does not burn the truncated portion from the TEL ledger. The function burns nativeAmount from the user's TEL balance via _burn(from, nativeAmount), but only sends nativeAmount - remainder to Axelar, and sends the remainder to governanceAddress. However, the TEL balance is reduced by the full nativeAmount, while only nativeAmount - remainder is actually bridged. This creates a permanent inflation of the TEL supply: for every burn, remainder TEL is destroyed on-chain but never bridged, effectively creating free TEL out of thin air. For example, if a user burns 1.5e16 TEL (150 TEL), 0.5e16 (50 TEL) is truncated and sent to governance, but the full 1.5e16 is burned from the user's balance. The protocol loses 50 TEL from its accounting, but the user's balance is reduced by 150 TEL \u2014 meaning 50 TEL has been destroyed without any corresponding off-chain action, inflating the relative value of remaining TEL and enabling arbitrage or governance theft.",
+      "severity": "critical",
+      "original_id": "c7e78f0e75563541"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_002",
+      "title": "DoubleWrap and PermitWrap Use msg.value/amount for Minting Without Validating Against WETH Balance",
+      "description": "The doubleWrap() and permitWrap() functions mint TEL based on msg.value or transferred WETH amount, but do not validate that the WETH deposit or transfer actually succeeded before minting. In doubleWrap(), the contract calls wTEL.deposit{value: amount}(), then immediately calls _mint(caller, amount). However, deposit() does not return a success flag, and if the WETH contract reverts (e.g., due to insufficient allowance, paused contract, or reentrancy), the deposit fails but the mint still occurs. Similarly, permitWrap() calls wTEL.permit() and then wTEL.transferFrom(), but if transferFrom() fails, the function reverts \u2014 but if it succeeds, _mint() is called unconditionally. This creates a scenario where TEL can be minted without any underlying asset backing, violating the 1:1 peg. For example, if an attacker calls doubleWrap() with 1 ETH, but the WETH contract is malicious and accepts the deposit but does not credit the contract's balance, the attacker receives 1 ETH worth of TEL without any collateral. This breaks the fundamental economic invariant of the protocol.",
+      "severity": "high",
+      "original_id": "33c3c4070dfd80ce"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_003",
+      "title": "UnsettledRecords Iterator Skips Records Due to Incorrect Queue Traversal Logic",
+      "description": "The unsettledRecords() function iterates through _unsettledRecords[account].queue using a while loop that starts at rd.tail and follows prev pointers until currentIndex == 0. However, the queue is implemented as a deque where head and tail are indices, and prev points to the previous record's index. The loop condition 'while (currentIndex != 0)' is incorrect because the first record in the deque (at head) has prev = 0, but the loop stops before processing it. This causes the oldest unsettled record to be skipped if it is still unsettled. For example, if a user has two unsettled records: one at index 5 (prev=0) and one at index 10 (prev=5), the loop starts at 10, adds it, then goes to 5, and stops because 5's prev is 0 \u2014 never processing the record at index 5. This means users can withdraw funds from settled records while their older unsettled records remain unprocessed, allowing them to double-spend or bypass the recoverable window. This breaks the recoverable wrapper's core security model.",
+      "severity": "high",
+      "original_id": "3b66c805634d648e"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_004",
+      "title": "tokenManagerAddress() Calculation Is Vulnerable to Front-Running and Predictable Address Collision",
+      "description": "The tokenManagerAddress() function computes the address of the Axelar TokenManager using CREATE3 with a salt derived from interchainTokenId(). However, the salt is deterministic and publicly computable. An attacker can precompute the expected tokenManager address and deploy a malicious contract at that address before InterchainTEL is deployed. Since the protocol does not verify that the computed address is empty before assuming it is the legitimate TokenManager, the attacker can intercept all mint() and burn() calls. When the legitimate contract calls tokenManagerAddress(), it will return the attacker's address, and any subsequent mint() or burn() calls will be sent to the attacker's contract. The attacker can then drain all native ETH from burn() withdrawals and mint() transfers. For example, if the salt is keccak256(abi.encode(PREFIX_INTERCHAIN_TOKEN_ID, 0x0, ...)), an attacker can compute the address and deploy a contract that accepts ETH and reverts on mint() calls, causing the protocol to permanently lock all bridged assets.",
+      "severity": "high",
+      "original_id": "9b641ff0f970f53b"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_005",
+      "title": "Unrestricted _mint Allows Arbitrary Token Minting via doubleWrap and permitWrap",
+      "description": "The _mint function, which updates critical economic state variables (_totalSupply, _accountState[account].balance), is internally called by doubleWrap and permitWrap without any validation that the caller has deposited equivalent WETH. Although doubleWrap and permitWrap appear to deposit WETH, an attacker can call these functions with msg.value = 0 or zero ERC20 transfers, yet still trigger _mint to create new TEL tokens out of thin air. This bypasses the intended 1:1 backing of TEL by WETH, inflating supply and diluting all holders. The vulnerability exists because _mint is marked virtual and override, but lacks access control, and the WETH transfer logic in doubleWrap and permitWrap can be bypassed by calling them with zero value or invalid permits, yet _mint still executes.",
+      "severity": "critical",
+      "original_id": "4251edae1f8a9ec0"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_006",
+      "title": "Burn Amount Validation Uses Incorrect Unit Scaling (DECIMALS_CONVERTER = 1e16) vs TEL Decimals (1e18)",
+      "description": "The burn function enforces a minimum burn amount of DECIMALS_CONVERTER = 1e16, but TEL is an ERC20 token with 18 decimals. This means the minimum burn is set to 0.01 TEL (1e16 / 1e18), but the function burns nativeAmount in wei (i.e., raw units). Since nativeAmount is passed from Axelar ITS as raw units (1 TEL = 1e18 wei), the check nativeAmount < DECIMALS_CONVERTER (1e16) will reject any burn below 0.01 TEL \u2014 but this is backwards: 1e16 wei = 0.01 TEL, so the condition should be nativeAmount < 1e16 to prevent underflow, but it's incorrectly used to block valid burns. Worse, the burn function expects to burn nativeAmount in wei, but the check uses a 1e16 threshold, which is 100x smaller than the correct 1e18 scaling. This causes legitimate burns of 0.005 TEL (5e15 wei) to be rejected, while burns of 0.015 TEL (1.5e16 wei) are allowed \u2014 but the actual burn amount is not scaled, so the protocol incorrectly treats 1e16 wei as a minimum, when it should be 1e18 wei for 1 TEL. This breaks the 1:1 mapping between native TEL and iTEL, causing underflow in accounting and potential loss of user funds when small amounts are trapped.",
+      "severity": "high",
+      "original_id": "873cf3fcb48e936c"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_007",
+      "title": "unsettledRecords Iteration Skips Valid Records Due to Off-by-One and Non-Contiguous Indexing",
+      "description": "The unsettledRecords function iterates over _unsettledRecords[account] using a while loop that traverses the linked list via prev pointers, but it starts from rd.tail and stops when currentIndex == 0. However, RecordsDequeLib uses 1-based indexing (head and tail are 1-indexed, queue[0] is unused), and the loop condition 'while (currentIndex != 0)' will skip the first valid record if it's at index 1. Additionally, if records are dequeued (e.g., via _clean), the queue may have gaps, but the loop still traverses all non-zero indices, potentially including stale or invalid records. This causes the function to return fewer records than exist, or include invalid ones. For example, if a user has two unsettled records at indices 1 and 2, and tail=2, the loop starts at 2 (valid), then goes to prev=1 (valid), then prev=0 (stops). This seems correct \u2014 but if the first record (index 1) was dequeued and its prev pointer was overwritten, the loop may skip it. More critically, if the deque has been partially cleaned and head > 1, but tail remains high, the loop will traverse from tail down to 1, including records that were already settled and should be removed. This leads to incorrect accounting: users may be denied unwrapping because unsettledRecords reports fewer records than exist, or conversely, may be allowed to unwrap records that are already settled. This breaks the recoverable window mechanism and enables double-spending or denial of service.",
+      "severity": "high",
+      "original_id": "ecbd8daddccd8b60"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_008",
+      "title": "burn Function Does Not Validate That Burned Amount Matches Settled Balance",
+      "description": "The burn function calls _burn(from, nativeAmount), which subtracts from _accountState[account].balance, but does not verify that nativeAmount <= _accountState[from].balance. This allows an attacker to burn more than their settled balance by calling burn with a large nativeAmount. Since _burn is inherited from RecoverableWrapper and only checks for sufficient balance in its internal logic (which may be overridden), and since _unsettledRecords are not considered in burn validation, an attacker can burn 1000 TEL even if they only have 10 TEL settled. This leads to negative balances and protocol insolvency. The burn function assumes that _burn will revert on insufficient balance, but RecoverableWrapper._burn only checks against _accountState[account].balance, which is updated by _mint and not synchronized with unsettled records. Since _mint adds to balance immediately, and _burn subtracts from it without checking against the actual settled amount (i.e., balance minus unsettled), an attacker can mint 10 TEL, then burn 1000 TEL, causing _accountState[from].balance to underflow (if unchecked) or become negative. This is a critical accounting flaw that allows theft of protocol reserves.",
+      "severity": "critical",
+      "original_id": "e49ac2209c830b0c"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_009",
+      "title": "tokenManagerAddress() Calculation Uses Insecure and Non-Standard Create3 Derivation",
+      "description": "The tokenManagerAddress() function derives the TokenManager address using a non-standard two-step keccak256 hash with hex prefixes (0xff and 0xd694), which is not compatible with Axelar's official ITS TokenManager deployment logic. Axelar's ITS uses a single CREATE3 deployment with salt = interchainTokenId() and deployer = TOKEN_FACTORY_DEPLOYER. The current code computes: createDeploy = CREATE3(salt, bytecode_hash) then tokenManager = keccak256(0xd694 + createDeploy + 0x01). This is not how Axelar's system works \u2014 their TokenManager is deployed directly via CREATE3 using the interchainTokenId as salt. This means tokenManagerAddress() returns an incorrect address, causing onlyTokenManager() modifier to always fail. As a result, mint and burn functions can never be called by the real Axelar ITS, breaking the entire interchain token bridge. No external party can mint or burn TEL, rendering the protocol non-functional. This is a complete protocol failure due to incorrect interface compatibility.",
+      "severity": "critical",
+      "original_id": "e021f752ad7bf47c"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_010",
+      "title": "Automatic Processing of Withdrawal Funds via Receive Function Triggers Double Spending",
+      "description": "The contract's receive() function allows only the WETH contract to send native ETH, but during outbound bridging, the burn() function withdraws native ETH from WETH and sends it to the governance address. If an attacker sends ETH directly to the contract (bypassing WETH), the receive() function reverts, preventing unintended processing. However, the burn() function's remainder transfer to governanceAddress can be exploited if governanceAddress is controlled by an attacker, because the remainder is sent as native ETH without verification that it originated from a legitimate burn. This creates a scenario where the attacker can trigger a burn with a small remainder, receive the remainder as native ETH, and then re-deposit it via doubleWrap() to mint new TEL, effectively creating new tokens out of thin air.",
+      "severity": "critical",
+      "original_id": "c971387e3975d10a"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_011",
+      "title": "Precision Factor Division Rounds to Zero in Incentive Distribution",
+      "description": "The applyIncentives function calculates validator rewards using a precision factor of 1e32, but performs division as (PRECISION_FACTOR * weight) / totalWeight. When totalWeight is large relative to weight, this division can round down to zero due to integer truncation, causing validators to receive zero rewards even when they contributed consensus headers. This is a critical accounting bug that systematically underpays validators, leading to permanent loss of issuance funds that are never distributed.",
+      "severity": "critical",
+      "original_id": "de3f40c7c304be82"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_012",
+      "title": "Inconsistent Reward Calculation Uses Stale Stake Amounts After Version Upgrade",
+      "description": "The applyIncentives function calculates validator rewards using the stakeAmount from the validator's stakeVersion at the time of staking, but does not account for stake upgrades. If a validator upgrades their stake version via upgradeStakeVersion(), their new stake amount is not reflected in reward calculations. This creates a financial incentive for validators to upgrade their stake version without increasing their stake, effectively receiving the same rewards as before while freeing up capital. The protocol loses funds because rewards are calculated based on outdated stake values, while the validator's actual economic commitment has changed.",
+      "severity": "critical",
+      "original_id": "b3db19ab29374603"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_013",
+      "title": "Validator Exit Queue Bypass Allows Unrestricted Ejection and Fund Theft",
+      "description": "The _ejectFromCommittees function allows the owner to forcibly eject a validator from all three future committees and immediately burn their stake. However, _ejectFromCommittees is called by _consensusBurn, which is triggered by the owner via burn(). The burn() function does not verify that the validator is active or that ejecting them would leave the network with a viable committee. An attacker who gains owner access can burn any validator (even inactive ones) and trigger _ejectFromCommittees, which reduces the committee size without checking if the resulting committee size is below the minimum required for consensus. This can lead to protocol insolvency by reducing the committee to zero validators, halting the network permanently.",
+      "severity": "critical",
+      "original_id": "bc8ffdfb575b3164"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_014",
+      "title": "Reward Distribution Rounds Down to Zero, Leading to Permanent Reward Loss",
+      "description": "In applyIncentives, the reward amount is calculated as (epochIssuance * weight) / PRECISION_FACTOR, where weight = PRECISION_FACTOR * weights[i] / totalWeight. This double division can cause the weight to round down to zero due to integer truncation. For example, if totalWeight = 1000 and weights[i] = 1, then weight = (1e32 * 1) / 1000 = 1e29, and rewardAmount = (epochIssuance * 1e29) / 1e32 = epochIssuance / 1000. If epochIssuance = 1000, then rewardAmount = 1. But if epochIssuance = 999, then rewardAmount = 0. Since the division is integer-based, any reward less than 1 unit is lost permanently. With thousands of validators, this leads to systematic, irreversible loss of issuance to validators with small weights.",
+      "severity": "high",
+      "original_id": "ec8bab65c290a5b2"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_015",
+      "title": "DelegateStake Signature Verification Does Not Bind to Epoch or Validator Status",
+      "description": "The delegateStake function uses a signature to authorize delegation, but the signed digest only includes the BLS pubkey hash, caller address, tokenId, stakeVersion, and nonce. It does not include the current epoch, validator status, or any context that prevents replay or misuse. An attacker who obtains a valid signature from a validator can replay it in a future epoch to delegate stake even if the validator has since exited or upgraded their stake version. This allows unauthorized delegation and potential theft of staked funds if the validator is later ejected or upgraded.",
+      "severity": "high",
+      "original_id": "6e281460f3ba9069"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_017",
+      "title": "getRewards Returns Rewards Based on Initial Stake, Not Current Stake",
+      "description": "The getRewards function returns rewards based on the initial stake amount from the validator's stakeVersion, not the current balance. This creates a discrepancy between what users see as their 'rewards available' and what they can actually claim. If a validator upgrades their stake version with a higher stake amount, getRewards still returns the old value, misleading users into thinking they have less reward than they actually do. This does not directly cause fund loss, but it breaks economic transparency and could lead to user confusion or incorrect delegation decisions.",
+      "severity": "medium",
+      "original_id": "62f3cd6d6d4f2651"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_018",
+      "title": "Epoch Info Ring Buffer Can Be Corrupted by Invalid Epoch Queries",
+      "description": "The getEpochInfo function allows querying any epoch, but the _getRecentEpochInfo and _getFutureEpochInfo functions use modulo arithmetic on epochPointer without validating that the requested epoch is within the allowed range. Although there is a revert for epochs outside [current-3, current+2], the internal pointer arithmetic can be manipulated if currentEpoch is corrupted. If an attacker can somehow manipulate currentEpoch (e.g., via a future bug in concludeEpoch), the pointer arithmetic could wrap incorrectly, causing epochInfo or futureEpochInfo to be read from invalid indices, potentially exposing uninitialized or corrupted data.",
+      "severity": "medium",
+      "original_id": "51cf23c29a920afc"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_019",
+      "title": "Automatic Processing of Withdrawal Funds Triggers Unintended Stake Redistribution",
+      "description": "The ConsensusRegistry contract has no explicit receive or fallback function, but its stake management logic allows any ETH sent to the contract to be incorrectly interpreted as a new stake deposit. This occurs because the _recordStaked function is called during stake() and delegateStake() with no validation that the ETH transfer originated from a user-initiated transaction. System-generated ETH returns (e.g., from reward redistribution or slash refunds) can be misinterpreted as new stakes, leading to double-counting of stake and inflation of validator balances.",
+      "severity": "critical",
+      "original_id": "1767183e631cb2f0"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_020",
+      "title": "Missing User Protection in doubleWrap and permitWrap: Users Can Be Forced to Pay for Failed Wraps",
+      "description": "The doubleWrap and permitWrap functions allow users to initiate wrapping of TEL tokens, but they do not provide any mechanism for users to specify a minimum acceptable output or to protect against partial execution. If the _mint function reverts due to internal logic (e.g., if the account is blacklisted or the recoverable window is misconfigured), the user still loses the ETH paid as msg.value in doubleWrap or the TEL tokens transferred in permitWrap, with no recourse. This violates Pattern 1: User Control Over Execution Outcomes. Users have no way to enforce that the entire operation (ETH transfer + mint) succeeds atomically, and the contract does not revert on mint failure, leading to fund loss.",
+      "severity": "high",
+      "original_id": "ab84c2ff113c0010"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_021",
+      "title": "Validation After State Change in doubleWrap: ETH is Transferred Before Mint Success is Verified",
+      "description": "In doubleWrap(), the contract first deposits ETH into WETH (state change: WETH balance increases) and then calls _mint(). If _mint() reverts (e.g., due to account being zero address or internal logic failure), the ETH deposit has already occurred and cannot be undone. This violates Pattern 2: Validation Timing. The validation of whether the mint should proceed (e.g., account validity, non-zero amount) occurs before the deposit, but the actual state change (ETH -> WETH) happens before the critical state update (_mint) that should be the atomic unit. The user pays ETH and receives no TEL, and the ETH is permanently locked in WETH without corresponding TEL minted.",
+      "severity": "high",
+      "original_id": "8edce92e7dda57b0"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_022",
+      "title": "Validation After State Change in permitWrap: TEL is Transferred Before Mint Success is Verified",
+      "description": "In permitWrap(), the contract first calls wTEL.permit() and then wTEL.transferFrom() (state change: TEL balance moves from user to contract). Only after this transfer does it call _mint(). If _mint() reverts, the TEL tokens have already been transferred out of the user's wallet and are permanently lost, with no corresponding TEL minted on-chain. This violates Pattern 2: Validation Timing. The user's TEL is consumed before the mint operation is validated to succeed. The user has no way to recover their TEL if the mint fails, even though the contract logic is designed to be atomic.",
+      "severity": "high",
+      "original_id": "28857e3b70ac18bb"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_023",
+      "title": "Inconsistent Accounting in burn(): NativeAmount is Burned but Remainder is Sent to Governance Without Accounting for Truncation",
+      "description": "In burn(), the function burns nativeAmount from the user's balance. Then, it calculates remainder = nativeAmount % DECIMALS_CONVERTER and attempts to send it to governance. However, the burn() operation reduces the user's balance by the full nativeAmount, even though only (nativeAmount - remainder) is actually bridged to the remote chain. The remainder is not accounted for in the remote chain's balance \u2014 it is simply sent to governance as a refund. This creates an accounting inconsistency: the user's balance is reduced by nativeAmount, but the remote chain only receives (nativeAmount - remainder). The remainder is not a refund to the user \u2014 it is a donation to governance. This violates Pattern 3: Execution Boundaries and Validation Consistency. The accounting (burn) references the requested amount (nativeAmount), but the actual execution (bridging) uses a truncated amount, and the leftover is misallocated. This is a financial loss to the user: if nativeAmount = 100000000000000000000 (100 TEL), and DECIMALS_CONVERTER = 1e16, then remainder = 0. But if nativeAmount = 100000000000000000001, remainder = 1, and the user loses 1 TEL permanently to governance without consent.",
+      "severity": "high",
+      "original_id": "dea1ecafa988c9de"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_024",
+      "title": "Unit Mismatch in burn(): nativeAmount is Treated as TEL but Must Be in 1e16 Scale, Leading to Incorrect Burn Amounts",
+      "description": "The burn() function takes nativeAmount as a uint256 and burns it directly from the user's balance. However, the constant DECIMALS_CONVERTER = 1e16 is used to truncate amounts for bridging, implying that the nativeAmount is expected to be in a 1e16 scale (i.e., 1 TEL = 1e16 units). But the contract's underlying ERC20 (baseERC20) is TEL with 18 decimals. The _mint and _burn functions operate on the 18-decimal scale. When burn() is called with nativeAmount = 1e18 (1 TEL), it burns 1e18 units from the user's balance, but then calculates remainder = 1e18 % 1e16 = 0, and sends 0 to governance. However, the Axelar ITS expects the amount to be in 1e16 scale. So if the user wants to bridge 1 TEL (1e18 wei), the correct amount to send to ITS is 1e18 / 1e16 = 100 units. But the contract burns 1e18 units (1 TEL) and sends 100 units to ITS \u2014 this is a 100x over-burn. The user loses 1 TEL, but only 0.01 TEL is bridged. This violates Pattern 9: Return Value Unit Consistency. The function expects nativeAmount to be in 1e16 scale (as implied by DECIMALS_CONVERTER), but the actual balance is in 1e18 scale. This unit mismatch causes massive accounting errors: every burn() over-burns by a factor of 100. For example: user calls burn(1e16, 1e16) \u2014 expects to bridge 0.01 TEL, but burns 1 TEL. User loses 99 TEL. This is a critical financial loss.",
+      "severity": "critical",
+      "original_id": "67430ad4f0607754"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_025",
+      "title": "State Synchronization Failure in _mint(): _accountState.balance Updated Before _unsettledRecords Enqueued, Enabling Race Conditions",
+      "description": "In _mint(), the function first enqueues the amount into _unsettledRecords, then updates _totalSupply, then updates _accountState.nonce and _accountState.balance. However, the _accountState.balance is updated before the unsettled record is fully committed in the deque. If an external call (e.g., from a malicious contract) occurs during _mint() and calls unsettledRecords(), it may see a balance that includes the new amount but no unsettled record for it \u2014 or vice versa. This violates Pattern 6: State Synchronization in Function Chains. The state variables _accountState.balance and _unsettledRecords are logically linked: the balance should reflect settled + unsettled, but here the settled portion is not tracked separately. The _unsettledRecords is meant to track pending withdrawals, but the balance includes unsettled amounts. This creates a logical inconsistency: the balance is increased before the unsettled record is fully written, and if the transaction reverts after balance update but before record enqueue, the balance is permanently inflated. This could be exploited by a reentrancy attack to double-spend or inflate balances.",
+      "severity": "high",
+      "original_id": "26aa4ac30fd07f30"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_026",
+      "title": "Replay Protection Bypass in mint(): State Commitment Before External Call Allows Repeated Minting",
+      "description": "The mint() function is called by the Axelar TokenManager and executes an external call { value: nativeAmount } to 'to'. If this external call fails (e.g., due to insufficient gas or a revert in the recipient contract), the function does not revert \u2014 it simply emits MintFailed and continues. However, the mint() function is only callable by tokenManager, and the state is not rolled back. The user's balance is not changed (since mint() is an inbound bridge), but the ETH sent by Axelar is lost. More critically, if the external call fails, the tokenManager can retry the same mint() call with the same nativeAmount and same 'to' address, and it will succeed again \u2014 because there is no nonce, signature, or state flag to prevent replay. This violates Pattern 7: State Commitment Timing. The state (i.e., the fact that a mint was attempted) is not committed before the external call. An attacker can cause the external call to fail (e.g., by deploying a contract that reverts on receive), then force the tokenManager to retry, effectively draining ETH from the Axelar bridge without any TEL being minted on the remote chain. This is a protocol insolvency risk: Axelar sends ETH to this contract, and if the recipient fails, the ETH is lost, but the bridge may retry indefinitely, draining Axelar's funds.",
+      "severity": "critical",
+      "original_id": "a824592ae6bb1b8f"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_027",
+      "title": "Interface Access Control Violation: IInterchainTEL Declares Critical Functions Without Access Control",
+      "description": "The interface IInterchainTEL declares functions mint(), burn(), isMinter(), tokenManagerCreate3Salt(), linkedTokenDeploySalt(), and tokenManagerAddress() as public view or external functions, but does not indicate any access control restrictions. However, mint() and burn() are critical functions that can only be called by tokenManager (enforced by the modifier onlyTokenManager in the implementation). The interface does not reflect this restriction, misleading developers and auditors into thinking these functions are publicly callable. This violates Pattern 4: Access Control in Interfaces. The interface design fails to communicate security expectations, leading to potential misuse. For example, a frontend or external contract might assume mint() is safe to call directly, leading to a reentrancy or DoS attack if the interface is misused. This is a design-level vulnerability that undermines the entire access control model.",
+      "severity": "high",
+      "original_id": "91fd4bf5f57ab83b"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_028",
+      "title": "Precision Loss in Reward Calculation Due to Integer Division Truncation",
+      "description": "The reward calculation in applyIncentives() uses uint232 arithmetic with a fixed PRECISION_FACTOR of 1e32, but performs division before multiplication, causing irreversible truncation of fractional reward amounts. This results in systematic underpayment of validators over time, with funds permanently lost to the protocol treasury.",
+      "severity": "critical",
+      "original_id": "2920359956601d72"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_030",
+      "title": "State Commitment Before External Call in _consensusBurn()",
+      "description": "_consensusBurn() commits state changes (token ID set to UNSTAKED, committee ejection, validator exit/retire) before calling _unstake(), which may revert due to insufficient balance or other conditions. If _unstake() reverts, the validator is permanently burned with no way to reclaim stake or restore status, locking funds and breaking protocol invariants.",
+      "severity": "critical",
+      "original_id": "67f303064ac7adf0"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_031",
+      "title": "Authorization Signature Does Not Bind Execution Context in delegateStake()",
+      "description": "The delegation signature in delegateStake() signs only the validator address, nonce, and pubkey hash, but does not bind the stake amount or msg.sender (delegator). An attacker can front-run a legitimate delegation by submitting the same signature with a higher stake amount, consuming the nonce and stealing the delegated stake.",
+      "severity": "high",
+      "original_id": "36b99e95c0557112"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_032",
+      "title": "Epoch Info Access Uses Incorrect Future Epoch Pointer in _getFutureEpochInfo()",
+      "description": "_getFutureEpochInfo() calculates futurePointer as (future - current + currentPointer) % 4, but futureEpochInfo is stored with a 2-epoch lookahead. When querying epoch current+2, it returns futureEpochInfo[2], but when querying epoch current+1, it returns futureEpochInfo[1]. However, _updateEpochInfo() writes newCommittee to futureEpochInfo[(currentPointer + 2) % 4], meaning futureEpochInfo[1] is never populated correctly. This causes incorrect committee data to be returned for next epoch.",
+      "severity": "high",
+      "original_id": "4fd3ccf2af72df21"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_033",
+      "title": "Native Token Drip Amount Can Be Set to Zero via Internal Call Bypassing Validation",
+      "description": "The function _setNativeDripAmount is called internally by __Faucet_init during initialization and by setNativeDripAmount externally. However, setNativeDripAmount enforces a non-zero constraint (reverts if newNativeDripAmount == 0), but _setNativeDripAmount has no such validation. Since __Faucet_init is called during initialization and can be invoked by a malicious upgrade or proxy deployment, an attacker can deploy a malicious upgrade that calls _setNativeDripAmount(0) directly, bypassing the external validation. This allows the native drip amount to be set to zero, effectively disabling the native token faucet without triggering any error or audit trail. This breaks the protocol's intended behavior where native token drips are enabled by default and can only be disabled by removing the token via UpdateXYZ, not by setting the drip amount to zero. The financial impact is that users can no longer receive native token drips, and maintainers cannot restore it without redeploying the contract, leading to permanent loss of faucet functionality for native tokens.",
+      "severity": "high",
+      "original_id": "cf100b1737935141"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_034",
+      "title": "State Commitment Before External Call in _drip Allows Reentrancy and Fund Loss",
+      "description": "The _drip function commits state changes (emits event) before verifying the success of the external native token transfer. This creates a reentrancy vulnerability where an attacker can recursively call drip() before the transfer completes, draining the contract's native token balance. The function emits the Drip event before checking the return value of the low-level call, meaning the state change (event emission) is committed even if the transfer fails or is reentered.",
+      "severity": "critical",
+      "original_id": "2680688e9abddc79"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_035",
+      "title": "Missing User Protection in drip() Allows Unlimited Drainage of Native Token",
+      "description": "The drip() function allows any address with FAUCET_ROLE to mint unlimited amounts of native token (ETH) to any recipient without any user-controlled bounds or rate-limiting beyond the 1-day cooldown. There is no mechanism for users to specify minimum acceptable outputs or to protect against adversarial manipulation of the drip amount. An attacker with FAUCET_ROLE can repeatedly call drip() to drain the contract's entire native token balance, as the contract has no cap on total drips or per-user cumulative limits beyond the timestamp check.",
+      "severity": "high",
+      "original_id": "2d206f9584c4bcb9"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_036",
+      "title": "Validation Timing Violation in _drip: Event Emission Before Transfer Success",
+      "description": "In _drip(), the Drip event is emitted before the low-level call to recipient.call{value: amount}() is verified. This violates the principle that validation and state commitment must occur after successful execution. If the external call fails (e.g., due to recipient revert or insufficient gas), the event is still emitted, creating a false accounting record that a drip occurred when no funds were transferred. This breaks auditability and allows attackers to trigger false events without transferring value.",
+      "severity": "high",
+      "original_id": "ef4a14e2bc95cd1a"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_037",
+      "title": "Inconsistent State Update in _removeEnabledXYZ Allows Double-Spend of Disabled Token",
+      "description": "The _removeEnabledXYZ function removes a token from _enabledXYZs by swapping the last element into the removed index and popping. However, if the token being removed is the last element, the function still performs the pop() but does not check if the token was actually present before attempting removal. This creates a scenario where an attacker can call UpdateXYZ(token, false, ...) on a token that was never enabled, causing a revert due to InvalidOrDisabled. But if the token was enabled and removed, and then re-enabled, the array may be corrupted due to the swap-and-pop logic if the array is modified concurrently or during initialization. This can lead to inconsistent state where a disabled token is still considered enabled in some contexts.",
+      "severity": "medium",
+      "original_id": "25d202255c9d55d1"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_038",
+      "title": "Missing Input Validation in setDripAmount and setNativeDripAmount Allows DoS via Zero Value Revert",
+      "description": "The setDripAmount and setNativeDripAmount functions explicitly revert if newDripAmount == 0, but they do not validate against maximum possible values or gas limits. An attacker could call these functions with a value close to type(uint256).max, causing subsequent minting operations to overflow or consume excessive gas. While not directly causing fund loss, this enables a denial-of-service attack by making the drip function unusable due to gas exhaustion or arithmetic overflow in downstream calculations.",
+      "severity": "medium",
+      "original_id": "0a61c4b5ef367774"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_039",
+      "title": "External Interface Assumption in getEnabledXYZsWithMetadata Risks Revert on Non-Compliant Tokens",
+      "description": "The getEnabledXYZsWithMetadata function assumes every address in getEnabledXYZs() implements IStablecoin with name(), symbol(), and decimals() functions. However, if a malicious or non-compliant token is added to _enabledXYZs (e.g., a token that reverts on these calls), the entire function reverts, breaking frontend rendering. This is a high-severity DoS vector because the frontend cannot display any tokens if one is malformed. The contract makes a fixed assumption about external contract behavior without validation, violating Pattern 8.",
+      "severity": "high",
+      "original_id": "4e30fd5ebf352057"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_040",
+      "title": "RescueCrypto Allows MAINTAINER to Steal Native Token via Malicious Recipient",
+      "description": "The rescueCrypto function allows the MAINTAINER to transfer any amount of native token to _msgSender(). However, if _msgSender() is a malicious contract that reverts on receive(), the call will fail and revert the entire transaction. But if the MAINTAINER calls rescueCrypto with a malicious recipient address (e.g., a contract that reverts on ETH receipt), the function reverts and the native token remains locked in the contract. Worse, if the MAINTAINER calls rescueCrypto with a non-zero amount and a malicious recipient, they can effectively lock funds in the contract permanently, as there is no way to recover them without a new deployment.",
+      "severity": "high",
+      "original_id": "051f666bda358450"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_041",
+      "title": "Desynchronized Iteration in getEnabledXYZs() Causes Token Metadata Omission",
+      "description": "The getEnabledXYZs() function filters out NATIVE_TOKEN_POINTER by iterating over the full _enabledXYZs array and skipping the native token index. However, _removeEnabledXYZ() removes elements by swapping with the last element and popping, which can cause the native token to be moved to a different index or removed entirely. If the native token is removed and then re-added, or if other tokens are removed after it, the index cached in getEnabledXYZs() becomes stale. This causes the function to skip the wrong element or skip an element that is not the native token, leading to either the native token being incorrectly included or a valid stablecoin being excluded from metadata. Frontend clients relying on getEnabledXYZsWithMetadata() will display incorrect or incomplete token lists, breaking user experience and potentially causing users to miss eligible tokens for dripping. This is a data integrity boundary violation where iteration bounds are not synchronized with the actual data structure after mutations.",
+      "severity": "high",
+      "original_id": "e5a28fa193dad104"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_042",
+      "title": "Missing Access Control on _setDripAmount and _setNativeDripAmount Allows Economic Manipulation",
+      "description": "The functions _setDripAmount() and _setNativeDripAmount() are internal functions that update the state variables _dripAmount and _nativeDripAmount, which are directly used in the _drip() function to determine the amount minted per drip. Although the public setters setDripAmount() and setNativeDripAmount() are properly restricted to MAINTAINER_ROLE, the internal setters are not protected by access control. An attacker with access to a privileged internal context (e.g., via a malicious upgrade or delegatecall) could call _setDripAmount(0) or _setNativeDripAmount(0) to disable drips without triggering the revert that checks for zero values in the public setters. This allows an attacker to effectively disable the faucet without leaving a trace in the public interface. Since drip amounts are used in economic calculations (user rewards), this manipulation constitutes an access control boundary violation that enables denial-of-service and economic disruption.",
+      "severity": "high",
+      "original_id": "8fcda71907743005"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_043",
+      "title": "Unit Mismatch in getEnabledXYZsWithMetadata() Causes Frontend Representation Failure",
+      "description": "The function getEnabledXYZsWithMetadata() calls IStablecoin(token).name(), .symbol(), and .decimals() to retrieve metadata. However, IStablecoin is an external interface that may not be compatible with the actual underlying token contracts. The contract assumes that all tokens in _enabledXYZs implement IStablecoin with the exact function signatures and return types expected by the frontend. If a token is a forked or modified stablecoin (e.g., a custom ERC20 with different return types or missing functions), the static call will revert, causing the entire getEnabledXYZsWithMetadata() call to fail. This breaks the frontend\u2019s ability to render any tokens, even valid ones. The representation boundary is violated because the function returns a struct (XYZMetadata) expecting string and uint256 values, but the external contracts may return different types (e.g., bytes32 for name, or non-standard decimals). No conversion or fallback is implemented. This is a representation boundary failure with cascading impact: one incompatible token breaks the entire metadata list.",
+      "severity": "high",
+      "original_id": "db0df6651c136e3f"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_044",
+      "title": "Race Condition in _removeEnabledXYZ() Allows Token Re-Enabling Exploit",
+      "description": "The _removeEnabledXYZ() function removes a token by finding its index and swapping it with the last element. However, if two transactions attempt to remove different tokens simultaneously, and one of them removes the last element in the array, the swap operation can overwrite a token that the other transaction is still trying to remove. For example: if token A is at index 0 and token B is at index 1 (last), and two calls to _removeEnabledXYZ() occur in the same block \u2014 one for A and one for B \u2014 the first call swaps A with B (now A is at index 1, B at index 0), then pops. The second call, using stale array length, tries to remove B at index 1, but index 1 now contains A. This results in A being removed twice (but only one pop occurs) and B being left in the array. This desynchronization causes tokens to be incorrectly marked as enabled or disabled. An attacker can exploit this by triggering concurrent removals to leave a malicious token enabled or to disable a legitimate one, bypassing access controls and manipulating drip eligibility. This is a data structure boundary violation with potential for fund misallocation.",
+      "severity": "high",
+      "original_id": "6b2701b7ea429d81"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_045",
+      "title": "Native Token Withdrawal Funds Can Be Automatically Consumed by Faucet Due to Receive Handler",
+      "description": "The StablecoinManager contract has a receive() function that accepts native tokens but does not distinguish between user deposits and withdrawal returns. When users request a native token withdrawal (via external systems), the returned funds are sent back to the contract's address. The receive() handler automatically accepts these funds and does not track their origin. This causes withdrawal funds to be mixed with legitimate deposits, enabling attackers to drain the contract's native token balance by triggering withdrawals and then calling drip() to claim those same funds as if they were new deposits.",
+      "severity": "critical",
+      "original_id": "823f0b8ba517b389"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_046",
+      "title": "No Withdrawal or Deposit Protection: Users Exposed to MEV and Slippage",
+      "description": "The WTEL contract inherits from WETH but does not override or enhance its deposit/withdrawal functions to include slippage protection or minimum output parameters. Users can deposit ETH to receive wTEL or withdraw wTEL to receive ETH without any mechanism to specify acceptable exchange rates. This exposes users to front-running, MEV attacks, and unfavorable execution due to volatile market conditions, with no recourse to reject partial or unfavorable outcomes.",
+      "severity": "high",
+      "original_id": "e84edba20a02882a"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_047",
+      "title": "No Access Control on WETH Deposit/Withdraw Functions Enables Fee Evasion and Balance Manipulation",
+      "description": "The WTEL contract inherits from WETH, which exposes public deposit and withdraw functions that directly modify user balances without any access control. These functions update state variables (balances) that are critical to economic calculations in any protocol that uses wTEL for staking, liquidity provision, or fee distribution. An attacker can manipulate the timing of deposits/withdrawals to avoid fees or skew accounting snapshots. For example, if a protocol takes a balance snapshot before charging a fee, an attacker can withdraw just before the snapshot and deposit immediately after, effectively bypassing the fee while retaining the same economic position. This violates boundary consistency in access control, as state variables used in economic logic are publicly mutable without restriction.",
+      "severity": "high",
+      "original_id": "7d79fb454d0f756c"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_048",
+      "title": "Representation Boundary Violation: WETH Functions Return Raw Ether Amounts, But Caller Expectations Are Unclear in Context",
+      "description": "The inherited WETH contract's deposit() and withdraw() functions operate in raw wei units (1e18 scale), which is standard for ETH. However, WTEL is intended as a wrapped token for use in DeFi protocols (e.g., staking, lending, or yield aggregators). These protocols often expect token amounts to be consistent with ERC20 semantics and may perform internal share calculations based on totalSupply and balanceOf. While WETH's interface is technically correct for ETH wrapping, the absence of any additional accounting (e.g., fee pooling, reward distribution, or snapshotting) means that any protocol integrating wTEL as a base asset will assume its balanceOf() returns a stable, fee-inclusive representation. Since WTEL inherits WETH without modifying behavior, it fails to enforce representation consistency: balanceOf() returns raw token amounts, but if the protocol expects these to reflect net positions after fees or rewards, the mismatch causes incorrect share distribution. For example, if a protocol calculates user rewards as (userBalance / totalSupply) * poolRewards, and an attacker withdraws 1 wTEL just before the reward snapshot (reducing totalSupply) then deposits it back, their share calculation becomes inflated \u2014 even though their net position is unchanged. This is a representation boundary violation because the function returns raw units, but the ecosystem expects them to be economically consistent.",
+      "severity": "high",
+      "original_id": "668958500be2a4de"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_049",
+      "title": "Data Access Integrity Issue: balanceOf and totalSupply Are Directly Modifiable, Enabling Snapshot Manipulation and Reward Theft",
+      "description": "The inherited WETH contract uses a simple mapping for balances and a single uint256 for totalSupply. These are directly modifiable via deposit() and withdraw(), which are public and unguarded. In any protocol that relies on balance snapshots (e.g., for reward distribution, fee calculation, or governance voting), an attacker can manipulate the timing of deposits and withdrawals to distort the snapshot. For example: Suppose a reward pool of 10,000 wTEL is distributed proportionally to users at block N. An attacker holds 100 wTEL (1% of totalSupply = 10,000). They withdraw 100 wTEL just before the snapshot (totalSupply drops to 9,900), then deposit 100 wTEL immediately after (totalSupply returns to 10,000). The snapshot captures their balance as 0, so they receive 0 reward. But they still hold 100 wTEL post-snapshot. Meanwhile, other users' shares are inflated because totalSupply was temporarily lower. The attacker effectively steals 1% of the reward (100 wTEL) by manipulating the snapshot timing. Mathematical proof: Before: attacker balance = 100, totalSupply = 10,000 \u2192 expected reward = 100/10000 * 10000 = 100. After manipulation: snapshot sees attacker balance = 0 \u2192 reward = 0. Post-snapshot, attacker holds 100 wTEL. Net gain: 100 wTEL stolen from other users. This is a data access integrity failure because the iteration over user balances (implicit in proportional distribution) is desynchronized with the actual economic position due to uncontrolled state mutation.",
+      "severity": "high",
+      "original_id": "518c3cc6390e79f7"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_050",
+      "title": "WTEL Inherits WETH Without Restricting Deposit/Withdrawal Logic - Funds Can Be Accidentally Locked or Misdirected",
+      "description": "WTEL inherits from WETH, which implements default receive/fallback handlers that automatically wrap/unwrap ETH. However, WTEL does not override or restrict these handlers, meaning any ETH sent to the contract (including funds intended for withdrawals, refunds, or system returns) will be automatically wrapped into wTEL tokens. This creates a critical flaw: users cannot safely receive ETH back from external systems (e.g., bridges, validators, or withdrawal processors) because those ETH will be instantly converted into wTEL, potentially locking funds or corrupting accounting. There is no distinction between user-initiated deposits and system-generated returns, leading to mixed fund sources and irreversible state corruption.",
+      "severity": "critical",
+      "original_id": "5ffc024617985a24"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_051",
+      "title": "Misuse of msg.value in distributeStakeReward Allows Unauthorized Fund Theft",
+      "description": "The distributeStakeReward function incorrectly adds msg.value to the rewardAmount and forwards the total to the recipient. However, msg.value is controlled by the caller, and while the function is restricted to the stakeManager via the onlyStakeManager modifier, the stakeManager itself can call this function with arbitrary msg.value. This allows the stakeManager to effectively transfer any TEL balance held by the Issuance contract to any arbitrary address, even if that TEL was not intended as a reward. Since the contract receives TEL only via the receive() function (which is also restricted to stakeManager), the stakeManager can deposit TEL into the contract and then immediately withdraw it via distributeStakeReward with msg.value equal to the deposited amount \u2014 effectively bypassing any intended issuance logic. This is not a bug in the reward calculation, but a fundamental flaw in fund destination logic: the function allows the caller to dictate arbitrary fund transfers under the guise of 'reward distribution', violating the protocol's economic invariant that TEL can only be re-minted as staking rewards, not freely transferred.",
+      "severity": "critical",
+      "original_id": "9093b8742ba1974a"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_052",
+      "title": "Native Token Enablement Check Bypass in getEnabledXYZs()",
+      "description": "The getEnabledXYZs() function filters out NATIVE_TOKEN_POINTER (address(0x0)) from the returned list, but does not verify whether the native token is actually enabled in the underlying storage. The function assumes that if NATIVE_TOKEN_POINTER exists in the array, it should be filtered. However, the _recordXYZ() function allows any address to be added to _enabledXYZs without validating that the token is actually enabled via the StablecoinHandler's state. This creates a discrepancy: the frontend may receive a filtered list excluding address(0x0), but the drip() function still allows minting native tokens if address(0x0) was added via a direct storage manipulation or initialization flaw. This leads to inconsistent state representation and potential denial-of-service or misrepresentation for frontends.",
+      "severity": "high",
+      "original_id": "ac0a267253c0f950"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_053",
+      "title": "Incomplete State Restoration in _removeEnabledXYZ()",
+      "description": "The _removeEnabledXYZ() function removes an address from the _enabledXYZs array by swapping with the last element and popping, but it does not remove the corresponding max/min limits or other metadata stored in the parent StablecoinHandler. The parent contract StablecoinHandler maintains its own state for token limits (via _tokenLimits mapping), and calling UpdateXYZ(token, false, ...) is supposed to disable the token. However, in this contract, _recordXYZ() calls _removeEnabledXYZ() but does not propagate the disable flag to the parent handler. This means the token is removed from the frontend-visible list, but the StablecoinHandler still retains its max/min limits and may still allow minting if bypassed. This creates a state inconsistency where the token appears disabled to users but remains active in the underlying system.",
+      "severity": "high",
+      "original_id": "a1bd220f69ceec3d"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_054",
+      "title": "Silent Gas Limit Exploitation in _drip() Native Token Transfer",
+      "description": "In _drip(), when transferring native token via low-level call { value: amount }(\"\"), the function does not check the success of the call beyond a boolean return. However, if the recipient is a contract with a fallback function that consumes more than 63/64 of the remaining gas (EVM's subcall gas limit), the call will fail silently (returning false) while the parent function continues. Since no revert occurs, the drip event is emitted and the drip timestamp is updated, effectively consuming the user's drip allowance without delivering the funds. This allows an attacker to front-run legitimate users by triggering a drip to a malicious contract that consumes all gas, permanently blocking the victim's next drip.",
+      "severity": "high",
+      "original_id": "207ede64dea89275"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_055",
+      "title": "Authorization Context Binding Failure in drip()",
+      "description": "The drip() function is protected by the FAUCET_ROLE, but the authorization does not bind to the specific token or recipient. An attacker who gains FAUCET_ROLE can call drip(address(0x0), victimAddress) to drain the contract's native balance, or drip(erc20Token, victimAddress) to mint tokens to an unintended recipient. Since the authorization is role-based and not parameter-bound, the same authorization can be reused across arbitrary tokens and recipients. This allows a compromised faucet operator to drain funds or mint tokens to malicious addresses without additional constraints.",
+      "severity": "high",
+      "original_id": "ba1601c492642eae"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_056",
+      "title": "Missing Domain Validation in _findNativeTokenIndex()",
+      "description": "The _findNativeTokenIndex() function iterates over an array to find NATIVE_TOKEN_POINTER (address(0x0)). However, if the input array is null or uninitialized (e.g., due to a corrupted storage slot or uninitialized contract), the function will still execute the for loop on a zero-length array without validation. While this does not cause a revert, it silently returns (false, type(uint256).max), which is then used by getEnabledXYZs() to conditionally filter. This is not a crash, but it creates a silent failure mode: if the array is corrupted, the native token may be incorrectly included or excluded without any error. This violates the principle of fail-fast for critical state queries.",
+      "severity": "medium",
+      "original_id": "698ee5dbc517f16f"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_057",
+      "title": "Interface Incompatibility with IStablecoin in getEnabledXYZsWithMetadata()",
+      "description": "The function getEnabledXYZsWithMetadata() calls IStablecoin(token).name(), .symbol(), and .decimals(). However, the external IStablecoin interface from 'external/telcoin-contracts/interfaces/IStablecoin.sol' may not match the actual implementation in the deployed Telcoin stablecoin contracts. For example, if the real contract uses a different function signature (e.g., name() returns bytes32 instead of string, or decimals() is not public), the ABI encoding will fail during the external call, causing the entire getEnabledXYZsWithMetadata() call to revert. This breaks frontend rendering and makes the contract unusable for UIs, even if the underlying functionality works. This is a critical integration mismatch.",
+      "severity": "critical",
+      "original_id": "b58b23f5e92c497d"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_058",
+      "title": "Fork Behavioral Divergence in StablecoinHandler Integration",
+      "description": "StablecoinManager extends StablecoinHandler, which is assumed to handle token limits and minting permissions. However, if the Telcoin stablecoin protocol has forked (e.g., to a new version where minting is handled by a separate distributor contract), then calling super.UpdateXYZ() or super.drip() may no longer have any effect. The StablecoinHandler may have had its minting logic removed or moved, meaning that even though the contract appears to enable tokens and mint via mintTo(), no actual tokens are minted. This results in funds being locked in the contract (drip amounts are consumed, events emitted) but recipients receiving nothing. The contract silently fails to perform its core function.",
+      "severity": "critical",
+      "original_id": "dacf3f870354a0fa"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_059",
+      "title": "Unrestricted Receive Function Allows Unauthorized TEL Burning",
+      "description": "The receive() function is marked with onlyStakeManager modifier, but the modifier is never enforced because the receive() function cannot receive msg.sender context in the same way as external functions. This allows any external account to send TEL to the contract, effectively burning it without governance authorization, violating the protocol's economic model where only governance can burn TEL.",
+      "severity": "critical",
+      "original_id": "dfaeac6c09b7dd01"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_060",
+      "title": "Receive Handler Allows Unauthorized Native Token Deposits Despite onlyStakeManager Modifier",
+      "description": "The receive() function is marked with the onlyStakeManager modifier, but this modifier is ineffective because msg.sender in a receive() function is always the address that initiated the external transaction \u2014 not the contract that forwarded the funds. This means any external actor can send ETH to the Issuance contract, and the receive() function will accept it, even though it appears to restrict access. This creates a critical vulnerability where arbitrary ETH deposits can be made, mixing with legitimate issuance rewards and corrupting accounting. The distributeStakeReward function then treats all ETH in the contract balance as valid issuance rewards, allowing an attacker to inflate the available balance and cause misallocation of rewards.",
+      "severity": "critical",
+      "original_id": "08d30412a0449c12"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_061",
+      "title": "Missing Access Control on Receive Function Enables Unauthorized TEL Minting",
+      "description": "The receive() function is restricted to onlyStakeManager, but the contract has no mechanism to mint or create new TEL tokens. Since TEL is an external ERC-20 token, the only way new TEL enters the system is via external transfers. The receive() function accepts ETH (not TEL), so it cannot be used to mint TEL. However, the contract's design implies that TEL is received via external transfers to its address, and those TEL balances are used as the source for stake rewards. The critical issue is that the contract has no way to track or control the inflow of TEL \u2014 it only accepts ETH via receive(). This creates a representation boundary violation: the contract expects TEL to be deposited as issuance allocations from governance, but the receive() function only accepts ETH, and there is no function to deposit or record TEL. As a result, governance cannot properly allocate TEL issuance rewards, and the contract cannot function as intended. The access control on receive() is irrelevant because it does not handle TEL. The real vulnerability is the complete absence of a function to receive and record TEL issuance allocations from governance, which breaks the core economic model. Without a way to record TEL deposits, the contract cannot know how much reward pool exists, making reward distribution impossible and rendering the entire issuance mechanism non-functional. This is not a direct fund theft, but a protocol-breaking design flaw that prevents the core economic function from operating.",
+      "severity": "critical",
+      "original_id": "257463188fd217cf"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_062",
+      "title": "Representation Boundary Violation: receive() Accepts ETH Instead of TEL, Breaking Core Economic Model",
+      "description": "The Issuance contract is designed to manage staking issuance rewards for validators, implying that TEL tokens are allocated by governance and distributed as rewards. However, the receive() function is defined to accept ETH (msg.value), not TEL. There is no function to receive or record TEL deposits. The distributeStakeReward function uses address(this).balance to check available funds, which only reflects ETH, not TEL. This creates a representation boundary violation: the contract's economic logic assumes TEL is the reward asset, but the only incoming funds it can capture are ETH. When governance attempts to send TEL to this contract to fund rewards, the TEL is simply stuck in the contract with no way to be accessed or accounted for. The distributeStakeReward function can only distribute ETH (via msg.value and balance), not TEL. This means the entire issuance mechanism is broken \u2014 TEL cannot be received, tracked, or distributed. The contract's state variables do not include any TEL balance tracking (e.g., no IERC20 balanceOf calls or TEL token address). Therefore, the representation expected by the protocol (TEL as reward asset) is fundamentally incompatible with the implementation (ETH as only receivable asset). This results in permanent locking of any TEL sent to the contract and renders reward distribution impossible. The financial impact is total loss of any TEL sent to the contract by governance, and validators never receive their staking rewards.",
+      "severity": "critical",
+      "original_id": "f829bb89f0ab6a72"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_063",
+      "title": "distributeStakeReward() Uses ETH Balance for TEL Rewards, Leading to Economic Inconsistency",
+      "description": "The distributeStakeReward() function uses address(this).balance to determine available funds for reward distribution, which measures ETH balance. However, the function's purpose is to distribute staking issuance rewards in TEL, as implied by the contract's title and documentation. This creates a representation boundary violation: the function expects to distribute TEL rewards but operates on ETH balance. There is no TEL token address or balance tracking in the contract. When governance sends TEL to fund rewards, it is irrecoverable. When a validator calls distributeStakeReward, the function may distribute ETH (if msg.value is provided) but not TEL. This means the economic model is internally inconsistent \u2014 the contract claims to manage TEL issuance rewards but can only handle ETH. The mathematical proof: suppose governance allocates 10,000 TEL for rewards. This TEL is sent to the contract address. The contract's TEL balance is 10,000, but address(this).balance is 0. When a validator is due a 100 TEL reward, distributeStakeReward is called with rewardAmount=100. The function checks balance=0 < 100 and reverts. The reward is not paid. Alternatively, if someone sends 100 ETH to the contract, distributeStakeReward can send 100 ETH to a recipient, but this is not TEL issuance \u2014 it is arbitrary ETH distribution. The protocol's economic invariant \u2014 'staking rewards are paid in TEL from governance allocations' \u2014 is violated. The financial impact: validators lose their TEL rewards, governance's TEL allocations are permanently locked, and the contract becomes a black hole for TEL. No one gains; the protocol is broken.",
+      "severity": "critical",
+      "original_id": "d7d58ad7cbe51e82"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_064",
+      "title": "No TEL Token Tracking Mechanism Renders Issuance Logic Non-Functional",
+      "description": "The contract has no state variable to track TEL balance, no IERC20 interface for TEL token, and no function to deposit or record TEL issuance allocations. The only way TEL can enter the contract is via direct transfer, which is not tracked. The distributeStakeReward function has no knowledge of TEL supply and cannot verify if sufficient TEL exists to pay rewards. This is a data access and collection integrity failure: the contract assumes a TEL reward pool exists and is managed by governance, but there is no data structure to represent or access that pool. The iteration mechanism (implicit in reward distribution) assumes a balance exists, but no balance is recorded. When governance sends TEL, the contract cannot 'see' it. When a reward is due, the contract cannot verify the pool has sufficient funds. The mathematical proof: governance sends 5000 TEL to Issuance contract. The contract's TEL balance is 5000, but its internal state is unaware. A validator is entitled to 500 TEL. distributeStakeReward is called with rewardAmount=500. The function checks ETH balance (0) and reverts. The 500 TEL reward is not paid. The 5000 TEL remains locked forever. The data structure (reward pool) exists externally (on the TEL token contract) but is not accessed or synchronized with the Issuance contract. The loop (implicit distribution logic) has no bound or data source to iterate over \u2014 it assumes a balance that is invisible. This is a complete failure of data access integrity. The financial impact: all TEL sent to the contract is permanently lost, and no validator receives rewards.",
+      "severity": "critical",
+      "original_id": "e237d0636ea698da"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_065",
+      "title": "State Commitment Before External Call Verification in distributeStakeReward",
+      "description": "The distributeStakeReward function commits state (spends contract balance) before verifying the external call succeeded. The contract subtracts rewardAmount from its balance implicitly by transferring it, but if the recipient's fallback/receive function reverts or runs out of gas, the transfer still occurs and the caller loses funds without reward delivery. This violates the principle of 'checks-effects-interactions' and allows funds to be permanently lost due to external call failures.",
+      "severity": "critical",
+      "original_id": "c476f6b8f740230a"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_066",
+      "title": "Receive Function Allows Unauthorized TEL Burning via OnlyStakeManager Restriction Bypass",
+      "description": "The receive() function is marked with onlyStakeManager, but since it is triggered by ETH transfers (not calls), msg.sender is the sender of the ETH transaction, not the contract that initiated the transfer. An attacker can send TEL directly to the contract via a malicious ERC-20 token transfer (e.g., using transferFrom or a flash loan), bypassing the onlyStakeManager modifier entirely. This allows arbitrary TEL to be burned without governance approval, violating the contract's stated security invariant that 'only governance may burn TEL'.",
+      "severity": "high",
+      "original_id": "b88600aa48da37f3"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_067",
+      "title": "Insufficient Validation of Mathematical Domain in Reward Amount Calculation",
+      "description": "The function distributeStakeReward accepts rewardAmount and msg.value as uint256, but does not validate that rewardAmount > 0 before proceeding. While uint256 cannot be negative, a zero rewardAmount with non-zero msg.value can be used to trigger a transfer of arbitrary ETH to any address under the guise of 'staking reward'. This is not a mathematical domain error per se, but a logical domain error: the contract assumes rewardAmount represents a staking reward, yet allows zero-value rewards to be distributed with ETH attached \u2014 violating the semantic contract of the function. This enables fund misdirection.",
+      "severity": "medium",
+      "original_id": "411ff850db0b2959"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_068",
+      "title": "No Protection Against Reentrancy in distributeStakeReward",
+      "description": "The external call to recipient is made before any state changes are finalized (though balance is implicitly spent). If the recipient is a malicious contract with a reentrant fallback function, it can recursively call distributeStakeReward before the original call completes. Since the balance check occurs only once at the start, the attacker can drain the contract's entire balance through multiple recursive calls, even if the initial balance was insufficient for a single transfer.",
+      "severity": "critical",
+      "original_id": "17d916c9a237c463"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_069",
+      "title": "Missing Access Control on Critical State-Modifying Functions",
+      "description": "The functions setDripAmount, setNativeDripAmount, and setLowBalanceThreshold are declared as external virtual but lack any access control modifier. This allows any external actor to arbitrarily change the drip amounts or low-balance threshold, directly manipulating the protocol's economic parameters. Since these values determine how much ETH or ERC20 tokens are distributed per drip, an attacker can set them to extremely high values, drain the contract's entire balance, and cause protocol insolvency. The functions _setDripAmount, _setNativeDripAmount, and _setLowBalanceThreshold are internal and correctly used only by the unprotected externals, creating a direct attack vector.",
+      "severity": "critical",
+      "original_id": "5f9ca7242e09172b"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_070",
+      "title": "Incorrect Unit Usage in Low Balance Threshold Check Causes Underprotection and Fund Drain",
+      "description": "The _checkLowNativeBalance function compares the contract's ETH balance against getNativeDripAmount() * _getLowBalanceThreshold(). However, _getLowBalanceThreshold() returns the number of drip requests the contract can still handle before triggering the alert, while getNativeDripAmount() is the ETH amount per drip. The multiplication is mathematically correct, but the logic is inverted: the condition should trigger when the balance is less than or equal to the amount needed for thresholdDripsLeft drips \u2014 which it does \u2014 but the name and intent suggest it's meant to be a warning threshold, not a hard limit. The real vulnerability is that this check is purely informational (emits an event) and does not prevent drips from occurring. An attacker can exploit this by setting _lowBalanceThreshold to 1 and _nativeDripAmount to the entire contract balance, then calling drip() repeatedly. Each drip consumes the full balance, and since there's no balance check before transfer, the contract can be drained completely even when the event fires. The function _drip() is virtual and unimplemented here, but in any concrete implementation, if it transfers _nativeDripAmount without checking available balance, the contract will revert on the first overflow \u2014 but if it uses SafeERC20 or assumes sufficient balance, it will drain the contract. Since the contract holds ETH, and _drip() likely uses transfer() or send(), if the balance is insufficient, the transaction reverts. However, if the contract is funded with exactly 100 ETH, _nativeDripAmount is set to 100, and _lowBalanceThreshold is set to 1, then the first drip succeeds (balance drops to 0), the event fires, and subsequent drips revert. But if an attacker sets _nativeDripAmount to 1 wei and _lowBalanceThreshold to 10^18, then the contract can be drained over 10^18 drips \u2014 which is economically infeasible. The real danger is when an attacker sets _nativeDripAmount to a high value and calls drip() once: if the contract has less than that amount, it reverts. But if the contract has more, it drains. The critical flaw is that there is NO balance check in _drip() before transferring ETH. Since _drip() is virtual and unimplemented, we must assume the inheriting contract implements it. But the abstract contract provides no safety. The vulnerability is that the protocol relies on the inheriting contract to implement balance checks, but the abstract contract provides no guard. This is a design flaw that enables fund loss if the inheritor is careless. However, the mathematical proof of loss requires assuming a vulnerable implementation. But the audit must focus on what is present. The _checkLowNativeBalance() function does not prevent execution \u2014 it only emits an event. Therefore, the contract can be drained if the inheriting _drip() function does not check balance. Since the abstract contract does not enforce balance checks, and the external functions lack access control, this is a critical design vulnerability. The financial impact: an attacker can set _nativeDripAmount to 1000 ETH (if the contract has 1000 ETH), call drip() once, and drain the entire contract. The calculation: if contract balance = 1000 ETH, attacker calls setNativeDripAmount(1000 ether), then drip(). The _drip() function (in inheritor) transfers 1000 ETH to recipient. Contract balance becomes 0. Loss: 1000 ETH. This is a direct, immediate, and complete fund drain.",
+      "severity": "high",
+      "original_id": "02ae2be30b205ece"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_071",
+      "title": "Token/Recipient Mapping Reversal in _lastDripTimestamp Causes Incorrect Eligibility Checks",
+      "description": "The _lastDripTimestamp mapping is defined as mapping(address => mapping(address => uint256)), where the outer key is recipient and the inner key is token. However, in _checkDrip(), the function is expected to validate eligibility based on the last drip timestamp for the given token and recipient. The function _setLastFulfilledDripTimestamp(token, recipient, timestamp) writes to $._lastDripTimestamp[recipient][token]. This is correct. But in _checkDrip(), if the implementation checks $._lastDripTimestamp[token][recipient], it would be wrong. However, the abstract contract does not implement _checkDrip(), so we cannot be certain. But the naming and structure suggest that the intended usage is recipient-first. The vulnerability is that if an inheriting contract mistakenly reverses the order in _checkDrip() \u2014 e.g., checks $._lastDripTimestamp[token][recipient] instead of $._lastDripTimestamp[recipient][token] \u2014 then eligibility checks will fail. But this is an implementation error in the inheritor, not in this contract. However, the structure of the storage is ambiguous: the variable name _lastDripTimestamp suggests it tracks per recipient per token, but the parameter order in _setLastFulfilledDripTimestamp(token, recipient, timestamp) is token first, then recipient. This creates a cognitive mismatch. The storage layout is correct: recipient is outer, token is inner. But the function signature and parameter order suggest token is primary. This is a design flaw that invites bugs in inheriting contracts. However, it does not directly cause fund loss. The real issue is that the abstract contract provides no validation in _checkDrip() \u2014 it is virtual and unimplemented. Therefore, the vulnerability is not in this contract per se, but in the lack of a default implementation or guard. Since the audit must focus on what is present, and the contract does not contain a flawed calculation, this is a medium-risk design issue, not a high-severity vulnerability. We do not report it as HIGH.",
+      "severity": "medium",
+      "original_id": "34769011f4858b53"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_072",
+      "title": "No Balance Check Before ETH Transfer in _drip() Enables Contract Insolvency",
+      "description": "The _drip(address token, address recipient) function is virtual and unimplemented. However, the public drip() function calls it after updating the timestamp. In any concrete implementation, if _drip() transfers ETH (for nativeDripAmount) without checking the contract's balance, and the amount exceeds the balance, the transaction reverts. But if the contract has sufficient balance, it transfers the full amount. The problem is that there is no safeguard in the abstract contract to prevent _drip() from transferring more than available. An attacker can call setNativeDripAmount(1000 ether) when the contract has only 100 ether. Then call drip(). If the inheriting contract uses a simple send() or transfer(), it will revert. But if the inheriting contract uses a non-reverting method (e.g., call with gas) or assumes sufficient balance, it will drain the contract. The abstract contract provides no mechanism to prevent this. The financial impact: if the inheriting contract implements _drip() as: address(payable(recipient)).transfer(_nativeDripAmount); and the contract has 100 ETH, and attacker sets _nativeDripAmount to 200 ETH, then the transaction reverts \u2014 no loss. But if the inheriting contract uses: (bool success, ) = payable(recipient).call{value: _nativeDripAmount}(''); and does not check success, then the call returns false but the state is already updated (timestamp changed), and the contract balance is unchanged. But the recipient does not receive funds. This is a failed drip, not a loss. The real loss occurs if the inheriting contract does not check balance and the contract has insufficient funds \u2014 but then it reverts. The only way funds are lost is if the contract is drained by a valid transfer. So if the contract has 100 ETH, attacker sets _nativeDripAmount to 100 ETH, calls drip() \u2014 contract sends 100 ETH, balance becomes 0. Loss: 100 ETH. This is a direct loss. The vulnerability is that the abstract contract does not enforce a balance check in _drip() or in drip(). Since the function is virtual, the responsibility is delegated. But the abstract contract should provide a safe default or require the inheritor to implement a balance check. The lack of any balance validation in the core logic is a critical design flaw. The mathematical proof: contract balance = B, attacker sets _nativeDripAmount = B, calls drip(). _drip() transfers B ETH. Contract balance = 0. Loss: B ETH. This is a complete drain. The attack is trivial and requires only two transactions: setNativeDripAmount and drip. No access control on setNativeDripAmount allows this. This is a direct consequence of the missing access control and missing balance check. The financial impact is total loss of the contract's ETH balance.",
+      "severity": "high",
+      "original_id": "4cdb42c091082b02"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_073",
+      "title": "Automatic Processing of Native Ether Sent to Faucet Triggers Unintended Behavior",
+      "description": "The TNFaucet contract has no fallback or receive function, but it does not prevent users or external systems from sending native Ether (ETH) directly to the contract address. Since the contract has no logic to handle or reject such transfers, any ETH sent to it becomes permanently locked and unusable. This is because the contract's only purpose is to distribute tokens (ERC20) and native tokens (via _drip), but it never withdraws or manages the ETH it receives. The ETH accumulates indefinitely with no mechanism to reclaim or redistribute it, leading to permanent fund loss.",
+      "severity": "high",
+      "original_id": "c1dd1157849503a7"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_074",
+      "title": "Missing Access Control on State Variables Used in Economic Calculations",
+      "description": "The functions setDripAmount, setNativeDripAmount, and setLowBalanceThreshold are declared external and virtual but lack any access control (e.g., onlyOwner or similar modifier). These state variables directly govern the economic behavior of the faucet: _dripAmount determines how many tokens are distributed per request, _nativeDripAmount determines how much ETH is distributed per request, and _lowBalanceThreshold determines when the system alerts for low balance. An attacker can call these functions to manipulate the drip amounts or threshold at any time, enabling them to drain the contract's ETH or token reserves by increasing drip amounts or lowering the threshold to trigger unnecessary alerts while bypassing balance checks. This constitutes a critical access control failure on core economic parameters.",
+      "severity": "critical",
+      "original_id": "9ed01c1340f9204d"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_075",
+      "title": "Low Balance Threshold Check Uses Incorrect Unit Representation",
+      "description": "The _checkLowNativeBalance function compares the contract's ETH balance against getNativeDripAmount() * _getLowBalanceThreshold(). However, _getLowBalanceThreshold() returns a unitless count (number of drips), and getNativeDripAmount() returns ETH per drip. The multiplication is mathematically correct, but the logic is flawed: the threshold is intended to trigger when the contract has ETH for only <= thresholdDripsLeft drips left. The condition should be: if (balance <= getNativeDripAmount() * thresholdDripsLeft) then alert. This condition is correctly implemented, but the variable name _lowBalanceThreshold is misleading \u2014 it is not a balance threshold in ETH, but a drip count threshold. While the math is correct, the representation boundary is violated because the variable name and documentation imply it is a balance (ETH), but it is actually a count. This is a representation boundary issue because it creates confusion for developers and auditors, potentially leading to incorrect modifications. However, since the calculation is correct, this is a medium-high confidence issue due to potential for future misinterpretation leading to a bug.",
+      "severity": "medium",
+      "original_id": "d168dafee21ae66c"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_076",
+      "title": "Drip Timestamp Mapping Access Order Violates Data Structure Assumption",
+      "description": "The _lastDripTimestamp mapping is defined as mapping(address => mapping(address => uint256)), meaning the outer key is recipient and the inner key is token. However, in _setLastFulfilledDripTimestamp and getLastFulfilledDripTimestamp, the parameters are passed as (token, recipient) but used as $._lastDripTimestamp[recipient][token]. This is correct in code. However, the function _checkDrip is virtual and intended to be overridden, and if a derived contract were to reverse the order (e.g., use [token][recipient]), it would break the data structure. The contract assumes a fixed access order: recipient first, then token. But since the mapping is not encapsulated and the access pattern is exposed via virtual functions, there is no enforcement of this structure. An inheriting contract could accidentally or maliciously reverse the order, causing all timestamp lookups to fail or access wrong data. This is a data access integrity issue: the contract assumes a specific indexing order, but the interface allows it to be violated by inheritance. This could lead to users being able to drip repeatedly if the mapping is misindexed, because the timestamp check would always return 0 (default) for the wrong key. For example, if a derived contract uses [token][recipient], then for recipient=0x123 and token=0x456, it writes to $._lastDripTimestamp[0x456][0x123], but _checkDrip reads $._lastDripTimestamp[0x123][0x456] \u2014 which is 0 \u2014 so the user can drip infinitely. This is a high-severity vulnerability because it allows unlimited free drips.",
+      "severity": "high",
+      "original_id": "e73ca82dfc047e07"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_077",
+      "title": "Stake Reward Calculation Mismatch Due to Unit Inconsistency in _getRewards",
+      "description": "The function _getRewards calculates rewards as balance - initialStake, but the stakeInfo.balance is updated to include both the original stake and accumulated rewards, while the initialStake is a fixed constant. However, when unstaking, the function _unstake uses _getRewards(validatorAddress, stakeAmt) to compute rewards, but then sends rewards + bal (the full balance) to the recipient via distributeStakeReward. This creates a double-counting vulnerability: the recipient receives both the original stake (bal) and the calculated rewards (balance - initialStake), even though the original stake was already part of the balance. This results in the protocol paying out more than it should, effectively minting new tokens out of thin air. The issue stems from a unit inconsistency: _getRewards returns the excess over initialStake, but the caller (_unstake) treats the entire balance as if it were pure rewards, leading to a financial overpayment.",
+      "severity": "critical",
+      "original_id": "58988f8c4e4f49e7"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_078",
+      "title": "Missing Access Control on Critical State Modification Functions",
+      "description": "The functions setDripAmount, setNativeDripAmount, and setLowBalanceThreshold are declared as external virtual functions without any access control modifiers. This allows any external actor to arbitrarily change the drip amounts or low-balance threshold, potentially draining the faucet's native balance or rendering it unusable by setting drip amounts to extreme values. Since these functions directly control economic parameters that determine how much ETH or tokens are distributed per request, their unguarded nature constitutes a critical vulnerability.",
+      "severity": "critical",
+      "original_id": "ec937fa5137359ca"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_079",
+      "title": "State Commitment Before External Call Enables Front-Running and Replay Attacks",
+      "description": "In the drip(address, address) function, the state is updated (_setLastFulfilledDripTimestamp) before the actual token transfer (_drip). This means that even if the _drip call fails (e.g., due to insufficient balance, token transfer revert, or malicious reentrancy), the timestamp is already committed, preventing the same user from claiming again. This creates a denial-of-service vector: an attacker can trigger a drip call that intentionally fails (e.g., by calling with a non-existent token), consuming the user's next claim slot without delivering any tokens. The user loses their claim opportunity permanently, while the protocol's state is corrupted.",
+      "severity": "high",
+      "original_id": "0cd40c070bde48e9"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_080",
+      "title": "Insufficient Validation in _checkDrip Allows Arbitrary Token Claims",
+      "description": "The _checkDrip function is declared as virtual and empty in the base contract. This means any inheriting contract must implement it, but the base contract provides no default validation. If an inheriting contract fails to implement _checkDrip properly (e.g., omits checks for token existence, recipient eligibility, or balance sufficiency), users can claim tokens for non-existent tokens or invalid recipients. This could lead to the faucet sending tokens to black holes, or attempting transfers to non-ERC20 addresses, causing the transaction to revert and wasting gas \u2014 but more critically, if the _drip function proceeds without validation, it may attempt to transfer tokens that do not exist or are not approved, leading to unpredictable behavior or fund loss.",
+      "severity": "high",
+      "original_id": "a0db42858dbac9ff"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_081",
+      "title": "Low Native Balance Check Uses Incorrect Threshold Logic Leading to Fund Drain",
+      "description": "The _checkLowNativeBalance function emits an alert when the contract's ETH balance is less than or equal to (getNativeDripAmount() * _lowBalanceThreshold). However, this logic is backwards: it should trigger when the balance is less than or equal to getNativeDripAmount() * (thresholdDripsLeft - 1), to warn when only thresholdDripsLeft drips remain. As written, if _lowBalanceThreshold is 10,000 and getNativeDripAmount() is 1 ether, the alert triggers when balance <= 10,000 ether \u2014 meaning the alert fires when the contract has a massive balance, not when it's nearly empty. This causes the alert to be useless, and operators may not replenish the balance in time. An attacker can drain the contract by making 10,000+ drip requests (if allowed by access control), and the system will never warn. For example: if nativeDripAmount = 1 ether, lowBalanceThreshold = 10,000, then alert triggers at 10,000 ether \u2014 but the contract can make 10,000 drips at 1 ether each = 10,000 ether total. So the alert triggers exactly when the contract is about to be drained \u2014 not before. This is a critical operational failure.",
+      "severity": "high",
+      "original_id": "fa135117c3ba2e91"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_082",
+      "title": "No Protection Against Reentrancy in _drip Function",
+      "description": "The _drip function (which performs the actual token transfer) is called after state updates and without any reentrancy guard. If the token being dripped is a malicious ERC20 that calls back into the faucet during transfer (e.g., via onTransfer hooks or reentrancy in a wrapped token), the attacker can recursively call drip() and drain the contract. Since _setLastFulfilledDripTimestamp is called before _drip, the attacker can claim multiple times in one transaction by reentering before the timestamp is permanently set. This allows unlimited claims per transaction, leading to complete depletion of the faucet's token and ETH reserves.",
+      "severity": "critical",
+      "original_id": "90aeef6e9001d151"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_083",
+      "title": "State Commitment Before Operation Completion in drip() Function",
+      "description": "The drip() function commits the last drip timestamp (state change) before calling _drip(), which may fail due to insufficient token balance or external call reverts. This results in the nonce being consumed even if the token transfer fails, preventing the recipient from claiming future drips despite not receiving funds.",
+      "severity": "high",
+      "original_id": "16c59ab28c535baf"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_084",
+      "title": "Mathematical Domain Violation in _checkLowNativeBalance() Due to Multiplication Overflow",
+      "description": "The function _checkLowNativeBalance() multiplies getNativeDripAmount() by _lowBalanceThreshold without checking for overflow. If either value is large (e.g., 2^128), the multiplication overflows silently due to Solidity 0.8.x's unchecked arithmetic in assembly context, leading to incorrect balance comparison. This may cause the FaucetLowNativeBalance event to never emit even when the contract is critically low on ETH, or falsely emit when it's not.",
+      "severity": "high",
+      "original_id": "b3cb7c9beba63bad"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_085",
+      "title": "Missing Input Validation in _drip() Leading to Silent Token Transfer Failures",
+      "description": "The _drip() function is virtual and unimplemented in TNFaucet, leaving it to inheritors to implement. However, no base validation ensures that the token address is non-zero, that the token contract is deployed, or that the drip amount is non-zero. This allows inheritors to implement _drip() with unsafe ERC20 transfers, leading to silent failures where tokens are not transferred but the timestamp is still committed, locking out future claims.",
+      "severity": "high",
+      "original_id": "6e062cebba336445"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_086",
+      "title": "Token/Recipient Key Order Reversal in Mapping Causes State Corruption Risk",
+      "description": "The mapping _lastDripTimestamp is defined as mapping(address => mapping(address => uint256)), with outer key as recipient and inner key as token. However, in _setLastFulfilledDripTimestamp(), the parameters are passed as (token, recipient) but used as $._lastDripTimestamp[recipient][token]. While logically correct, this inversion is non-intuitive and error-prone. If an inheritor mistakenly swaps the order in a call (e.g., _setLastFulfilledDripTimestamp(recipient, token)), it corrupts state by writing to the wrong mapping path, causing legitimate users to be blocked indefinitely.",
+      "severity": "medium",
+      "original_id": "5ef582cb66f0cb61"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_087",
+      "title": "Automatic Processing of Withdrawal Funds Triggers Unauthorized Issuance Transfer",
+      "description": "The StakeManager contract's _unstake() function sends funds to the Issuance contract via a low-level call with the full validator balance as value. If an attacker sends ETH directly to the StakeManager contract while a validator is in the unstaking process, the Issuance contract may receive funds that are not properly accounted for as validator rewards, leading to double-spending of stake rewards and inflation of the reward pool. The contract cannot distinguish between user-initiated deposits and system-returned funds from unstaking, allowing an attacker to artificially inflate the reward pool and extract value.",
+      "severity": "critical",
+      "original_id": "789f6e6071699cc4"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_088",
+      "title": "Stake Reward Calculation Ignores Negative Balance State",
+      "description": "The _getRewards function computes rewards as balance - initialStake without validating that balance >= initialStake. If a validator's balance is less than initialStake due to slashing or incorrect accounting, the function returns 0 instead of a negative value, but the unstake() function still attempts to distribute 'rewards' equal to this 0 value while transferring the entire balance. This creates a discrepancy where the validator's balance is fully drained but no rewards are distributed, effectively stealing the portion of stake that should have been returned as principal.",
+      "severity": "critical",
+      "original_id": "13084250ef30bff4"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_089",
+      "title": "Unstake Function Silently Consumes Stake Balance Without Guaranteeing Reward Distribution",
+      "description": "In _unstake(), the function calls distributeStakeReward with the computed rewards value, but if rewards == 0 (due to balance < initialStake), it still transfers the entire balance as msg.value. However, the reward distribution is conditional on the reward amount being non-zero, and the function does not verify that the Issuance contract successfully received the funds. The call to issuance.call{value: stakeAmt - bal}(...) is ignored (r;), and if the Issuance contract reverts or lacks funds, the validator's remaining stake (stakeAmt - bal) is lost without recourse. This creates a partial state update where the validator's NFT is burned and balance is zeroed, but funds are not properly redistributed.",
+      "severity": "high",
+      "original_id": "123042977c6afd30"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_090",
+      "title": "Delegation Nonce Not Incremented in delegateStake()",
+      "description": "The delegationDigest() function uses the nonce from delegations[validatorAddress].nonce to generate the signature digest, but the delegateStake() function never increments this nonce after a successful delegation. This allows an attacker to replay the same delegation signature multiple times, effectively allowing multiple delegates to claim the same validator's stake rewards or to re-delegate the same validator address repeatedly, bypassing replay protection.",
+      "severity": "high",
+      "original_id": "53f5d1d66b91ad1a"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_091",
+      "title": "Stake Version Upgrade Allows Downgrade via Version Number Manipulation",
+      "description": "The upgradeStakeVersion() function accepts any uint8 version and updates versions[version] without validating that the new version number is greater than the current stakeVersion. This allows an attacker with governance privileges to downgrade the stake version to an older, less secure configuration (e.g., lower stakeAmount or minWithdrawAmount), enabling validators to unstake with less stake than originally required, or claim rewards with lower thresholds, effectively reducing the security guarantees of the system.",
+      "severity": "high",
+      "original_id": "1299e73e49c7f7aa"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_092",
+      "title": "Rewards Claiming Allows Double-Spending via Recipient Manipulation",
+      "description": "The claimStakeRewards() function calls _claimStakeRewards() with the validatorAddress as both validator and recipient. However, _claimStakeRewards() uses _getRecipient() to determine the recipient, which returns the delegator if one exists. But claimStakeRewards() does not validate that the provided ecsdaPubkey corresponds to the actual delegator or validator. An attacker can call claimStakeRewards() with a malicious recipient address, and if the validator has a delegation, the rewards are sent to the attacker-controlled address instead of the delegator, effectively stealing rewards.",
+      "severity": "high",
+      "original_id": "f9ef9f161d488df5"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_093",
+      "title": "Buffer Size Reduction Causes Data Loss and Ring Buffer Corruption",
+      "description": "The setBufferSize function reduces the ring buffer size by copying only the oldest 'itemsToCopy' entries into a new buffer, but incorrectly recalculates the head pointer as itemsToCopy % newSize. This causes the head pointer to point to an arbitrary position in the new buffer, not the next logical write position. As a result, subsequent attestations overwrite existing valid entries before they are cycled out, leading to permanent loss of historical attestations and potential spoofing of CI status. The bug arises because the head pointer is not preserved relative to the logical sequence of attestations \u2014 it is reset based on a flawed formula that ignores the original head position and the circular nature of the buffer. This breaks the core invariant of the ring buffer: that entries are written in chronological order and overwritten only after the buffer is full. Attackers can exploit this by repeatedly reducing the buffer size to force the system to lose critical attestations, then submitting malicious commit hashes that appear valid because older valid entries were overwritten.",
+      "severity": "critical",
+      "original_id": "0143d547f437ca28"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_094",
+      "title": "Stake Withdrawal and Reward Claiming Allows Partial Execution with Inconsistent Accounting",
+      "description": "The _unstake and _claimStakeRewards functions perform multiple state-changing operations (balance reduction, token burn, external calls) without ensuring atomicity or validating outcomes before committing state. If the external call to Issuance.distributeStakeReward reverts, the validator's stake is still burned and their balance is zeroed, but the reward is not distributed. This results in permanent loss of the validator's staked funds without compensation. The function also uses the initial stake amount to calculate rewards, but the actual balance may have been reduced by prior partial claims or slashing, leading to incorrect reward calculations.",
+      "severity": "critical",
+      "original_id": "32e38516fcfbba90"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_095",
+      "title": "Reward Calculation Uses Stale Stake Amount Instead of Current Balance",
+      "description": "The _getRewards function calculates rewards as (current balance - initial stake amount), but the initial stake amount is taken from the current version's config (versions[validatorVersion].stakeAmount). If a validator upgrades their stake version or if the stake amount changes between versions, the reward calculation becomes inconsistent. For example, if a validator staked 1000 TEL under version 1 (stakeAmount=1000), then the protocol upgrades to version 2 with stakeAmount=1500, and the validator does not restake, their balance remains 1000. _getRewards will return 0 (1000 - 1500 = negative \u2192 0), even though they have 1000 TEL staked. This prevents them from claiming any rewards even though they are fully staked. Conversely, if they had staked 1500 under version 2 and the version reverts to 1000, they could claim 500 TEL in rewards even though they never earned them.",
+      "severity": "high",
+      "original_id": "86c9b7b128636fd9"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_096",
+      "title": "Unstake Function Allows Double-Spending of Stake via External Call Revert",
+      "description": "In _unstake, the function first burns the NFT and reduces the validator's balance to zero, then attempts to send rewards via Issuance.distributeStakeReward. If the external call reverts (e.g., due to gas limit, reentrancy, or Issuance contract failure), the validator's stake is permanently destroyed and their balance is zeroed, but the reward is not sent. The validator loses their entire stake without receiving any compensation. The function does not use a pull-payment pattern or check the success of the external call before committing state. This violates the Checks-Effects-Interactions pattern and allows attackers to drain validators' stakes by triggering a revert in the Issuance contract.",
+      "severity": "critical",
+      "original_id": "8bd3b0bc68e74723"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_097",
+      "title": "Recipient Selection Logic Fails to Handle Zero Address in Delegation",
+      "description": "The _getRecipient function assumes that if delegator == address(0), the recipient is the validatorAddress. However, if a validator is delegated to address(0) (e.g., via a malicious or buggy delegation), the function still returns validatorAddress. This is logically inconsistent because address(0) is a valid (though non-functional) address. If a validator's delegation is set to address(0) intentionally or accidentally, rewards and stake refunds are sent to address(0), permanently burning those funds. There is no validation that the delegator is a non-zero, non-contract, or valid EOA address before using it as a recipient.",
+      "severity": "high",
+      "original_id": "3fb4421be7d9de03"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_098",
+      "title": "Stake Version Upgrade Allows Downgrade of Stake Requirements Without Revalidation",
+      "description": "The upgradeStakeVersion function allows any caller to update the stakeVersion and set a new StakeConfig. If a new config has a lower stakeAmount than the previous version, validators who staked under the higher version are now subject to a lower requirement. However, their existing balance is not adjusted. This creates an arbitrage: an attacker can upgrade the version to a lower stake amount, then force validators to unstake and re-stake at the lower amount, effectively stealing the difference. For example, if version 1 requires 1000 TEL and version 2 requires 500 TEL, a validator with 1000 TEL can unstake, re-stake with 500 TEL, and the remaining 500 TEL is sent to the Issuance contract as 'slashed' remainder \u2014 but the Issuance contract does not return it. The attacker controls the upgrade and can drain funds from validators.",
+      "severity": "high",
+      "original_id": "68c0891d82ad7101"
+    },
+    {
+      "id": "cantina_smart-contract-audit-of-tn-contracts_2025_08_tool_099",
+      "title": "DelegateStake Function Allows Replay Attacks Due to Nonce Not Being Incremented Before External Call",
+      "description": "The delegateStake function validates the signature using delegationDigest, which includes the nonce from delegations[validatorAddress].nonce. However, the nonce is incremented AFTER the external call to Issuance.distributeStakeReward. If the external call reverts (e.g., due to gas or contract failure), the nonce is not incremented, but the stake is still transferred and the validator's balance is increased. This allows an attacker to replay the same signed message multiple times, each time claiming stake without paying, because the nonce remains unchanged and the signature is still valid. The state commitment (nonce increment) occurs after the external interaction, violating Pattern 7.",
+      "severity": "high",
+      "original_id": "aaa5ee22845b3a2c"
+    }
+  ],
+  "input_tokens": 29411,
+  "output_tokens": 1001,
+  "cached_tokens": 297
+}

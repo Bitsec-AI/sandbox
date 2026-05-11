@@ -1,0 +1,744 @@
+{
+  "project": "code4rena_kinetiq_2025_07",
+  "agent": "agent794",
+  "status": "success",
+  "timestamp": "2026-04-06T15:24:00.681441",
+  "elapsed_seconds": 365.4,
+  "total_expected": 3,
+  "total_found": 100,
+  "true_positives": 1,
+  "false_negatives": 2,
+  "false_positives": 99,
+  "detection_rate": 0.3333333333333333,
+  "precision": 0.01,
+  "f1_score": 0.019417475728155338,
+  "matched_findings": [
+    {
+      "id": "code4rena_kinetiq_2025_07_expected_000",
+      "expected": "Buffer Silently Locks Staked HYPE in Contract Without Using Them For Withdrawals Or Providing A Way To Be Pulled Out Or Moved To L1",
+      "matched": "CancelWithdrawal Does Not Restore Buffer State, Leading to Double-Spend",
+      "confidence": 0.85,
+      "justification": "FINDING 3 directly matches the expected vulnerability about buffer handling. The expected vulnerability describes buffer silently locking staked HYPE without being used for withdrawals or providing a way to be pulled out. FINDING 3 states that 'CancelWithdrawal Does Not Restore Buffer State, Leading to Double-Spend' - when a withdrawal is cancelled via cancelWithdrawal(), the buffer that was reduced during queueWithdrawal() is not restored. This creates a permanent accounting mismatch where the buffer is lower than it should be, effectively locking staked HYPE. The function hints include cancelWithdrawal, queueWithdrawal, and _withdrawFromValidator, which aligns with the line references in the expected vulnerability (L519-L533 likely relates to queueWithdrawal/_withdrawFromValidator). While the exact wording differs, the core issue is the same: buffer accounting problems during withdrawal operations that lock user funds.",
+      "severity": "high",
+      "expected_description": "Submitted by\nfranfran20\n, also found by\n0xDeoGratias\n,\n0xG0P1\n,\n0xgremlincat\n,\n0xpiken\n,\n0xsagetony\n,\ndobrevaleri\n,\ngesha17\n,\nhals\n,\nInfect3d\n,\nka14ar\n,\nKupiaSec\n,\nmarchev\n,\nRagnarok\n,\nrama_tavanam\n,\nRiceee\n,\nroccomania\n,\nrouhsamad\n,\nzhanmingjing\n, and\nzhaojohnson\n\nhttps://github.com/code-423n4/2025-04-kinetiq/blob/7f29c917c09341672e73be2f7917edf920ea2adb/src/StakingManager.sol#L946-L957\n\nhttps://github.com/code-423n4/2025-04-kinetiq/blob/7f29c917c09341672e73be2f7917edf920ea2adb/src/StakingManager.sol#L919-L941\n\nhttps://github.com/code-423n4/2025-04-kinetiq/blob/7f29c917c09341672e73be2f7917edf920ea2adb/src/StakingManager.sol#L519-L533\n\nWhen users stake into the Staking Manager and get their KHYPE tokens, after earning some rewards they might want to queue a withdrawal to get their HYPE tokens back. While the queued withdrawal delay is on, the user can decide to\ncancelWithdrawal\nand get their KHYPE tokens back. The way the buffer is handled in this flow leads to locking of HYPE in the staking manager contract.\n\nTake for example a target buffer of\n30 HYPE\nwith only\n20 HYPE\nleft in the buffer, the user has initially staked some HYPE and gotten some KHYPE.\n\nThe user wishes to cash in that KHYPE worth\n15 HYPE\n, now the buffer can satisfy this amount of HYPE, so they\u2019ll need to withdraw from the validator on L1. You can see this in the\n_withdrawFromValidator\nfunction UserWithdrawal operation type below.\n\nif\n(\noperationType\n==\nOperationType\n.\nUserWithdrawal\n) {\n// Buffer handling uses 18 decimal precision\nuint256\ncurrentBuffer\n=\nhypeBuffer\n;\nuint256\namountFromBuffer\n=\nMath\n.\nmin\n(\namount\n,\ncurrentBuffer\n);\nif\n(\namountFromBuffer\n>\n0\n) {\nhypeBuffer\n=\ncurrentBuffer\n-\namountFromBuffer\n;\namount\n-=\namountFromBuffer\n;\nemit\nBufferDecreased\n(\namountFromBuffer\n,\nhypeBuffer\n);\n}\n// If fully fulfilled from buffer, return\nif\n(\namount\n==\n0\n) {\nreturn\n;\n}\n}\n\nSo the buffer reduces to\n5 HYPE\n(even though the contract still has the remaining\n15 HYPE\nbecause the transfer hasn\u2019t occurred yet) and the withdrawal amount is fully satisfied, with the withdrawal request being created.  Ideally, the user now has to wait the withdrawal delay and confirm their withdrawal but if at some point during the withdrawal delay, the user decides to cancel their withdrawal and keep their KHYPE tokens. We can observe the function below.\n\nfunction\ncancelWithdrawal\n(\naddress\nuser\n,\nuint256\nwithdrawalId\n)\nexternal\nonlyRole\n(\nMANAGER_ROLE\n)\nwhenNotPaused\n{\nWithdrawalRequest\nstorage\nrequest\n=\n_withdrawalRequests\n[\nuser\n][\nwithdrawalId\n];\nrequire\n(\nrequest\n.\nhypeAmount\n>\n0\n,\n\"No such withdrawal request\"\n);\nuint256\nhypeAmount\n=\nrequest\n.\nhypeAmount\n;\nuint256\nkHYPEAmount\n=\nrequest\n.\nkHYPEAmount\n;\nuint256\nkHYPEFee\n=\nrequest\n.\nkHYPEFee\n;\n// Check kHYPE balances\nrequire\n(\nkHYPE\n.\nbalanceOf\n(\naddress\n(\nthis\n)) >=\nkHYPEAmount\n+\nkHYPEFee\n,\n\"Insufficient kHYPE balance\"\n);\n// Clear the withdrawal request\ndelete\n_withdrawalRequests\n[\nuser\n][\nwithdrawalId\n];\ntotalQueuedWithdrawals\n-=\nhypeAmount\n;\n// Return kHYPE tokens to user (including fees)\nkHYPE\n.\ntransfer\n(\nuser\n,\nkHYPEAmount\n+\nkHYPEFee\n);\n// Track cancelled amount for future redelegation\n_cancelledWithdrawalAmount\n+=\nhypeAmount\n;\nemit\nWithdrawalCancelled\n(\nuser\n,\nwithdrawalId\n,\nhypeAmount\n,\n_cancelledWithdrawalAmount\n);\n}\n\nThere is no update to increment the buffer back after the withdrawal has been canceled, so the\n15 HYPE\ntokens are stored in the balance and are tracked in the\n_cancelledWithdrawalAmount\nwhich eventually can be moved via the\nredelegateWithdrawnHYPE\nfunction below.\n\nfunction\nredelegateWithdrawnHYPE\n()\nexternal\nonlyRole\n(\nMANAGER_ROLE\n)\nwhenNotPaused\n{\nrequire\n(\n_cancelledWithdrawalAmount\n>\n0\n,\n\"No cancelled withdrawals\"\n);\nrequire\n(\naddress\n(\nthis\n).\nbalance\n>=\n_cancelledWithdrawalAmount\n,\n\"Insufficient HYPE balance\"\n);\nuint256\namount\n=\n_cancelledWithdrawalAmount\n;\n_cancelledWithdrawalAmount\n=\n0\n;\n// Delegate to current validator using the SpotDeposit operation type\n_distributeStake\n(\namount\n,\nOperationType\n.\nSpotDeposit\n);\nemit\nWithdrawalRedelegated\n(\namount\n);\n}\n\nNow we can see that the function calls the distributeStake internal function with a spot deposit operation type and it resets the\n_cancelledWithdrawableAmount\nto 0, meaning the\n15 HYPE\nthat was initially taken from the buffer and canceled is no longer accounted for because it\u2019s going to be redelegated to the validators.\n\nelse\nif\n(\noperationType\n==\nOperationType\n.\nSpotDeposit\n) {\n// For spot deposits, first move from spot balance to staking balance\nuint256\ntruncatedAmount\n=\n_convertTo8Decimals\n(\namount\n,\nfalse\n);\nrequire\n(\ntruncatedAmount\n<=\ntype\n(\nuint64\n).\nmax\n,\n\"Amount exceeds uint64 max\"\n);\n// 1. First move from spot balance to staking balance using cDeposit\nl1Write\n.\nsendCDeposit\n(\nuint64\n(\ntruncatedAmount\n));\n// 2. Queue the delegation operation (8 decimals)\n_queueL1Operation\n(\nvalidator\n,\ntruncatedAmount\n,\nOperationType\n.\nRebalanceDeposit\n);\n}\n\nThis basically converts the amount to 8 decimals and moves it from the spot balance in L1 to the staking balance. Now the issue arises from the fact that the withdrawn funds were taken from the buffer and the withdrawal amount never got to L1. My understanding of the connection between the HYPER core and EVM is that the funds need to be moved first to L1 as with the user deposit operation with the logic below before being moved from spot to staking balance on L1.\n\n(\nbool\nsuccess\n,) =\npayable\n(\nL1_HYPE_CONTRACT\n).\ncall\n{value:\namount\n}(\n\"\"\n);\nrequire\n(\nsuccess\n,\n\"Failed to send HYPE to L1\"\n);\n\nHence the\n15 HYPE\ngets lost in the process and it can be repeated over and over again.\n\nEnsure that when the the canceled withdrawn amount is taken from the buffer, the buffer is either re-bumped or the assets are first moved to L1 to avoid being locked in the staking manager contract.\n\nKinetiq disputed and commented:\n\nWe can reduce the target buffer to zero to clear it as withdrawal liquidity.\nAlternatively we are able to redelegate those cancelled withdrawals back to protocol by using\nredelegateWithdrawnHYPE\n.",
+      "found_description": "When a withdrawal is cancelled via cancelWithdrawal(), the function returns kHYPE tokens to the user and reduces totalQueuedWithdrawals, but it does not restore the hypeBuffer that was reduced during the original queueWithdrawal() call. The original queueWithdrawal() called _withdrawFromValidator(), which reduced the buffer if applicable. Canceling the withdrawal should restore that buffer, but it does not. This allows an attacker to queue a withdrawal that drains the buffer, cancel it, and repeat \u2014 effectively spending the buffer multiple times.",
+      "found_id": "860f13a541480902",
+      "tool_finding_index": 12
+    }
+  ],
+  "missed_findings": [
+    {
+      "id": "code4rena_kinetiq_2025_07_expected_001",
+      "title": "Users Who Queue Withdrawal Before A Slashing Event Disadvantage Users Who Queue After And Eventually Leads To Loss Of Funds For Them",
+      "description": "Submitted by\nfranfran20\n, also found by\n0xG0P1\n,\n0xLeveler\n,\n0xpiken\n,\nadamIdarrha\n,\nAfriauditor\n,\nak1\n,\nAtharv\n,\nAudinarey\n,\nbtk\n,\nd3e4\n,\nfalconhoof\n,\ngesha17\n,\ngivn\n,\nharry\n,\nholydevoti0n\n,\nIzuMan\n,\nke1caM\n,\nknight18695\n,\nkomronkh\n,\nKupiaSec\n,\nmarchev\n,\nmrudenko\n,\nMrValioBg\n,\nocteezy\n,\noxelmiguel12\n,\npeanuts\n,\nphoenixV110\n,\nrouhsamad\n,\nThanatOS\n,\ntrachev\n,\ntypicalHuman\n,\nvangrim\n,\nzhaojohnson\n, and\nzzebra83\n\nhttps://github.com/code-423n4/2025-04-kinetiq/blob/7f29c917c09341672e73be2f7917edf920ea2adb/src/StakingAccountant.sol#L214-L216\n\nLets take the scenario where the HYPE to KHYPE exchange is\n1 KHYPE = 1.5 KHYPE\n.\n\nAt this point, let\u2019s assume that there are in total\n50 KHYPE\ntokens queued for withdrawals, that is\n75 HYPE\nqueued for withdrawals while the remaining\n20 KHYPE\nare still held by their respective holders worth\n30 HYPE\nin all.\n\nThis means that the locked in amount in the queued Withdrawals for each user across all queued withdrawals is\n75 HYPE\n.\n\nWe know this because of the logic in the queueWithdrawal function in the StakingManager below:\n\nuint256\nhypeAmount\n=\nstakingAccountant\n.\nkHYPEToHYPE\n(\npostFeeKHYPE\n);\n// Lock kHYPE tokens\nkHYPE\n.\ntransferFrom\n(\nmsg\n.\nsender\n,\naddress\n(\nthis\n),\nkHYPEAmount\n);\n// Create withdrawal request\n_withdrawalRequests\n[\nmsg\n.\nsender\n][\nwithdrawalId\n] =\nWithdrawalRequest\n({\nhypeAmount:\nhypeAmount\n,\nkHYPEAmount:\npostFeeKHYPE\n,\nkHYPEFee:\nkHYPEFee\n,\ntimestamp:\nblock\n.\ntimestamp\n});\n\nThat gives us a total of\n70 KHYPE\nto\n105 HYPE\nacross the board when calulating the exchange ratio (including rewards).\n\nNow let\u2019s assume for some reason there\u2019s a slashing event and the amount of HYPE in total reduces from\n105 KHYPE\nto\n75 KHYPE\n.\n\nNow it leaves us with an exchange ratio of\n70 KHYPE\nto\n75 HYPE\ni.e\n1 KHYPE = 1.071 HYPE\n.\n\nSince the guys who withdrew earlier already have their withdrawal delay processing first locked in with the ratio that was used before the slash, they all successfully confirm their withdrawal first and take the whole\n75 HYPE\navailable, leaving 0 HYPE left for all the remaining\n20 KHYPE\nholders.\n\nYou can see the\nconfirmWithdrawal\nfunction uses the withdrawalRequest amount\nhypeAmount\nstored which uses the previous ratio.\n\nfunction\nconfirmWithdrawal\n(\nuint256\nwithdrawalId\n)\nexternal\nnonReentrant\nwhenNotPaused\n{\n// @note - the process confirmation basically makes sure the khype amount to be withdrawn is in the contracts\n// ... it burns it, transfers the fee and makes sure the withdrawal delay has been exceeded, deletes the withdrawal request, updates the totalclaimed and totalqueuedwithdrawals\n// ... it then returns the hype amount to be received by the user\nuint256\namount\n=\n_processConfirmation\n(\nmsg\n.\nsender\n,\nwithdrawalId\n);\nrequire\n(\namount\n>\n0\n,\n\"No valid withdrawal request\"\n);\n// @note - makes sure that the contract has the specified amount required to satisfy the withdrawals\n// @note - this is where the issue lies I guess, maybe not here, but if there was a slashing occurence before this confirmation of withdrawal, there could be an issue???\nrequire\n(\naddress\n(\nthis\n).\nbalance\n>=\namount\n,\n\"Insufficient contract balance\"\n);\n// @note - updates the totalClaimed hype across all SM\nstakingAccountant\n.\nrecordClaim\n(\namount\n);\n// Process withdrawal using call instead of transfer\n(\nbool\nsuccess\n,) =\npayable\n(\nmsg\n.\nsender\n).\ncall\n{value:\namount\n}(\n\"\"\n);\nrequire\n(\nsuccess\n,\n\"Transfer failed\"\n);\n}\n\nThis leads to loss of stake for the remaining KHYPE holders even though there was enough to go 1:1.\n\nA possible mitigation would be when confirming withdrawals, not to use the hypeAmount stored in the withdrawal request but to recalculate with the new ratio.\n\nKinetiq disputed and commented:\n\nExchange rate adjusts only during rewards or slashing. When users queue withdrawals, their assets exit the validator, earning no profits, so the exchange rate remains fixed as when queued, until confirmation. The rate fluctuates slightly upon claiming due to total supply changes, but this is acceptable and not an issue for us.",
+      "severity": "high",
+      "reason": "Closest candidate index=22 (title='Exchange Ratio Calculation Uses Stale totalStaked and totalClaimed Values During') with confidence=0.70."
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_expected_002",
+      "title": "Mishandling of receiving HYPE in the StakingManager, user can\u2019t confirm withdrawal and inflate the exchange ratio",
+      "description": "Submitted by\n0xDemon\n, also found by\n0xG0P1\n,\nchibi\n,\nFalendar\n,\nFalseGenius\n,\nIzuMan\n,\njkk812812\n,\nLSHFGJ\n,\noxelmiguel12\n,\nRiceee\n,\nroccomania\n, and\nwon\n\nhttps://github.com/code-423n4/2025-04-kinetiq/blob/7f29c917c09341672e73be2f7917edf920ea2adb/src/StakingManager.sol#L208-L211\n\nMishandling of receiving\nHYPE\nin the\nStakingManager\n, user can\u2019t confirm withdrawal and inflate the exchange ratio.\n\nBased on the\nHyperliquid docs\n:\n\nHYPE is a special case as the native gas token on the HyperEVM. HYPE is received on the EVM side of a transfer as the native gas token instead of an ERC20 token\n\nThe problem arises when\nHYPE\nwithdrawn from a validator on Hypercore is sent to the\nStakingManager\n(e.g. use call / transfer). It will immediately trigger the\nstake()\nfunction to be called and cause the\nHYPE\nthat should have been sent to the user who made the withdrawal to be staked back and inflate the exchange ratio. This happened because of the implementation of\nreceive()\non the\nStakingManager\n:\n\nreceive\n()\nexternal\npayable\n{\n// Simply call the stake function\nstake\n();\n}\n\nThe first impact can occur if\ntargetBuffer = 0\n, but there is another impact if\ntargetBuffer != 0\nand fully fulfill.\n\nIf the buffer is applied, the user who initiated the withdrawal can still confirm the withdrawal but there is another effect that arises, the\nHYPE\nresulting from the withdrawal is still staked and inflates the exchange ratio for\nHYPE\nand\nKHYPE\nbecause\nKHYPE\nwill be minted to the system address (Core) and the\ntotalSupply\nwill increase. The amount of\nKHYPE\nminted to system address will be locked forever.\n\nNote: This issue could also happen if reward from delegating to validator is sent directly to\nStakingManager\n.\n\nModify the\nreceive()\nfunction\n\nreceive\n()\nexternal\npayable\n{\n// Simply call the stake function\nif\n(\nmsg\n.\nsender\n!=\nsystemAddress\n) {\nstake\n();\n}\n}\n\nThe\nschema\nfor\nthe\ntest :\n1.\nWill\nuse\ntargetBuffer\n=\n0\nfor\nsimplicity\n2.\nUser\nstake\n1\nHYPE\n3.\nOperator\nexecute\nL1\ndeposit\noperations\n4.\nUser\nqueue\nwithdrawal\n,\n1\nKHYPE\n5.\nOperator\nexecute\nL1\nwithdrawal\noperations\n6.\nSystem\naddress\n(\nCore\n)\ncall\n/\ntransfer\nHYPE\nto\nstaking\nmanager\nand\nauto\nstaked\n7.\nUser\ncan\n't confirm withdrawal because lack of HYPE balance on the staking manage\nr\n\nAdd test to\nStakingManager.t.sol\nand run\nforge test --match-test test_misshandlingOfReceivingHYPE -vvv\n\nfunction\ntest_misshandlingOfReceivingHYPE\n()\npublic\n{\n// Set actor\naddress\nsystemAddressForHYPE\n=\nmakeAddr\n(\n\"systemAddressForHYPE\"\n);\n// Set staking amount\nuint256\nstakeAmount\n=\n1\nether\n;\n// fund the system for mocking withdrawal process and the user\nvm\n.\ndeal\n(\nsystemAddressForHYPE\n,\n1\nether\n);\nvm\n.\ndeal\n(\nuser\n,\n1\nether\n);\n// Set up delegation first\nvm\n.\nstartPrank\n(\nmanager\n);\nvalidatorManager\n.\nactivateValidator\n(\nvalidator\n);\nvalidatorManager\n.\nsetDelegation\n(\naddress\n(\nstakingManager\n),\nvalidator\n);\nvm\n.\nstopPrank\n();\nconsole\n.\nlog\n(\n\"\"\n);\nconsole\n.\nlog\n(\n\" START TEST ... \"\n);\nconsole\n.\nlog\n(\n\"\"\n);\n// check stakingManager balance\nuint256\ninitialStakingManagerBalance\n=\naddress\n(\nstakingManager\n).\nbalance\n;\nconsole\n.\nlog\n(\n\"Staking Manager Initial HYPE Balance:\"\n,\ninitialStakingManagerBalance\n);\nconsole\n.\nlog\n(\n\"\"\n);\nconsole\n.\nlog\n(\n\" USER STAKE ... \"\n);\nconsole\n.\nlog\n(\n\"\"\n);\n// User stake\nvm\n.\nprank\n(\nuser\n);\nstakingManager\n.\nstake\n{value:\nstakeAmount\n}();\nuint256\nstakingManagerBalanceAfterUserDeposit\n=\naddress\n(\nstakingManager\n).\nbalance\n;\nconsole\n.\nlog\n(\n\"\n\\\\\nThis value will be zero because HYPE will directly send to system address on core\"\n);\nconsole\n.\nlog\n(\n\"Staking Manager HYPE Balance After User Deposit:\"\n,\nstakingManagerBalanceAfterUserDeposit\n);\nconsole\n.\nlog\n(\n\"\"\n);\nconsole\n.\nlog\n(\n\" OPERATOR EXECUTE L1 DEPOSIT OPERATION ... \"\n);\nconsole\n.\nlog\n(\n\"\"\n);\n// operator execute L1 operations : delegate HYPE to validator\nvm\n.\nprank\n(\noperator\n);\nstakingManager\n.\nprocessL1Operations\n(\n0\n);\nconsole\n.\nlog\n(\n\" USER QUEUE WITHDRAWAL ... \"\n);\nconsole\n.\nlog\n(\n\"\"\n);\n// User withdraw\nvm\n.\nstartPrank\n(\nuser\n);\nkHYPE\n.\napprove\n(\naddress\n(\nstakingManager\n),\nstakeAmount\n);\nstakingManager\n.\nqueueWithdrawal\n(\nstakeAmount\n);\nvm\n.\nstopPrank\n();\nconsole\n.\nlog\n(\n\" OPERATOR EXECUTE L1 WITHDRAWAL OPERATION ... \"\n);\nconsole\n.\nlog\n(\n\"\"\n);\n// operator execute L1 operations : undelegated HYPE from validator\nvm\n.\nprank\n(\noperator\n);\nstakingManager\n.\nprocessL1Operations\n(\n0\n);\nconsole\n.\nlog\n(\n\" WITHDRAWAL HYPE FROM CORE SEND TO STAKINGMANAGER ... \"\n);\nconsole\n.\nlog\n(\n\"\"\n);\n// systemAddress send back undelegated HYPE from validator to stakingManager\nvm\n.\nprank\n(\nsystemAddressForHYPE\n);\naddress\n(\nstakingManager\n).\ncall\n{value :\nstakeAmount\n}(\n\"\"\n);\nuint256\nstakingManagerBalanceAfterHYPESentFromCore\n=\naddress\n(\nstakingManager\n).\nbalance\n;\nconsole\n.\nlog\n(\n\"\n\\\\\nThis value will be zero, HYPE will directly stacked again because receive() initiate stake() function\"\n);\nconsole\n.\nlog\n(\n\"Staking Manager HYPE Balance After HYPE Sent From Core :\"\n,\nstakingManagerBalanceAfterHYPESentFromCore\n);\n// warp 7 days\nvm\n.\nwarp\n(\nblock\n.\ntimestamp\n+\n7\ndays\n);\n// User want to confirm withdrawal failed because lack of HYPE on stakingManager\nvm\n.\nprank\n(\nuser\n);\nvm\n.\nexpectRevert\n();\nstakingManager\n.\nconfirmWithdrawal\n(\n0\n);\n}\n\nResult:\n\n[\nPASS\n]\ntest_misshandlingOfReceivingHYPE\n() (\ngas\n:\n897229\n)\nLogs:\nStarting setUp\nMinimal implementation deployed at: 0x2e234DAe75C793f67A35089C9d99245E1C58470b\nDeploying proxies...\nPauserRegistry proxy deployed at: 0xF62849F9A0B5Bf2913b396098F7c7019b51A820a\nPauserRegistry admin at: 0x4f81992FCe2E1846dD528eC0102e6eE1f61ed3e2\nStakingManager proxy deployed at: 0x5991A2dF15A8F6A256D3Ec51E99254Cd3fb576A9\nStakingManager admin at: 0x5B0091f49210e7B2A57B03dfE1AB9D08289d9294\nKHYPE proxy deployed at: 0xc7183455a4C133Ae270771860664b6B7ec320bB1\nKHYPE admin at: 0xa38D17ef017A314cCD72b8F199C0e108EF7Ca04c\nValidatorManager proxy deployed at: 0xa0Cb889707d426A7A386870A03bc70d1b0697598\nValidatorManager admin at: 0x83B4EEa426B7328eB3bE89cDb558F18BAF6A2Bf7\nOracleManager proxy deployed at: 0x1d1499e622D69689cdf9004d05Ec547d650Ff211\nOracleManager admin at: 0x45C92C2Cd0dF7B2d705EF12CfF77Cb0Bc557Ed22\nStakingAccountant proxy deployed at: 0xA4AD4f68d0b91CFD19687c881e50f3A00242828c\nStakingAccountant admin at: 0xeafCcCE3F73a1ac8690F49acF56C4142183619dd\nStarted admin prank\nCreating pausable contracts array\nSetup completed\nSTART TEST ...\nStaking Manager Initial HYPE Balance: 0\nUSER STAKE ...\n\\ This value will be zero because HYPE will directly send to system address on core\nStaking Manager HYPE Balance After User Deposit: 0\nOPERATOR EXECUTE L1 DEPOSIT OPERATION ...\nUSER QUEUE WITHDRAWAL ...\nOPERATOR EXECUTE L1 WITHDRAWAL OPERATION ...\nWITHDRAWAL HYPE FROM CORE SEND TO STAKINGMANAGER ...\n\\ This value will be zero, HYPE will directly stacked again because receive() initiate stake() function\nStaking Manager HYPE Balance After HYPE Sent From Core : 0\nSuite result: ok. 1 passed; 0 failed; 0 skipped; finished in 8.41ms (1.93ms\nCPU\ntime\n)\n\nKinetiq acknowledged",
+      "severity": "high",
+      "reason": "Closest candidate index=1 (title='Automatic ETH Processing Bypasses Withdrawal Flow and Enables Double Funding') with confidence=0.70."
+    }
+  ],
+  "undecided_findings": [],
+  "extra_findings": [
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_000",
+      "title": "Unstake Fee Calculation Uses Incorrect kHYPE Amount Leading to Fee Theft",
+      "description": "The queueWithdrawal function calculates the unstake fee based on the full kHYPEAmount requested by the user, but then uses the post-fee kHYPEAmount (kHYPEAmount - kHYPEFee) to compute the HYPE amount to be withdrawn. However, the fee is deducted from the user's kHYPE balance before the conversion, meaning the fee is effectively taken from the user's kHYPE balance but then the fee amount is transferred to treasury from the contract's kHYPE balance. This creates a discrepancy: the fee is calculated on the full amount, but the contract only holds the post-fee kHYPE amount. When the fee is transferred to treasury, it is taken from the contract's kHYPE balance, which does not include the fee amount. This results in the contract being unable to cover the fee transfer, leading to a revert on confirmWithdrawal, or if the fee is somehow covered, the treasury receives a fee that was never actually collected from the user's balance. This is a critical accounting error that can lead to protocol insolvency or failed withdrawals.",
+      "severity": "critical",
+      "original_id": "5694aeb60d00b292"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_001",
+      "title": "Automatic ETH Processing Bypasses Withdrawal Flow and Enables Double Funding",
+      "description": "The receive() function automatically calls stake() when ETH is sent to the contract, but the contract also processes user-initiated withdrawals that return ETH to users. If an attacker queues a withdrawal and then sends ETH directly to the contract, the receive() handler will automatically stake that ETH, effectively re-depositing withdrawal funds before the user can collect them. This creates a double funding vulnerability: the user receives ETH from the withdrawal confirmation, while the protocol simultaneously re-stakes the same ETH via the receive() handler, causing the protocol to lose funds equal to the withdrawal amount.",
+      "severity": "critical",
+      "original_id": "bbfc4e7e5096a361"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_002",
+      "title": "Withdrawal Confirmation Allows Partial Execution Without User Consent",
+      "description": "The confirmWithdrawal and batchConfirmWithdrawals functions process withdrawal requests without ensuring that the full requested amount is available for withdrawal. The _processConfirmation function deducts the withdrawal amount from totalQueuedWithdrawals and totalClaimed before the actual ETH transfer occurs. If the ETH transfer fails (e.g., due to a reentrancy attack, recipient contract reverting, or insufficient balance), the state is already updated, but the user does not receive funds. This creates a scenario where users lose their staked HYPE without receiving the corresponding ETH, and the protocol retains the funds permanently.",
+      "severity": "critical",
+      "original_id": "d77f4a91e946e7f2"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_003",
+      "title": "Buffer Management Allows Double-Spending of HYPE During Withdrawals",
+      "description": "The _withdrawFromValidator function first attempts to fulfill withdrawal requests from the hypeBuffer, then queues an L1 withdrawal for the remainder. However, if the L1 withdrawal fails (e.g., due to validator rejection or L1Write revert), the buffer has already been reduced, but the L1 system never receives the withdrawal request. This results in the protocol permanently losing the equivalent HYPE value from the buffer without any corresponding L1 withdrawal, effectively double-spending the same HYPE: once from the buffer and once from the validator's stake. This is a critical accounting inconsistency.",
+      "severity": "critical",
+      "original_id": "4d77d2dc86058f1c"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_004",
+      "title": "Unstake Fee Calculation Uses Incorrect kHYPE Amount After Fee Deduction",
+      "description": "In queueWithdrawal, the unstake fee is calculated as Math.mulDiv(kHYPEAmount, unstakeFeeRate, BASIS_POINTS), then subtracted from kHYPEAmount to get postFeeKHYPE. However, the fee is then transferred to treasury from the contract's kHYPE balance, while the kHYPEAmount burned is only the postFeeKHYPE. This is correct. However, the issue is that the fee is taken from the user's kHYPE balance via transferFrom, but the fee is not accounted for in the hypeAmount calculation. The hypeAmount is derived from postFeeKHYPE, which is correct. But the fee is not included in the totalQueuedWithdrawals or totalClaimed accounting \u2014 only the post-fee amount is. This is correct. However, the real issue is that the fee is transferred to treasury before the withdrawal is confirmed, and if the withdrawal is later canceled (via cancelWithdrawal), the fee is returned to the user. This means the treasury receives a fee for a withdrawal that may be canceled, leading to treasury gaining funds from invalid or canceled withdrawals. This is a financial misappropriation.",
+      "severity": "high",
+      "original_id": "f7c062c831601ce7"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_005",
+      "title": "L1 Operation Queue Processing Can Skip Operations Due to Index Mismatch",
+      "description": "The _processL1Withdrawals and _processL1Deposits functions use global indices (_withdrawalProcessingIndex and _depositProcessingIndex) to track progress. However, if a transaction processing L1 operations reverts midway (e.g., due to gas limit or sendTokenDelegate reverting), the index is not rolled back, but the operation is not executed. This causes the next transaction to skip the failed operation entirely, permanently leaving it unprocessed. This results in user withdrawals or deposits being stuck forever, locking assets on L1 while the EVM state believes they are processed. This is a critical state synchronization failure.",
+      "severity": "critical",
+      "original_id": "d154851a1db16323"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_006",
+      "title": "Emergency Withdrawal Bypasses Buffer and Delegation Logic, Leading to Protocol Insolvency",
+      "description": "The executeEmergencyWithdrawal function allows SENTINEL_ROLE to withdraw any amount directly from a validator via sendTokenDelegate, without checking the contract's balance or the buffer. This means the protocol can withdraw more HYPE than it actually holds on L1, because the function does not verify that the amount being withdrawn is backed by actual staked assets. If the validator has insufficient balance, the L1 operation may fail, but the EVM state does not revert. More critically, if the operation succeeds, the protocol has withdrawn HYPE that was not accounted for in its internal state (totalStaked, hypeBuffer, etc.), leading to a mismatch between on-chain accounting and actual asset holdings. This can cause protocol insolvency if the withdrawn amount exceeds the actual staked balance.",
+      "severity": "critical",
+      "original_id": "e05c70cc65d2a48e"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_007",
+      "title": "Staking Limit Validation Uses Inaccurate Rewards Estimation",
+      "description": "In the stake function, the staking limit check uses validatorManager.totalRewards() to estimate available capacity: netStaked = totalStaked + rewardsAmount - totalClaimed. However, totalRewards() is a global value that may include rewards earned by other stakers or validators, not just those attributable to this contract. This means the limit check is inaccurate \u2014 the contract may allow staking beyond its actual capacity if rewards are inflated. An attacker can manipulate the validatorManager to report inflated rewards (e.g., by staking large amounts elsewhere and triggering reward distribution), causing the StakingManager to accept staking beyond its intended limit, leading to over-staking and potential insolvency when withdrawals are requested.",
+      "severity": "high",
+      "original_id": "67ecbade3afc5e05"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_008",
+      "title": "cancelWithdrawal Returns kHYPE Fee to User, But Treasury Already Received It",
+      "description": "In queueWithdrawal, the unstake fee (kHYPEFee) is transferred to treasury immediately. However, in cancelWithdrawal, the entire kHYPEAmount + kHYPEFee is returned to the user. This means the treasury keeps the fee even when the withdrawal is canceled, while the user gets back the full kHYPE amount they originally staked. This is a financial gain for the treasury at the expense of protocol fairness \u2014 users pay fees for canceled withdrawals, which should be refunded. This is a clear accounting inconsistency: the fee is collected before the withdrawal is confirmed, and should be refunded if the withdrawal is canceled.",
+      "severity": "high",
+      "original_id": "cb5984fe091e429e"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_009",
+      "title": "redelegateWithdrawnHYPE Uses SpotDeposit Without Validating Available Balance",
+      "description": "The redelegateWithdrawnHYPE function transfers _cancelledWithdrawalAmount from the contract's ETH balance to _distributeStake with OperationType.SpotDeposit. However, _distributeStake for SpotDeposit assumes the amount is already on L1 spot balance and calls l1Write.sendCDeposit. But the _cancelledWithdrawalAmount is ETH held in the contract, not L1 spot balance. This means the function attempts to move ETH from EVM to L1 spot balance via sendCDeposit, which expects 8-decimal HYPE tokens already on L1. This will fail silently or revert, but the state (_cancelledWithdrawalAmount = 0) is already updated. The protocol permanently loses the ETH that was supposed to be redelegated, because it was never properly moved to L1.",
+      "severity": "critical",
+      "original_id": "6f074b0fd3e7e899"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_010",
+      "title": "Missing Access Control on PauserRegistry Update Allows Unauthorized Contract Pausing",
+      "description": "The pauserRegistry state variable is initialized in the initialize() function but can be re-assigned by any caller after initialization, since there is no access control on its setter. An attacker who gains access to the MINTER_ROLE or BURNER_ROLE (or any other role with sufficient privileges) can reassign pauserRegistry to a malicious contract they control. This malicious contract can then return true for isPaused(address(this)), effectively pausing the KHYPE contract indefinitely. Once paused, all token transfers (mint, burn, transfer, etc.) are blocked via the whenNotPaused modifier, locking all user funds permanently. This is a critical loss-of-function vulnerability that renders the entire protocol unusable.",
+      "severity": "critical",
+      "original_id": "7ab133ffede6ad73"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_011",
+      "title": "Precision Loss in _convertTo8Decimals Causes Underpayment on Withdrawals",
+      "description": "The _convertTo8Decimals function rounds up for withdrawals but does not account for the fact that the input amount may already be truncated from 18 to 8 decimals in prior steps. This leads to double-rounding: when a user queues a withdrawal of an amount that was already rounded down during staking, the withdrawal rounds up again, causing the system to pay out more HYPE than was originally staked. This results in a net loss to the protocol treasury and buffer.",
+      "severity": "critical",
+      "original_id": "2a21e97b46c17720"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_013",
+      "title": "State Commitment Before External Call in confirmWithdrawal Allows Reentrancy and Fund Loss",
+      "description": "In confirmWithdrawal() and batchConfirmWithdrawals(), the state is updated (totalClaimed, totalQueuedWithdrawals, deletion of request) before the external call to msg.sender. If the recipient is a malicious contract that reenters confirmWithdrawal() via a fallback function, it can reconfirm the same withdrawal ID multiple times, draining the contract's ETH balance. The state changes (deletion of request, totalClaimed increment) are committed before the transfer, making the reentrancy possible.",
+      "severity": "high",
+      "original_id": "c6e97735b84fe7a9"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_014",
+      "title": "L1Write.sendCWithdrawal Only Called for UserWithdrawal, Not RebalanceWithdrawal, Leading to Unclaimed Fees",
+      "description": "In _processL1Withdrawals(), sendCWithdrawal() is only called for UserWithdrawal operations. RebalanceWithdrawal operations (used by ValidatorManager) call sendTokenDelegate but skip sendCWithdrawal. This means that when the validator withdraws funds for rebalancing, the L1 spot balance is not updated to reflect the withdrawal, causing the spot balance to become inconsistent with the staking balance. This leads to future deposits being rejected due to insufficient spot balance, or fees being incorrectly calculated.",
+      "severity": "high",
+      "original_id": "57ceef05bb647d27"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_015",
+      "title": "redelegateWithdrawnHYPE Uses SpotDeposit Without Buffer Handling, Leading to Inconsistent Buffer Accounting",
+      "description": "The redelegateWithdrawnHYPE() function calls _distributeStake(amount, OperationType.SpotDeposit). However, _distributeStake() for SpotDeposit skips buffer handling entirely. The _cancelledWithdrawalAmount was originally subtracted from the buffer during queueWithdrawal(), but when redelegated, it is deposited without restoring the buffer. This creates a permanent accounting mismatch: the buffer is lower than it should be by the amount of cancelled withdrawals that were redelegated.",
+      "severity": "high",
+      "original_id": "17d2bc39850076d8"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_016",
+      "title": "Missing User Protection in Mint and Burn Functions - No Slippage Control",
+      "description": "The mint and burn functions allow privileged roles (MINTER_ROLE and BURNER_ROLE) to directly mint or burn arbitrary amounts of KHYPE tokens without any mechanism for users to specify minimum acceptable outputs or slippage tolerance. This creates a critical vulnerability where an attacker with MINTER_ROLE can mint tokens to themselves or others in a way that dilutes existing holders, or a burner can burn tokens from users without consent, leading to irreversible loss of value. Users have no way to protect themselves from unfavorable execution, especially in scenarios where token value is tied to external economic mechanisms (e.g., staking rewards, liquidity provision).",
+      "severity": "critical",
+      "original_id": "b592c1ad788ca115"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_017",
+      "title": "Insufficient Access Control in Interface Declaration - PauserRegistry Interaction Without Validation",
+      "description": "The contract interacts with an external IPauserRegistry via a public state variable, but the interface IPauserRegistry is not defined in the provided code. However, the contract assumes that pauserRegistry.isPaused(address(this)) is a reliable and secure mechanism to pause the contract. If the IPauserRegistry interface is implemented by a malicious or compromised contract that returns arbitrary values (e.g., always returns false), the whenNotPaused modifier becomes ineffective. Furthermore, the contract does not validate that the pauserRegistry address is a legitimate, trusted contract (e.g., by checking for a known interface or using a trusted registry). This creates a high-risk attack surface where an attacker who gains control of the pauserRegistry contract (or front-runs its deployment) can bypass the pause mechanism entirely.",
+      "severity": "high",
+      "original_id": "a3f21c305d2197e9"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_018",
+      "title": "State Synchronization Issue in _update Override - Pausing Check After State Change",
+      "description": "The _update function overrides the ERC20Upgradeable _update to add a whenNotPaused modifier. However, the modifier is applied as an external check that wraps the super._update call. This means that the state change (balance updates, totalSupply changes) occurs inside super._update, and the pausing check is enforced before the state change. While this appears correct at first glance, the issue is that the pausing check is not part of the state change logic itself \u2014 it is a pre-condition. The vulnerability arises if the pauserRegistry contract is manipulated during the transaction (e.g., via flash loan or reentrancy) to toggle the pause state between the check and the execution. However, since the modifier is applied before the state change, this is not a direct validation-after-change issue. But critically, the contract does not validate that the pauserRegistry contract itself is trusted or immutable. If the pauserRegistry is upgraded or replaced by an attacker-controlled contract, the entire pause mechanism is compromised. This is a state synchronization issue because the contract's security depends entirely on an external, mutable, and unverified contract.",
+      "severity": "high",
+      "original_id": "aa3c2309477c0134"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_019",
+      "title": "No Validation of PauserRegistry Interface Compliance",
+      "description": "The contract assigns the pauserRegistry address via initialize() without verifying that the provided address implements the expected IPauserRegistry interface. An attacker can pass a malicious contract address that does not implement isPaused() correctly \u2014 for example, a contract that always returns false, or one that reverts on call. In the latter case, any mint/burn operation will revert due to the whenNotPaused modifier, effectively locking the contract permanently. In the former case, the contract becomes unpausable even if the legitimate pauser registry intends to pause it. This is a critical failure in external dependency validation. No interface compatibility check (e.g., using ERC165 or a static call to verify function existence) is performed.",
+      "severity": "critical",
+      "original_id": "84bc7ffb6fb930fa"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_020",
+      "title": "Critical Role Assignment Without Multi-Sig or Timelock - Admin Can Fully Compromise Protocol",
+      "description": "The initialize() function grants DEFAULT_ADMIN_ROLE to a single address (admin), which then controls MINTER_ROLE and BURNER_ROLE. There is no multi-sig requirement, timelock, or governance mechanism to protect these roles. An attacker who compromises the admin address (e.g., via private key theft, phishing, or smart contract vulnerability) can immediately mint unlimited tokens, drain all value, or burn all user-held tokens. This is a classic single-point-of-failure vulnerability. The contract uses OpenZeppelin's AccessControl, which is secure by design, but the deployment configuration makes it dangerously centralized. No safeguards are in place to prevent the admin from acting maliciously or being compromised.",
+      "severity": "critical",
+      "original_id": "57b24e0448ad91f6"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_021",
+      "title": "No Default Receive/Fallback Handler, But Withdrawal Funds Could Be Accidentally Sent to Contract",
+      "description": "The KHYPE contract is an ERC20 token with no receive() or fallback() function, meaning it cannot accept native currency (ETH). However, if external systems (e.g., a staking or withdrawal contract) accidentally send ETH to this contract during a withdrawal flow, the funds become permanently locked because there is no mechanism to withdraw or recover them. The contract has no logic to distinguish or handle native currency, and no admin or role-based recovery mechanism exists. This creates a critical risk of permanent fund loss if ETH is sent to the contract by mistake.",
+      "severity": "high",
+      "original_id": "3211e66ca564edb0"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_022",
+      "title": "Exchange Ratio Calculation Ignores TotalStaked Being Modified by Unauthorized Managers",
+      "description": "The _getExchangeRatio() function calculates the HYPE/kHYPE exchange ratio using totalStaked, which is only updated by authorized managers via recordStake(). However, totalStaked is a global state variable that can be manipulated by any authorized manager. Since multiple managers can call recordStake() independently, and each manager's staked amount contributes to totalStaked, the exchange ratio becomes a weighted average of all managers' staking activity. This creates a critical accounting flaw: when a manager records a stake, it increases totalStaked, which inflates the exchange ratio for all other managers. This allows a malicious manager to artificially inflate the exchange ratio by staking a large amount, then claiming rewards at an inflated rate, effectively stealing HYPE from other users. The flaw is that totalStaked is used as a global accumulator without per-manager accounting, so the exchange ratio does not reflect the true proportional ownership of each manager's kHYPE supply. This breaks the fundamental invariant that exchange ratio should be fair and proportional to actual staked HYPE across all managers.",
+      "severity": "critical",
+      "original_id": "569b2457aec422d4"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_023",
+      "title": "Exchange Ratio Calculation Uses Stale totalStaked and totalClaimed Values During kHYPEToHYPE Conversion",
+      "description": "The _getExchangeRatio() function calculates the HYPE/kHYPE exchange ratio using totalStaked and totalClaimed, which are updated by external managers via recordStake() and recordClaim(). However, these values are not atomically synchronized with the kHYPE supply during ratio calculation. An attacker can manipulate the ratio by triggering a stake or claim immediately before a conversion, causing users to receive fewer HYPE tokens than mathematically justified by the true state. This creates a front-running opportunity where the attacker exploits the time gap between ratio calculation and state updates, effectively stealing value from users converting kHYPE to HYPE.",
+      "severity": "high",
+      "original_id": "43705b7a18685720"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_024",
+      "title": "Missing Mathematical Domain Validation in _update Override",
+      "description": "The _update function overrides the ERC20 internal state update mechanism but does not validate that the amount being transferred or burned is within valid mathematical bounds. While Solidity's uint256 prevents underflow/overflow via checked arithmetic, the function does not validate that the amount is non-zero before proceeding, which can lead to unintended behavior when zero-value transfers are processed. Although zero transfers are technically allowed in ERC20, the lack of explicit domain validation in a context where pausing and role-based control are enforced creates ambiguity and potential for logic errors in downstream systems that assume non-zero transfers have economic meaning.",
+      "severity": "low",
+      "original_id": "41ac6246f05a7cab"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_025",
+      "title": "Authorization Context Not Bound to Operation in mint/burn",
+      "description": "The mint and burn functions are restricted by role (MINTER_ROLE, BURNER_ROLE) but do not bind the authorization context to the specific parameters of the operation. An authorized actor can mint or burn any amount to any address. While this is standard for ERC20, in systems where mint/burn operations are intended to be tied to specific events (e.g., staking/unstaking), the lack of parameter binding allows front-running or misuse. For example, a minter could mint tokens to an attacker's address immediately after a legitimate user initiates a staking transaction, effectively stealing the economic intent of the operation. The authorization grants broad power without contextual constraints.",
+      "severity": "high",
+      "original_id": "7d860cfd226d9a25"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_026",
+      "title": "State Commitment Before External Dependency Validation",
+      "description": "The whenNotPaused modifier checks pauserRegistry.isPaused(address(this)) before allowing _update to proceed. However, if the pauserRegistry contract is malicious or compromised, it could return false initially, allowing the state update (transfer/burn) to occur, and then immediately pause the contract or revert future calls. Since the state change (balance update) is committed before the external call's result is fully trusted, an attacker could trigger a state change that is later deemed invalid by the external system, leaving the system in an inconsistent state. This is a classic commit-before-verify flaw.",
+      "severity": "high",
+      "original_id": "90c3deac73f9feba"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_027",
+      "title": "External Interface Dependency Without Version or ABI Compatibility Check",
+      "description": "The contract depends on IPauserRegistry without verifying the external contract's interface compatibility. The interface is declared as having an isPaused(address) function, but if the deployed pauserRegistry contract is from a different version or fork (e.g., a modified fork that renamed the function to isContractPaused or added parameters), the call will revert silently due to ABI mismatch. This is not caught at compile time and will cause the entire contract to become unusable (all transfers blocked) if the external contract is incompatible. No fallback, version check, or interface validation is performed.",
+      "severity": "critical",
+      "original_id": "c37ab59c1d3c6584"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_028",
+      "title": "Fork Behavioral Divergence Risk in PauserRegistry Integration",
+      "description": "The contract assumes that pauserRegistry.isPaused(address(this)) returns true when the contract should be paused. However, in many forked protocols (e.g., Uniswap v3 forks, SushiSwap variants), pausing logic is moved to a separate governance or timelock contract, and the isPaused function may return false even when the system is effectively paused due to governance vote or emergency shutdown. If the deployed pauserRegistry is such a forked implementation, the contract will continue to allow transfers even when the protocol is paused, leading to potential fund theft during emergencies. The contract blindly trusts the external contract's semantics without verifying actual operational state.",
+      "severity": "critical",
+      "original_id": "de16cc31b9600d79"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_029",
+      "title": "Automatic Processing of Withdrawal Funds via External Token Transfers",
+      "description": "The StakingAccountant contract does not handle ERC20 token transfers correctly. When a user or external system sends kHYPE tokens directly to the StakingAccountant contract (e.g., as a withdrawal refund or reward), the contract's _getExchangeRatio() function automatically includes these tokens in the total kHYPE supply calculation. This causes the exchange ratio to be artificially inflated, leading to a dilution of all existing kHYPE holders' value. Since the contract has no receive() or onERC20Received() handler to distinguish between user deposits and system returns, any incoming kHYPE is treated as a legitimate stake, even if it originates from a withdrawal or reward refund. This creates a silent inflation vulnerability where attackers can flood the contract with kHYPE to devalue all other holdings.",
+      "severity": "critical",
+      "original_id": "9e92cb991edcb02d"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_030",
+      "title": "Missing Access Control on _update Override Enables Unauthorized Token Transfer Manipulation",
+      "description": "The _update function is overridden with a whenNotPaused modifier, but it is an internal function called by _mint and _burn, which are already restricted by onlyRole modifiers. However, the _update function itself is not externally callable, so the primary issue is not direct access. The real vulnerability lies in the fact that the contract inherits from ERC20PermitUpgradeable, which implements permit functionality allowing users to sign off-chain approvals for transfers. The _update function is called by _transfer, which is called by transferFrom and transfer. Since the whenNotPaused modifier is applied to _update, it prevents transfers during a pause, but there is no access control on the permit signature validation itself. The critical flaw is that the contract does not override the _afterTokenTransfer hook or any other mechanism to prevent minting/burning via permit-based transfers when the contract is paused. An attacker can exploit this by using a valid permit signature to transfer tokens even when the contract is paused, bypassing the intended pause mechanism. This breaks the integrity of the pause functionality, which is meant to halt all token movements during emergencies. The attacker can drain tokens from users who have previously signed permits, even during a pause, leading to loss of user funds and undermining the security model.",
+      "severity": "high",
+      "original_id": "0c8475ef85e71e65"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_031",
+      "title": "Division by Zero in Performance Aggregation Due to MIN_VALID_ORACLES = 1 and Zero Valid Oracles",
+      "description": "The generatePerformance function calculates averages by dividing aggregated values by validOracleCount. However, if all oracles return stale or invalid data, validOracleCount can be zero even when MIN_VALID_ORACLES = 1, because the require(validOracleCount >= MIN_VALID_ORACLES) check occurs after the division operations. This causes a division-by-zero revert in the averaging calculations, which can be triggered by an attacker who causes all oracles to return stale data. The protocol becomes non-functional for that validator until external intervention, effectively locking performance updates and potentially stalling reward distribution.",
+      "severity": "high",
+      "original_id": "fc0a4b7562e9f802"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_032",
+      "title": "Mathematical Domain Violation in Exchange Ratio Calculation",
+      "description": "The _getExchangeRatio() function computes a ratio using totalHYPE = totalStaked + rewardsAmount - totalClaimed - slashingAmount without validating that totalHYPE is non-negative. If totalClaimed + slashingAmount exceeds totalStaked + rewardsAmount, totalHYPE becomes negative, but Math.mulDiv treats it as an unsigned integer, producing a large positive result due to underflow wrapping. This corrupts the exchange ratio, causing all kHYPE-to-HYPE conversions to return incorrect, inflated values.",
+      "severity": "critical",
+      "original_id": "8d70f30373060065"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_033",
+      "title": "Incomplete State Restoration in Deauthorization",
+      "description": "When deauthorizing a manager, the contract removes the manager from _authorizedManagers and conditionally removes the kHYPE token from _uniqueTokens only if no other manager uses it. However, totalStaked and totalClaimed are global accumulators that include stakes and claims from the deauthorized manager. These global values are never adjusted to remove the historical contribution of the deauthorized manager, leading to an inflated totalHYPE calculation and thus an incorrect exchange ratio over time.",
+      "severity": "high",
+      "original_id": "fe5adfc8cc57f203"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_034",
+      "title": "Gas-Dependent Subcall Failure in Exchange Ratio Calculation",
+      "description": "In _getExchangeRatio(), the contract iterates over _uniqueTokens and calls IERC20(token).totalSupply() for each token. These external calls consume gas, and under the EVM's 63/64 gas forwarding rule, the final calls may run out of gas if the number of unique tokens is large. If a subcall reverts due to insufficient gas, the entire function reverts, preventing the exchange ratio from being computed. This allows an attacker to prevent legitimate users from converting kHYPE to HYPE by adding many dummy kHYPE tokens, effectively DoSing the conversion function.",
+      "severity": "high",
+      "original_id": "cf9cf63e77cbbea7"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_035",
+      "title": "Authorization Context Binding Missing in recordStake and recordClaim",
+      "description": "The recordStake and recordClaim functions are restricted by onlyAuthorizedManager, which checks msg.sender against _authorizedManagers. However, the authorization is bound only to the caller address, not to the specific kHYPE token or amount. An attacker who gains access to an authorized manager's private key can call these functions with arbitrary amounts, and there is no binding to the token or context. This allows a compromised manager to drain the global accounting by recording fraudulent stakes or claims.",
+      "severity": "high",
+      "original_id": "504e1ff0a7da4dbf"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_036",
+      "title": "Desynchronized Iteration in Deauthorization Leads to Token Supply Undercounting",
+      "description": "The deauthorizeStakingManager function iterates over _authorizedManagers to determine if a kHYPE token is still in use before removing it from _uniqueTokens. However, the iteration uses a static length value captured before the loop, which does not account for potential concurrent modifications. More critically, the logic assumes that if no other manager uses the token, it can be removed from _uniqueTokens. But if a manager is deauthorized and the token is still in use by another manager, the token remains. However, the real vulnerability is that the _uniqueTokens set is only updated when a manager is deauthorized \u2014 but if a manager is re-authorized with the same token after being deauthorized, the token is not re-added to _uniqueTokens because _uniqueTokens.add() is idempotent and the token was never removed. This leads to a critical data integrity failure: when a manager is deauthorized and the token is still in use by another manager, the token remains in _uniqueTokens. But if the last manager using that token is deauthorized, the token is removed from _uniqueTokens. However, if a new manager is later authorized with the same token, it is not added back to _uniqueTokens because _uniqueTokens.add() does nothing if the token is already present \u2014 but it was removed earlier. This creates a permanent gap: the token is no longer tracked in _uniqueTokens, so _getExchangeRatio() will not include its totalSupply() in the denominator, causing the exchange ratio to be artificially inflated. This leads to users receiving more HYPE than they should when converting kHYPE to HYPE, resulting in protocol insolvency.",
+      "severity": "critical",
+      "original_id": "4d0314c4966bf1ab"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_037",
+      "title": "Unrestricted recordStake and recordClaim Allow Timing Attacks on Exchange Ratio",
+      "description": "The recordStake and recordClaim functions are only restricted by onlyAuthorizedManager, which checks if msg.sender is an authorized manager. However, these functions directly update totalStaked and totalClaimed \u2014 state variables used in _getExchangeRatio() to compute the HYPE/kHYPE exchange ratio. An attacker can deploy a malicious StakingManager and call recordStake or recordClaim at a time just before a user calls kHYPEToHYPE. By manipulating the timing of these updates, the attacker can artificially inflate or deflate totalStaked or totalClaimed to distort the exchange ratio. For example, if an attacker calls recordClaim(1e18) just before a user converts 1000 kHYPE to HYPE, totalClaimed increases, reducing totalHYPE = totalStaked + rewards - totalClaimed - slashing, which reduces the exchange ratio. The user then receives fewer HYPE than they should. Conversely, if the attacker calls recordStake(1e18) before conversion, totalHYPE increases, inflating the ratio and causing the protocol to overpay HYPE. Since the attacker controls the timing and the function is publicly callable by any authorized manager, this is a classic timing attack on economic state. The financial impact is direct: users are underpaid or overpaid, and the protocol loses or gains funds accordingly.",
+      "severity": "high",
+      "original_id": "89ba90783869b171"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_038",
+      "title": "Unit Mismatch in _getExchangeRatio() Between HYPE (8 decimals) and kHYPE (18 decimals)",
+      "description": "The _getExchangeRatio() function calculates the exchange ratio as totalHYPE * 1e18 / totalKHYPESupply. However, totalHYPE is computed as totalStaked + rewardsAmount - totalClaimed - slashingAmount. The variables totalStaked and totalClaimed are maintained in HYPE units (assumed to be 8 decimals, as typical in staking protocols), while rewardsAmount and slashingAmount from validatorManager.totalRewards() and totalSlashing() are also assumed to be in 8 decimals. But totalKHYPESupply is the sum of ERC20 totalSupply() calls, which are in 18 decimals. The function multiplies totalHYPE by 1e18 to normalize it to 18 decimals before division. However, this is incorrect: if totalHYPE is in 8 decimals, multiplying by 1e18 converts it to 26 decimals, not 18. The correct normalization should be to multiply by 1e10 (10^10) to convert from 8 to 18 decimals. This causes the exchange ratio to be inflated by a factor of 1e8 (100 million). For example: if totalHYPE = 100 HYPE (100 * 1e8 = 1e10 in 18-decimal units), and totalKHYPESupply = 1000 kHYPE (1000 * 1e18), then the ratio should be (1e10 * 1e18) / (1000 * 1e18) = 1e10 / 1000 = 1e7 (i.e., 1 HYPE = 10 kHYPE). But the code computes (1e10 * 1e18) / (1000 * 1e18) = 1e28 / 1e21 = 1e7 \u2014 wait, this appears correct? No \u2014 the error is in the interpretation: totalHYPE is stored as 100 (meaning 100 * 1e8), but the code treats it as if it were in 18 decimals. So if totalHYPE = 100 (meaning 100 HYPE = 100 * 1e8), and the code does Math.mulDiv(100, 1e18, totalKHYPESupply), it is treating 100 as 100 * 1e18, not 100 * 1e8. So it multiplies 100 (intended as 1e8) by 1e18, resulting in 100 * 1e26, then divides by totalKHYPESupply (e.g., 1e21), yielding 1e5, when it should be 1e7. This means the exchange ratio is off by 1e8. A user converting 1 kHYPE gets 1e-8 HYPE instead of 1 HYPE. This is a catastrophic unit mismatch. The fix requires multiplying totalHYPE by 1e10, not 1e18.",
+      "severity": "critical",
+      "original_id": "f22dd71a99cb2868"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_039",
+      "title": "No Reentrancy Guard in generatePerformance Allows Cross-Contract Fund Manipulation",
+      "description": "The generatePerformance function performs external calls to IOracleAdapter.getPerformance() without reentrancy protection. An attacker can deploy a malicious oracle adapter that, during its getPerformance() call, triggers a withdrawal or fund transfer from the ValidatorManager or other dependent contracts, potentially draining funds or manipulating state. The function modifies critical state (lastValidatorUpdate, validator performance) after external calls, creating a state desynchronization vulnerability.",
+      "severity": "high",
+      "original_id": "d0b6143c85e50bd8"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_040",
+      "title": "Desynchronized Oracle Iteration Bound in generatePerformance",
+      "description": "The generatePerformance function iterates over authorizedOracles using a fixed length (oracleCount) at the start of the loop, but authorizedOracles can be modified by deauthorizeOracle or setOracleActive during the loop execution. Since the loop uses a snapshot of the collection size but accesses elements via .at(i), if an oracle is removed during iteration, the indices shift, causing the loop to skip the next oracle or access an invalid index. This leads to undercounting valid oracles, resulting in artificially low performance scores and reduced rewards for validators. The economic impact is that validators receive less reward than they deserve, while the protocol's reward distribution becomes biased and unfair.",
+      "severity": "high",
+      "original_id": "46e94449aed63903"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_041",
+      "title": "Missing Access Control on setMinValidOracles Enables Reward Manipulation",
+      "description": "The setMinValidOracles function is only restricted to MANAGER_ROLE, but it directly controls the threshold (MIN_VALID_ORACLES) used in generatePerformance to determine whether a validator's performance is accepted. An attacker with MANAGER_ROLE can temporarily lower MIN_VALID_ORACLES to 1, trigger generatePerformance while only one oracle reports (even if others are malicious or stale), then restore MIN_VALID_ORACLES. This allows a single oracle to dictate the entire validator's performance score, enabling manipulation of rewards and slashing. Since rewards are calculated as averages over valid oracles, reducing the threshold allows a malicious oracle to inflate or deflate scores, directly transferring value from the protocol or other validators to the attacker's validator.",
+      "severity": "high",
+      "original_id": "28c2b4782e237ecb"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_042",
+      "title": "Unit Mismatch in Reward/Slashing Aggregation Causes Underpayment",
+      "description": "The generatePerformance function aggregates accRewardAmount and accSlashAmount from oracles as absolute cumulative values, then computes their average. However, these values are expected by validatorManager.reportRewardEvent and reportSlashingEvent to represent the delta (increment) since the last update. The function correctly computes newRewardAmount = avgRewardAmount - previousRewards, but avgRewardAmount is an average of cumulative values, not a cumulative value itself. This creates a unit mismatch: the oracle returns cumulative rewards (e.g., 1000, 1200, 1100), the average is 1100, but if previousRewards was 1000, the system reports 100 as new reward. However, if the oracles' cumulative values are not monotonically increasing (e.g., due to resets or reverts), avgRewardAmount may be less than previousRewards, causing the system to report 0 or negative rewards \u2014 effectively stealing rewards from validators. The unit mismatch is between 'average of cumulative values' (expected to be cumulative) and 'delta from previous' (expected by downstream).",
+      "severity": "high",
+      "original_id": "cf7216a5727831b5"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_043",
+      "title": "Rebalance Request Closure Allows Unauthorized Fund Redirection via Staking Manager Mismatch",
+      "description": "The closeRebalanceRequests function allows any MANAGER_ROLE caller to close rebalance requests for any validator, but only validates that the stakingManager in the request matches the provided stakingManager parameter. However, it does not verify that the caller is the original staking manager that initiated the rebalance request. This allows a malicious MANAGER_ROLE actor to close rebalance requests initiated by one staking manager and redirect the redelegation funds to a different staking manager, effectively stealing the withdrawn funds intended for the original staking manager's delegation target. The totalAmount is calculated from the rebalance requests but sent to an arbitrary stakingManager, breaking the economic invariant that funds must be redelegated to the same staking manager that withdrew them.",
+      "severity": "critical",
+      "original_id": "f0decd0a80974a48"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_044",
+      "title": "Validation of Minimum Valid Oracles Occurs After Division Operations, Enabling Revert on Zero Division",
+      "description": "In generatePerformance, the function aggregates data from oracles and computes averages (total / validOracleCount) before validating that validOracleCount >= MIN_VALID_ORACLES. If all oracles are stale or fail, validOracleCount = 0, and the division operations (e.g., avgBalance = totalBalance / validOracleCount) revert before the require statement is reached. This is a classic validation-after-computation flaw (Pattern 2). The require statement is meant to prevent this, but it executes too late. An attacker can exploit this by causing all oracles to return stale data (timestamp + MAX_ORACLE_STALENESS < block.timestamp), forcing a revert that prevents any validator from updating performance, even if one valid oracle exists. This is a denial-of-service vector.",
+      "severity": "high",
+      "original_id": "d3ac8948e743310c"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_045",
+      "title": "Missing User Protection in Performance Generation: No Minimum Output Boundaries for Validators",
+      "description": "The generatePerformance function computes and updates validator performance metrics (balance, scores, rewards, slashing) without allowing the validator or any user to specify minimum acceptable output thresholds. An attacker can manipulate oracle data to return artificially low scores or rewards, causing the average to be suppressed. Since the function has no mechanism for the validator to reject updates below a threshold (e.g., 'minimum reward' or 'minimum uptime score'), the validator is forced to accept degraded performance metrics. This enables targeted suppression of validator rewards or scores, leading to economic disenfranchisement without recourse. This violates Pattern 1: user control over execution outcomes.",
+      "severity": "high",
+      "original_id": "f0a2507da926c4da"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_046",
+      "title": "Inconsistent Reward and Slashing Accounting Due to Use of Cumulative vs. Incremental Values",
+      "description": "The function uses cumulative reward and slashing values (accRewardAmount, accSlashAmount) from oracles, computes their average, then reports only the difference from the previous total. However, if any oracle returns a lower cumulative value than previously reported (e.g., due to data corruption or malicious submission), the difference (avgRewardAmount - previousRewards) can become negative. The code does not check for this, and since uint256 cannot be negative, the subtraction underflows to a huge positive number, causing the validator to be falsely slashed or rewarded with massive amounts. This is a critical accounting inconsistency (Pattern 3). For example: if previousRewards = 1000, and avgRewardAmount = 900, then newRewardAmount = 900 - 1000 = 2^256 - 100, triggering a massive false reward.",
+      "severity": "critical",
+      "original_id": "547408cf4c203ac9"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_047",
+      "title": "Sanity Checker Bypass via Zero Address Allows Unchecked Performance Updates",
+      "description": "The sanityChecker is optional (address(0) is allowed). If unset, the function skips all sanity checks and proceeds to update validator performance with potentially invalid data. However, the validatorManager.updateValidatorPerformance function may rely on sanity-checked data for internal invariants (e.g., reward caps, slashing thresholds). An attacker can force the sanityChecker to be set to address(0) via setSanityChecker(address(0)) (only callable by DEFAULT_ADMIN_ROLE), then manipulate oracle data to inject extreme values. Since no validation occurs, the validator's performance state becomes corrupted, potentially leading to protocol insolvency if rewards are overpaid or slashing is suppressed. This is a critical access control and validation gap.",
+      "severity": "critical",
+      "original_id": "d23551c4bf046216"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_048",
+      "title": "State Commitment Before External Call Failure Risk in ValidatorManager Updates",
+      "description": "The function updates lastValidatorUpdate[validator] = block.timestamp before verifying that all external calls to validatorManager have succeeded. If validatorManager.updateValidatorPerformance or reportRewardEvent/reportSlashingEvent reverts due to internal logic (e.g., invalid state, access control), the timestamp is still updated, preventing any future update for this validator for MIN_UPDATE_INTERVAL. This is a replay protection failure: state is committed before external operations complete. An attacker can trigger a revert in validatorManager (e.g., by manipulating its state) to permanently lock a validator from updating performance, even if the OracleManager logic is correct. This is a denial-of-service vector with permanent consequences.",
+      "severity": "high",
+      "original_id": "27040e94392a82fc"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_049",
+      "title": "Interface Compatibility Issue: IOracleAdapter.getPerformance Return Types May Not Match Actual Oracle Implementations",
+      "description": "The OracleManager assumes IOracleAdapter.getPerformance returns exactly 8 uint256 values in a fixed order. However, if an oracle adapter is implemented as a forked or modified contract (e.g., from a different protocol version), it may return fewer values, different types, or reordered fields. Since the try/catch block only catches outright reverts, not ABI mismatches, an oracle returning 7 values instead of 8 will cause the try block to revert due to ABI decoding failure, which is silently caught and treated as a failure. This is not a bug per se, but a critical interface compatibility risk (Pattern 8). If multiple oracles are incompatible, validOracleCount drops below MIN_VALID_ORACLES, causing the entire update to fail. This creates a systemic fragility: a single oracle with a non-compliant interface can break performance updates for all validators.",
+      "severity": "high",
+      "original_id": "fb6a0f45b6e7a0fb"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_050",
+      "title": "Access Control Bypass in Validator Performance Updates Allows Manipulation of Rebalancing and Reward Calculations",
+      "description": "The updateValidatorPerformance function allows the ORACLE_MANAGER_ROLE to directly set validator balances, which are used in economic calculations for rebalancing and reward distribution. However, there is no access control on the validatorBalance() view function or on the validatorRebalanceRequests mapping, enabling an attacker to manipulate validator balances before a rebalance request is processed. This creates a timing attack where an attacker can update a validator's balance to an artificially high value just before a rebalanceWithdrawal call, causing the system to allocate more funds to that validator than it should, effectively stealing from other validators and the protocol. The economic impact is direct theft of staked assets through misallocated rebalancing.",
+      "severity": "critical",
+      "original_id": "4b3bc119f9a902aa"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_051",
+      "title": "Unit Representation Mismatch in Validator Balance Handling Causes Incorrect Rebalancing and Reward Distribution",
+      "description": "The updateValidatorPerformance function accepts and stores validator balance in raw wei units (8 decimals), but the rebalanceWithdrawal and closeRebalanceRequests functions treat this balance as if it were the total staked amount eligible for withdrawal. However, the validator's actual staked balance may be different from the balance snapshot stored in the validator struct, because the balance is updated by external staking contracts and not synchronized with the validator's true on-chain stake. When closeRebalanceRequests calculates totalAmount for redelegation, it uses the stored balance from validatorRebalanceRequests, which may be outdated or manipulated. This causes redelegation amounts to be calculated incorrectly, leading to under- or over-delegation. For example, if a validator's true stake is 1000 ETH but the stored balance is 1500 ETH due to a prior update, and a withdrawal of 500 ETH is requested, the system will allow it even though the validator only has 1000 ETH staked, leading to a 500 ETH over-withdrawal. The redelegation then occurs on an incorrect totalAmount, causing systemic imbalance in validator rewards and potential insolvency.",
+      "severity": "high",
+      "original_id": "f89a473e1be0f6ee"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_052",
+      "title": "Desynchronized Validator Indexing Causes Data Loss During Rebalance Request Closure",
+      "description": "The _validators array and _validatorIndexes mapping are maintained independently. When a validator is deactivated, its index in _validators is not reused, but the _validatorsWithPendingRebalance set is cleared during closeRebalanceRequests. However, if a validator is deactivated and then reactivated, its index remains the same, but the _validatorsWithPendingRebalance set may still contain stale entries if the validator was previously in a pending state. More critically, if validators are removed from the system (e.g., via deactivation) and new validators are added, the _validators array grows but the _validatorIndexes mapping does not guarantee contiguous indexing. The closeRebalanceRequests function iterates over an array of validator addresses and checks _validatorsWithPendingRebalance.contains(validator), but if the validator was previously removed and re-added, its index may have been reused, and the validatorRebalanceRequests mapping may still contain old data from a prior instance. This leads to a situation where a new validator inherits the rebalance request of a previously deleted validator, causing incorrect fund allocation. For example: Validator A (index 5) is deactivated and deleted. Validator B is activated and assigned index 5. If Validator A had a pending rebalance request, and it was not fully cleared (due to a bug or race condition), Validator B may inherit that request. When closeRebalanceRequests is called for Validator B, it retrieves the old request from validatorRebalanceRequests[validatorB], which was set for Validator A, leading to a 1000 ETH withdrawal being allocated to Validator B when it should be 0. This results in a direct theft of 1000 ETH from the protocol.",
+      "severity": "high",
+      "original_id": "410f71eb21533da0"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_053",
+      "title": "Insecure External Interface Call in closeRebalanceRequests Leads to Reentrancy and Fund Drain",
+      "description": "The closeRebalanceRequests function calls IStakingManager(stakingManager).processValidatorRedelegation(totalAmount) after clearing rebalance requests, but does not use ReentrancyGuard on the external call. Although the function is marked nonReentrant, the reentrancy guard only protects the function's own execution context, not the external call. If the external StakingManager contract is malicious or compromised, it can reenter closeRebalanceRequests via a callback, causing the function to re-execute and clear rebalance requests multiple times. For example, an attacker can deploy a malicious StakingManager that, upon receiving processValidatorRedelegation, calls closeRebalanceRequests again with the same stakingManager and validators. Since the rebalance requests were already cleared in the first call, the second call will skip the checks and proceed to call processValidatorRedelegation again with the same totalAmount, effectively double-spending the redelegation. If totalAmount is 10,000 ETH, the attacker can drain 20,000 ETH from the protocol in a single transaction. This is a classic reentrancy vulnerability masked by the nonReentrant modifier's limited scope.",
+      "severity": "critical",
+      "original_id": "f6612d87cc9d6769"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_054",
+      "title": "Division by Zero in Performance Averaging Due to Insufficient Valid Oracle Check",
+      "description": "The generatePerformance function computes averages (e.g., avgBalance = totalBalance / validOracleCount) after requiring validOracleCount >= MIN_VALID_ORACLES. However, MIN_VALID_ORACLES can be set to 1 by the manager, and if all oracles return zero values (e.g., balance=0, scores=0), validOracleCount may be 1 while totalBalance=0, leading to 0/1=0 \u2014 which is mathematically valid but semantically meaningless. More critically, if MIN_VALID_ORACLES is set to 1 and the only active oracle returns a timestamp of 0 (invalid), the loop skips it, validOracleCount remains 0, and the division by zero occurs. The require(validOracleCount >= MIN_VALID_ORACLES) is placed after the aggregation loop but before division, yet if validOracleCount is 0, the division still executes and reverts. This is a critical type system integrity flaw: the code assumes that if validOracleCount >= MIN_VALID_ORACLES, then validOracleCount > 0, but if MIN_VALID_ORACLES is 1 and no oracles pass the freshness or sanity checks, validOracleCount remains 0, and division by zero occurs.",
+      "severity": "critical",
+      "original_id": "341af53157b9ac7f"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_055",
+      "title": "State Commitment Before External Call Verification in generatePerformance",
+      "description": "In generatePerformance, the function updates the validator's performance in ValidatorManager via validatorManager.updateValidatorPerformance(...) before verifying that the reward and slashing amounts are non-zero and before updating lastValidatorUpdate. However, if the external call to updateValidatorPerformance reverts (e.g., due to internal logic in ValidatorManager), the entire transaction reverts, which is acceptable. But the real issue is that the function commits state changes (lastValidatorUpdate[validator] = block.timestamp) only at the end \u2014 which is correct. However, the function emits PerformanceUpdated after the updateValidatorPerformance call, which is also correct. The real flaw is that the function does not validate that the external call to updateValidatorPerformance succeeded before proceeding. But since it's a direct call (not a low-level call), it will revert on failure. The actual flaw is in the reward/slashing reporting: the function computes newRewardAmount = avgRewardAmount - previousRewards and calls reportRewardEvent even if avgRewardAmount < previousRewards (which should not happen, but if due to oracle data corruption or clock drift, avgRewardAmount is less than previousRewards, then newRewardAmount becomes negative and underflows). Since uint256 is used, this underflow causes a revert. But the function does not check for underflow before subtraction. This is a mathematical domain validation issue: subtraction of uint256 values without bounds checking.",
+      "severity": "high",
+      "original_id": "70b622c320e6e945"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_056",
+      "title": "Underflow in Reward and Slashing Differential Calculation",
+      "description": "The function calculates newRewardAmount = avgRewardAmount - previousRewards and newSlashAmount = avgSlashAmount - previousSlashing without checking for underflow. Since both values are uint256, if avgRewardAmount < previousRewards (e.g., due to oracle data corruption, clock manipulation, or malicious oracle reporting a lower cumulative reward), the subtraction underflows, causing a revert. This is a mathematical domain validation failure: the operation assumes that cumulative rewards and slashing can only increase, but the contract does not validate this assumption before subtraction. For example, if previousRewards = 1000 and avgRewardAmount = 999, then 999 - 1000 underflows to 2^256 - 1, causing a revert. This breaks the operation lifecycle by causing a transaction to revert due to an unhandled edge case that should be validated. The financial impact is that legitimate updates may be reverted due to minor oracle data drift, locking validator performance updates and preventing reward distribution.",
+      "severity": "high",
+      "original_id": "7cb1c52e4878bee3"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_057",
+      "title": "Authorization Context Binding Failure in Oracle Activation",
+      "description": "The setOracleActive function allows any MANAGER_ROLE to activate or deactivate any authorized oracle. However, there is no binding between the oracle adapter's intended use and the actor activating it. An attacker who gains MANAGER_ROLE access can activate a malicious oracle adapter that returns zero or manipulated values. Then, when generatePerformance is called, it aggregates these bad values, leading to incorrect validator performance scores. The authorization is bound to the oracle address, but not to the context of its data integrity. This is an authorization context binding failure: the system trusts that an oracle adapter's address being active implies it will provide valid data, but there is no mechanism to verify or bind the oracle's behavior to its authorization. An attacker can activate a dummy oracle that always returns 0 for all scores, causing all validator performance to be averaged to zero, leading to unjust slashing or reward suppression.",
+      "severity": "high",
+      "original_id": "dd9348dce095e6fe"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_058",
+      "title": "Interface Definition Incompatibility with IOracleAdapter.getPerformance",
+      "description": "The contract assumes IOracleAdapter.getPerformance returns 8 values: (balance, uptimeScore, speedScore, integrityScore, selfStakeScore, accRewardAmount, accSlashAmount, timestamp). However, the interface IOracleAdapter is not provided in the code. If the actual implementation of IOracleAdapter (e.g., from a third-party or forked protocol) returns a different number of values \u2014 for example, 7 values (omitting timestamp) or 9 values (adding a new field) \u2014 the ABI decoding will fail, causing the try/catch to revert the entire call. This is an external integration integrity issue: the contract declares an expectation of 8 return values, but if the external oracle adapter (e.g., a forked version) has modified its interface (e.g., removed timestamp for gas savings), the contract will revert on every call, breaking the entire performance generation system. This is a critical compatibility failure: the contract does not verify the interface version or use a fallback mechanism, and the interface is not versioned or standardized across forks.",
+      "severity": "critical",
+      "original_id": "b9b9005a29721fba"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_059",
+      "title": "Withdrawal Funds Can Be Re-Processed as New Deposits via External Call",
+      "description": "The ValidatorManager contract does not distinguish between user-initiated withdrawals and system-returned funds. When IStakingManager.processValidatorWithdrawals is called, it sends funds back to the ValidatorManager contract. Since ValidatorManager has no receive or fallback function to handle incoming ETH, but does have logic that processes rebalance requests, an attacker can send ETH directly to ValidatorManager during the withdrawal window. This ETH is then incorrectly treated as new validator balance by the updateValidatorPerformance function, which is called by the oracle manager. This leads to mixed fund sources, inflation of validator balances, and potential loss of user funds when rebalancing occurs.",
+      "severity": "high",
+      "original_id": "1dfea0e4bfa04cb8"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_060",
+      "title": "Emergency Pause All Does Not Validate Contract Authorization State During Iteration",
+      "description": "The emergencyPauseAll() function iterates over all authorized contracts and pauses them, but it does not re-validate that each contract is still authorized during iteration. An attacker can deauthorize a contract immediately after it is read in the loop but before it is paused, causing the contract to be paused despite being unauthorized. This breaks the protocol invariant that only authorized contracts can be paused, and allows unauthorized contracts to be paused by the PAUSE_ALL_ROLE holder, potentially disrupting protocol operations or enabling denial-of-service attacks on contracts that should remain active. The state variable _authorizedContracts is modified during the loop, but the loop uses a cached length and indexed access, which creates a race condition between reading and applying state changes.",
+      "severity": "high",
+      "original_id": "3a89ecc8e07c3659"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_061",
+      "title": "RebalanceWithdrawal Allows Partial Execution Without User Protection or Reversion",
+      "description": "The rebalanceWithdrawal function executes multiple validator withdrawals via an external call to IStakingManager without ensuring atomicity or providing users with minimum output bounds. If any withdrawal fails (e.g., due to insufficient liquidity, reentrancy, or malicious StakingManager behavior), the function does not revert, leaving some withdrawals processed and others not. This results in inconsistent state: rebalance requests are added to _validatorsWithPendingRebalance but may not be fully executed. Subsequent closeRebalanceRequests will attempt to redelegate the full requested amount, even if only partial withdrawals occurred, leading to over-delegation and loss of user funds. Users have no mechanism to specify minimum acceptable withdrawal amounts or to cancel partial executions.",
+      "severity": "critical",
+      "original_id": "afbe65158a8b72f9"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_062",
+      "title": "closeRebalanceRequests Allows Over-Redelegation When Withdrawals Fail",
+      "description": "The closeRebalanceRequests function sums the total requested withdrawal amounts from validatorRebalanceRequests and redelegates that entire amount to the staking manager, regardless of whether the actual withdrawals succeeded. If IStakingManager.processValidatorWithdrawals() fails partially (e.g., only 50% of withdrawals complete), the validator balances are not updated accordingly, but the rebalance requests are still deleted and the full requested amount is redelegated. This results in the protocol redelegating more funds than were actually withdrawn, effectively creating new staked tokens out of thin air. The attacker can exploit this by triggering a partial withdrawal failure (e.g., via a malicious StakingManager that reverts on some calls), then calling closeRebalanceRequests to redelegate the full amount, stealing the difference from the protocol's total stake.",
+      "severity": "critical",
+      "original_id": "52f60284aa705864"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_063",
+      "title": "State Synchronization Failure in Rebalance Request Lifecycle",
+      "description": "The rebalanceWithdrawal function adds rebalance requests to _validatorsWithPendingRebalance and validatorRebalanceRequests before calling IStakingManager.processValidatorWithdrawals(). If the external call fails (e.g., due to gas limit, reentrancy, or malicious contract), the state changes (request added) are not reverted, but the withdrawal does not occur. This leaves the system in an inconsistent state: requests are marked as pending but no funds were withdrawn. Subsequent calls to closeRebalanceRequests will redelegate funds that were never withdrawn, leading to protocol insolvency. The state is committed before the external operation completes, violating Pattern 7 (State Commitment Timing).",
+      "severity": "critical",
+      "original_id": "2f5f9d77e92c1fcd"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_064",
+      "title": "getDelegation Requires Validator to Be Active but Does Not Validate Delegation Target Existence",
+      "description": "The getDelegation function requires the delegated validator to be active via validatorActiveState(), but does not verify that the validator address stored in delegations[stakingManager] actually exists in the _validatorIndexes mapping. An attacker can set a non-existent address as a delegation target via setDelegation (which only checks validatorActiveState, not validator existence). Later, when getDelegation is called, it will revert due to validatorActiveState() failing on a non-existent validator, but the delegation mapping remains corrupted. This allows an attacker to permanently break delegation for a staking manager by setting a non-existent validator, causing dependent systems to fail. The function assumes the address is valid, violating external system assumptions (Pattern 8).",
+      "severity": "high",
+      "original_id": "58f3a77ca63bc0cf"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_065",
+      "title": "updateValidatorPerformance Allows Arbitrary Balance Updates Without Validation Against Actual Staked Amount",
+      "description": "The updateValidatorPerformance function allows the ORACLE_MANAGER_ROLE to set any arbitrary balance value for a validator, with no verification against the actual staked amount held by the validator or tracked by the StakingManager. An attacker with oracle access can inflate a validator's balance to 2^256-1, causing all subsequent performance calculations (e.g., weighted scores, reward distribution) to overflow or become meaningless. This can lead to disproportionate reward distribution, draining the protocol's reward pool. The function trusts external oracle data without cross-checking, violating input validation and external system assumption patterns.",
+      "severity": "high",
+      "original_id": "4290d3bcc993044f"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_066",
+      "title": "reportRewardEvent and reportSlashingEvent Lack Reentrancy Protection",
+      "description": "The reportRewardEvent and reportSlashingEvent functions update totalRewards and totalSlashing (global state) and validator-specific reward/slashing mappings without reentrancy protection. If the IStakingManager or any downstream contract called during emission of RewardEventReported or SlashingEventReported re-enters ValidatorManager (e.g., via a callback that calls reportRewardEvent again), an attacker can recursively call these functions to mint unlimited rewards or slash unlimited amounts. This leads to inflation or deflation of the protocol's economic model, enabling theft of funds from the reward pool or unjust slashing of other validators.",
+      "severity": "high",
+      "original_id": "ce37ff6ba32399fd"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_067",
+      "title": "Emergency Pause All Iteration Desynchronization Vulnerability",
+      "description": "The emergencyPauseAll() function iterates over _authorizedContracts using a static length value, but if deauthorizeContract() is called during the loop (via a reentrant call), the underlying data structure can be modified, causing the loop to skip contracts or access invalid indices. This creates a desynchronization between the loop bound and the actual data, allowing an attacker to bypass pausing of authorized contracts by triggering removals during iteration. The vulnerability stems from using EnumerableSet's .at(i) with a pre-computed length while the set is being mutated during iteration, violating the assumption that the collection is immutable during traversal.",
+      "severity": "high",
+      "original_id": "af50b45a138d0027"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_068",
+      "title": "No Automatic Functions or Fund Handling - No Vulnerability",
+      "description": "The PauserRegistry contract is a pure access control and pause state management contract that does not handle any native currency (ETH) or token transfers. It has no payable functions, no fallback or receive handlers, and no logic for depositing, withdrawing, staking, or swapping funds. All functions are state-modifying operations restricted by role-based access control (onlyRole) and do not involve any fund movement. Therefore, there are no attack vectors related to automatic function triggers, withdrawal flows, deposit flows, or fund mixing.",
+      "severity": "low",
+      "original_id": "19638026e783c039"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_069",
+      "title": "EmergencyPauseAll Does Not Validate Contract Authorization Before Pausing",
+      "description": "The emergencyPauseAll function iterates over all authorized contracts and pauses them without re-validating that each contract is still authorized. If a contract is deauthorized during the loop (via deauthorizeContract), the function may attempt to pause a contract that is no longer in the authorized set, but this is not checked. However, the more critical issue is that isPaused state is modified for every contract in the authorized set regardless of whether it was authorized at the start of the loop. This creates a state inconsistency where a contract may be paused even after being deauthorized, and the pause state is not tied to authorization status.",
+      "severity": "high",
+      "original_id": "c878fd0d06c09d68"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_070",
+      "title": "Authorization and Pause State Are Decoupled, Enabling State Inconsistency",
+      "description": "The contract maintains two independent state variables: _authorizedContracts (set of authorized contracts) and isPaused (mapping of contract => bool). There is no enforcement that a contract must be authorized to be paused or unpaused. An attacker can deauthorize a contract (via deauthorizeContract) while it is paused, but the isPaused flag remains true. Later, if the same address is re-authorized, it inherits the previous paused state without explicit action. This violates the semantic expectation that only authorized contracts can be in a paused state. The system allows a contract to be paused without being authorized, and unpaused without being authorized, breaking the intended role-based control model.",
+      "severity": "high",
+      "original_id": "7207f33ded35406b"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_071",
+      "title": "EmergencyPauseAll May Skip Contracts Due to Array Length Mismatch During Iteration",
+      "description": "The emergencyPauseAll function reads _authorizedContracts.length() once at the start of the loop, but during iteration, deauthorizeContract could be called by a privileged user (DEFAULT_ADMIN_ROLE) to remove contracts from the set. Since EnumerableSet's .at(i) uses an internal array that is not dynamically updated during iteration, if a contract is removed during the loop, the indices shift, causing the loop to skip the next contract or access an invalid index. This is a well-known issue with EnumerableSet during mutation in loops. The function does not re-fetch the length or use a safe iteration pattern, leading to incomplete pausing and potential out-of-bounds access.",
+      "severity": "critical",
+      "original_id": "0c7094446e9f4e79"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_072",
+      "title": "Unauthorized Users Can Trigger Reentrancy via Paused Contract Callbacks",
+      "description": "The pauseContract and unpauseContract functions emit events but do not use the Checks-Effects-Interactions pattern. If a paused contract has a callback in its own logic (e.g., a token contract with onTransfer hooks), and that callback calls back into PauserRegistry (e.g., to deauthorize or pause another contract), reentrancy can occur. Since state changes (isPaused) occur before any external call (emit), an attacker can exploit this to manipulate the authorization state during the pause/unpause operation, potentially bypassing role checks or causing inconsistent state.",
+      "severity": "high",
+      "original_id": "03a53ed611914fe9"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_073",
+      "title": "No Validation That Pauser/Unpauser Roles Are Not the Same Address",
+      "description": "The initialize function grants PAUSER_ROLE and UNPAUSER_ROLE to separate addresses, but there is no check to prevent the same address from being assigned both roles. If the same address holds both roles, it can pause and unpause any contract at will, effectively bypassing the intended separation of duties. This is a design flaw in role assignment logic that undermines the security model of having distinct pauser and unpauser roles.",
+      "severity": "medium",
+      "original_id": "e19605d3942bcbe6"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_074",
+      "title": "Score Change Tolerance Check Ignores Directional Drift and Allows Gradual Manipulation",
+      "description": "The validator score change tolerance checks only detect absolute differences between current and previous scores, but do not enforce directional consistency or cumulative drift limits. An attacker can slowly manipulate scores by making small, below-threshold changes over multiple epochs, eventually causing a large deviation from the true validator performance without triggering any alert. This breaks the core security assumption that scores must remain stable and representative of actual validator behavior. The tolerance is applied per-change, not cumulatively, allowing unlimited drift over time.",
+      "severity": "high",
+      "original_id": "465490348058880f"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_075",
+      "title": "EmergencyPauseAll Can Be Exploited to Permanently Lock Contracts via Reentrancy",
+      "description": "The emergencyPauseAll function iterates over authorized contracts and pauses them without any reentrancy guard. An attacker can deploy a malicious contract that calls back into emergencyPauseAll during the loop, causing the loop to skip contracts or enter an infinite state, potentially leaving some contracts in an inconsistent state or preventing future unpausing. This breaks protocol invariants and can permanently lock critical protocol functions.",
+      "severity": "critical",
+      "original_id": "5c92f4f38237ac93"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_076",
+      "title": "Missing Reentrancy Guard on Critical Pause/Unpause Functions",
+      "description": "The pauseContract and unpauseContract functions modify critical state (isPaused) and emit events but lack reentrancy guards. An attacker can exploit this by calling pauseContract from within a contract's onERC721Received or similar callback, triggering a reentrant pause/unpause that could lock or unlock contracts in unintended ways, potentially bypassing authorization checks or causing inconsistent state.",
+      "severity": "high",
+      "original_id": "68e1f0d739e48599"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_077",
+      "title": "EmergencyPauseAll Uses Stale Length During Iteration, Leading to Partial Execution",
+      "description": "The emergencyPauseAll function reads _authorizedContracts.length() once at the start of the loop but modifies the set via emit and state changes. Although EnumerableSet does not allow modification during iteration, if a malicious contract is authorized during the loop (via authorizeContract called externally), the loop may not process newly added contracts. More critically, if any contract's pause() function reverts (e.g., due to internal logic), the entire transaction reverts, but the state changes for previously paused contracts are already committed. This creates a partial execution state where some contracts are paused and others are not, violating atomicity and leaving the protocol in an inconsistent, unrecoverable state without admin intervention.",
+      "severity": "high",
+      "original_id": "b9104a690fdb573b"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_078",
+      "title": "Unauthorized Contract Can Be Paused via Front-Running During Authorization",
+      "description": "The authorizeContract function adds a contract to _authorizedContracts but does not initialize its isPaused state. An attacker can call pauseContract(address) immediately after a legitimate authorization transaction is mined but before it is confirmed, exploiting the time window where the contract is not yet in _authorizedContracts but the transaction is pending. If the attacker's transaction is front-run, pauseContract will revert due to !isAuthorized, but if the attacker's tx is included first, the contract is paused before being authorized \u2014 violating the intended invariant that only authorized contracts can be paused. This allows an attacker to permanently disable a contract before it is legitimately authorized.",
+      "severity": "high",
+      "original_id": "a676c561eff2668c"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_079",
+      "title": "Interface IPauserRegistry Does Not Declare Access Control Modifiers",
+      "description": "The IPauserRegistry interface declares functions like pauseContract, unpauseContract, emergencyPauseAll, authorizeContract, and deauthorizeContract without any access control modifiers (e.g., onlyRole). This misleads developers and auditors into believing these functions are publicly callable without restriction, when in reality they are guarded by OpenZeppelin's onlyRole modifier in the implementation. This interface-implementation mismatch violates the principle of least surprise and can lead to incorrect assumptions in frontend or external contract integrations, potentially causing logic errors or security misconfigurations.",
+      "severity": "high",
+      "original_id": "654c86a1b3fbeb43"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_080",
+      "title": "Rebalance Request Closure Does Not Restore Validator Balance",
+      "description": "The closeRebalanceRequests function clears pending rebalance requests and triggers redelegation, but does not adjust the validator's balance in the _validators array. The withdrawal amount is deducted from the staking manager's balance externally, but the Validator.balance field remains unchanged, creating a state inconsistency between the on-chain validator record and actual staked balance. This causes future performance scoring and rebalancing decisions to be based on incorrect balance data.",
+      "severity": "high",
+      "original_id": "cff71eae56435428"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_081",
+      "title": "Performance Update Overwrites Validator State Without Preserving Active Flag",
+      "description": "In updateValidatorPerformance, the validator struct is overwritten using a memory struct that explicitly sets active: _validators[index].active. However, this is redundant and misleading \u2014 the active flag is read from storage and written back, but if the storage value were corrupted or the read failed, the write would still proceed. More critically, the function does not validate that the validator is active before updating performance, relying on the validatorActive modifier. However, the modifier is applied to the external function, but the internal write uses _validators[index].active which is read from storage. If the validator was deactivated between modifier check and storage write (e.g., via reentrancy), the active flag could be overwritten to false even if the validator was active at modifier check time. This creates a race condition where a malicious actor can deactivate a validator by triggering a performance update during a reentrant call to deactivateValidator.",
+      "severity": "high",
+      "original_id": "51680115333011cb"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_082",
+      "title": "Delegation Validation Bypass via Non-Active Validator",
+      "description": "The getDelegation function requires the delegated validator to be active via validatorActiveState(validator). However, the setDelegation function only requires the validator to be active at the time of setting. If a validator is later deactivated, getDelegation will revert, but the delegation mapping still points to an inactive validator. This is not a direct vulnerability, but it creates a dangerous state where a staking manager's delegation target becomes unusable without any mechanism to auto-reset or notify. However, the real issue is in the logic of setDelegation: it allows setting a delegation to a validator that is currently inactive, and only later validation in getDelegation prevents usage. This creates a window where a manager can set a delegation to a validator they plan to deactivate, effectively locking the staking manager into a dead end. This is a lifecycle integrity flaw because the system allows state transitions that lead to unrecoverable deadlocks.",
+      "severity": "medium",
+      "original_id": "dcaf71bcf63b7860"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_083",
+      "title": "Rebalance Request Addition Allows Duplicate Requests via Reentrancy",
+      "description": "The _addRebalanceRequest function checks !_validatorsWithPendingRebalance.contains(validator) before adding a request. However, this check and the subsequent add() are not atomic. If an attacker calls rebalanceWithdrawal with a validator address, and during the external call to IStakingManager.processValidatorWithdrawals, a reentrant call to rebalanceWithdrawal is made with the same validator, the second call will pass the contains check because the first add() has not yet completed. This allows multiple rebalance requests for the same validator to be created, leading to double withdrawal of funds. The vulnerability exists because the function does not use a mutex or reentrancy guard on the internal _addRebalanceRequest, and the external call to IStakingManager may trigger reentrancy.",
+      "severity": "critical",
+      "original_id": "0e4612bba8bc400b"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_084",
+      "title": "Validator Index Mapping Corruption via Array Manipulation",
+      "description": "The _validators array is manipulated via push() and never shrunk. When a validator is deactivated, its entry in _validators is not removed \u2014 only its active flag is set to false. However, the _validatorIndexes mapping maps validator addresses to array indices. If a validator is deactivated and later reactivated, its index remains the same. But if the contract were to ever remove entries from _validators (e.g., for cleanup), the _validatorIndexes mapping would become corrupted because it points to stale indices. While no such removal exists now, the design assumes the array is append-only. However, if future upgrades add a function to remove validators from _validators, the index mapping will break. This is a latent type system integrity flaw: the mapping between validator address and array index is fragile and not self-healing. The system relies on the invariant that array length equals number of validators ever created, but this is not enforced or documented as a design constraint.",
+      "severity": "high",
+      "original_id": "13ff46d8b21c5b1d"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_085",
+      "title": "Validation of Reward and Slashing Increments Uses Stale State, Enabling Reward Theft",
+      "description": "The checkValidatorSanity function validates reward and slashing increments against previously stored values from validatorManager, but does not validate that these values are consistent with the current state of the validator. An attacker can front-run a legitimate validator update by submitting a maliciously low avgRewardAmount or avgSlashAmount, causing the system to accept a massive subsequent increase as 'within tolerance' because the baseline was artificially lowered. This allows an attacker to steal rewards by manipulating the baseline state before a legitimate update.",
+      "severity": "critical",
+      "original_id": "80b9972d13435da4"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_086",
+      "title": "Reward and Slashing Accumulation Without Reset Causes Infinite Reward Theft",
+      "description": "The updateValidatorMetrics function overwrites the reward and slashing fields entirely instead of accumulating them. This allows an operator to repeatedly update a validator's metrics with small positive reward values while setting slashing to zero, effectively stealing all previously earned rewards from the validator. Since the reward field is not additive, any prior reward accumulation is permanently lost on every update. This breaks the economic invariant that rewards should be cumulative over time, enabling an operator to drain all historical rewards from any validator by performing a series of malicious updates.",
+      "severity": "critical",
+      "original_id": "cfa3c215b06def11"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_087",
+      "title": "Mathematical Domain Violation in Reward/Slashing BPS Calculation",
+      "description": "The contract calculates basis points (BPS) for slashing and rewards using Math.mulDiv(diff, BASIS_POINTS, avgBalance), but does not validate that avgBalance is non-zero before the division. Although a zero balance check exists earlier, it only returns 'Zero balance' without preventing the Math.mulDiv call in cases where avgBalance becomes zero due to race conditions or oracle manipulation between the check and the calculation. This leads to a division by zero, causing the transaction to revert, which is a denial-of-service vector for legitimate validators.",
+      "severity": "high",
+      "original_id": "90cf99a6f5d669b5"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_088",
+      "title": "Score Change Tolerance Ignores Zero-Initial-State Edge Case",
+      "description": "The score change checks (uptime, speed, integrity, self-stake) only perform tolerance validation if the previous score is greater than zero. If a validator has never been scored before (prevScore == 0), the check is skipped entirely. This allows an attacker to set an arbitrary high score (e.g., maxScoreBound) on a new validator without triggering any anomaly detection, even if the change is 100% from zero. This bypasses the entire score anomaly detection system for new validators.",
+      "severity": "high",
+      "original_id": "78ef62ed641ecc78"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_089",
+      "title": "Inconsistent Score Bound Enforcement for New Validators",
+      "description": "The contract enforces maxScoreBound on incoming avgScore values, but does not enforce the same bound on the previous scores retrieved from validatorManager. This creates a logic gap: if a validator's previous score was set to 15000 (above maxScoreBound=10000) due to a bug or malicious update in validatorManager, the checkValidatorSanity function will still accept it as long as the delta is within scoreTolerance. This allows invalid historical scores to propagate and be treated as valid, corrupting the entire scoring system.",
+      "severity": "high",
+      "original_id": "655e632df6414938"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_090",
+      "title": "Rewards and Slashing Increment Checks Are Not Atomic with State Read",
+      "description": "The function reads previous rewards and slashing values from validatorManager, then performs delta calculations. However, there is no mechanism to ensure that the state read and the subsequent checks are atomic. An attacker can front-run by triggering a reward or slashing update between the read and the check, causing the delta to appear artificially small or large. This enables manipulation of the tolerance thresholds by timing attacks, allowing invalid changes to pass or valid ones to be rejected.",
+      "severity": "medium",
+      "original_id": "e86359967df0b129"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_091",
+      "title": "Score Tolerance Comparison Uses Absolute Difference Without Normalization",
+      "description": "The score change checks compute absolute differences (e.g., |avg - prev|) and compare them to scoreTolerance. However, scores are basis point values (0-10000), and a change of 1000 (10%) from a score of 1000 is a 100% relative change, while the same absolute change from 9000 is only ~11%. The tolerance is applied as an absolute delta, not a relative one, making the system highly asymmetric and exploitable. An attacker can make large relative changes from low scores without triggering alerts, while minor changes from high scores are flagged.",
+      "severity": "high",
+      "original_id": "ca9ff072fd96213b"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_092",
+      "title": "Validator Metrics Can Be Updated with Zero or Negative Reward/Slashing Values, Leading to Incorrect Reward Distribution",
+      "description": "The updateValidatorMetrics function allows any operator to set reward and slashing values to zero or negative values without validation. Since these values are used in economic calculations (e.g., reward distribution, slashing penalties), setting them to zero or negative values can cause protocol insolvency or unfair distribution. For example, if an operator sets slashing = 0 for a validator who should be slashed, the protocol loses funds. Conversely, setting reward = 0 for a high-performing validator denies them earned rewards, undermining protocol incentives. The function validates only uptime, speed, integrity, and stake (0-10000), but ignores reward and slashing bounds entirely.",
+      "severity": "high",
+      "original_id": "e232b53568168ea7"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_093",
+      "title": "Missing Access Control on getValidators and hasMetrics Enables Front-Running and MEV Exploitation",
+      "description": "The functions getValidators() and hasMetrics() are public and view-only, but they expose the full list of active validators and their metrics status. An attacker can use this information to front-run validator updates or manipulate external systems that rely on validator activity (e.g., staking rewards, slashing triggers). Although these functions do not directly transfer funds, they expose critical economic state that enables MEV (Miner Extractable Value) attacks. For example, an attacker can observe a validator about to be slashed and trigger a withdrawal before the slash is applied, stealing funds. The interface design exposes sensitive state without access control, violating Pattern 4 (Access Control in Interfaces).",
+      "severity": "high",
+      "original_id": "0292d57e15ab64b0"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_094",
+      "title": "Validator Metrics Can Be Updated Before Initial Registration, Leading to State Inconsistency",
+      "description": "The updateValidatorMetrics function calls _validators.add(validator) unconditionally after updating metrics, even if the validator has never been registered. This means a malicious operator can create a validator entry with arbitrary metrics without any prior onboarding or consent. This violates the logical invariant that validators must be registered before being tracked. An attacker can spam the system with fake validator addresses, bloating the _validators set and increasing gas costs for legitimate users. This is a state management issue (Pattern 6) because the state (_validators) is updated before any validation of validator legitimacy.",
+      "severity": "high",
+      "original_id": "53979a2bd0818001"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_095",
+      "title": "No Protection Against Reentrancy in updateValidatorMetrics Leading to Potential Reward Theft",
+      "description": "The updateValidatorMetrics function performs state changes (updating validatorMetrics and adding to _validators) and then emits an event. If an external contract is called via a reward mechanism (e.g., a reward token that triggers on transfer or event), reentrancy could occur before the state is fully stabilized. Although no direct external call is made, if the reward value is used in a downstream system that calls back into this contract (e.g., a reward distributor that queries metrics and triggers a transfer), reentrancy could allow an attacker to manipulate state mid-execution. This is a control flow vulnerability (Pattern 6) where state is updated before external interactions are fully resolved.",
+      "severity": "high",
+      "original_id": "c74ab830c038ac07"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_096",
+      "title": "MIN_UPDATE_INTERVAL Enforcement Is Bypassed by Setting lastUpdateTime to Zero",
+      "description": "The function requires block.timestamp >= metrics.lastUpdateTime + MIN_UPDATE_INTERVAL. However, if a validator has never been updated, validatorMetrics[validator] defaults to all zeros, including lastUpdateTime = 0. Since 0 + 1 hour = 3600, and block.timestamp is typically > 3600 (after genesis), the check passes immediately. This allows an operator to update a new validator's metrics instantly upon first call, bypassing the intended 1-hour cooldown. This is a validation timing issue (Pattern 2) because the validation logic assumes non-zero initial state, but Solidity zero-initialization breaks the invariant. An attacker can spam updates to a new validator immediately, manipulating metrics before legitimate updates.",
+      "severity": "high",
+      "original_id": "60e407e1ae7c29ea"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_097",
+      "title": "No Receiving Function Protection Allows Fund Theft via Unexpected ETH Deposits",
+      "description": "The DefaultOracle contract has no receive() or fallback() function, but it can still receive ETH via direct transfers. Since the contract has no logic to handle or reject incoming ETH, any ETH sent to it becomes permanently locked. This is a critical issue because the contract is designed as an oracle for validator metrics and has no legitimate reason to hold ETH. Attackers can send ETH to the contract, and since there is no withdrawal mechanism for ETH, the funds are irrecoverable. This violates the principle that contracts should explicitly handle or reject native currency transfers.",
+      "severity": "high",
+      "original_id": "cf344ee712a34f50"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_098",
+      "title": "Missing Validation of Reward and Slashing Non-Negativity",
+      "description": "The updateValidatorMetrics function accepts reward and slashing values without validating they are non-negative. Since these are uint256 values, they cannot be negative by type, but the contract logic treats them as additive/subtractive amounts. If a malicious operator passes a value that underflows when subtracted (e.g., slashing > current balance), it can corrupt validator state. More critically, the contract assumes reward and slashing are absolute values to be added, but no bounds check ensures they are not absurdly large, leading to potential arithmetic overflow or inflation of validator rewards beyond intended limits.",
+      "severity": "high",
+      "original_id": "ef0abb708f5359e7"
+    },
+    {
+      "id": "code4rena_kinetiq_2025_07_tool_099",
+      "title": "State Commitment Before Update Interval Validation",
+      "description": "The contract commits validator state (including lastUpdateTime) only after the update interval check, but the state is written unconditionally after the check. However, if the transaction reverts after the state write due to an external call or gas exhaustion, the lastUpdateTime is permanently advanced, preventing future updates even if the metrics update itself failed. This creates a denial-of-service vector: an attacker can trigger a revert after the timestamp update (e.g., by calling a malicious contract in a reward calculation) and lock the validator from future updates indefinitely.",
+      "severity": "high",
+      "original_id": "7af35abfe396e734"
+    }
+  ],
+  "input_tokens": 55352,
+  "output_tokens": 15069,
+  "cached_tokens": 6324
+}

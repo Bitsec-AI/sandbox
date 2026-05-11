@@ -1,0 +1,100 @@
+{
+  "findings": [
+    {
+      "title": "add/sub Subtraction Path Missing L_FLAG for 72-Digit Results with High Exponents",
+      "description": "In the subtraction normalization path of both add() and sub(), when the result mantissa is exactly in L range (72 digits, between MIN_L_DIGIT_NUMBER and MAX_L_DIGIT_NUMBER) and the result exponent rExp >= 8140, no action is taken. The L_FLAG (bit 241) is NOT set, creating a malformed packedFloat where a 72-digit mantissa is treated as M-format (38 digits) by all subsequent operations. This triggers for any L-format subtraction with values >= ~10^23 (stored exponent >= 8144). The resulting malformed value causes uint256 overflow in the M+M alignment path of every arithmetic operation (10^71 * 10^38 = 10^109 > 2^256).",
+      "vulnerability_type": "Logic Error",
+      "severity": "high",
+      "confidence": 0.95,
+      "location": "add(), sub()",
+      "file": "src/Float128.sol",
+      "id": "a8f3d2e1c5b47690",
+      "reported_by_model": "manual-review",
+      "status": "proposed"
+    },
+    {
+      "title": "sqrt(0) Calls stop() Halting Entire EVM Execution",
+      "description": "When sqrt() receives packedFloat(0), it executes the EVM STOP opcode, which terminates the entire execution context with success status but zero return data. This means the caller gets no return value, any code after sqrt(0) never executes, and state changes made before the call persist (since STOP indicates success). sqrt(0) = 0 is mathematically well-defined and the function should return packedFloat(0). The STOP opcode indicates success, so state changes made before the sqrt(0) call persist while all logic after it is silently skipped, potentially leaving protocols in inconsistent state.",
+      "vulnerability_type": "Denial of Service",
+      "severity": "medium",
+      "confidence": 0.99,
+      "location": "sqrt()",
+      "file": "src/Float128.sol",
+      "id": "b2c4e6f8a0d1e3f5",
+      "reported_by_model": "manual-review",
+      "status": "proposed"
+    },
+    {
+      "title": "eq() Returns False for Mathematically Equal Values with Different Representations",
+      "description": "eq() performs a raw uint256 comparison of two packedFloat values. The same mathematical value can have different binary representations (M-format vs L-format, different normalization). For example, divL() always returns L-format while most operations auto-scale to M-format when possible. eq(toPackedFloat(1,0), divL(toPackedFloat(2,0), toPackedFloat(2,0))) returns false even though both represent 1.0. Protocols using eq() for equality checks will get incorrect results when comparing values from different computation paths that produce different internal representations, potentially bypassing safety conditions or enabling unauthorized operations.",
+      "vulnerability_type": "Logic Error",
+      "severity": "medium",
+      "confidence": 0.9,
+      "location": "eq()",
+      "file": "src/Float128.sol",
+      "id": "c3d5f7a9b1e2f4d6",
+      "reported_by_model": "manual-review",
+      "status": "proposed"
+    },
+    {
+      "title": "ln(0) Returns Finite Incorrect Value Instead of Reverting",
+      "description": "ln() does not validate for zero input. When packedFloat(0) is passed, it proceeds through the Taylor series computation and returns a large negative finite value (~-18790) instead of reverting. The mathematical ln(0) = -infinity is not representable as a finite float. Any protocol computing ln(price_ratio) or ln(reserve_ratio) where the argument can reach zero will silently receive ~-18790 instead of a revert. This value may pass downstream validation checks that only expect negative values, causing incorrect pricing or interest calculations.",
+      "vulnerability_type": "Missing Input Validation",
+      "severity": "medium",
+      "confidence": 0.9,
+      "location": "ln()",
+      "file": "src/Ln.sol",
+      "id": "d4e6f8a0b2c3d5e7",
+      "reported_by_model": "manual-review",
+      "status": "proposed"
+    },
+    {
+      "title": "ln(negative) Returns ln(|x|) Instead of Reverting",
+      "description": "ln() completely ignores the sign bit (MANTISSA_SIGN_MASK at bit 240) of the input. When a negative packedFloat is passed, the mantissa is extracted unsigned, so ln(-x) silently returns ln(|x|). The natural logarithm is undefined for negative real numbers. Negative values can arise from subtraction results in financial computations. Any protocol computing ln(a - b) where a < b will get a negative value passed to ln(), which silently returns ln(|a - b|) \u2014 a positive, plausible-looking result with no error indication, causing incorrect interest calculations or pricing errors.",
+      "vulnerability_type": "Missing Input Validation",
+      "severity": "medium",
+      "confidence": 0.9,
+      "location": "ln()",
+      "file": "src/Ln.sol",
+      "id": "e5f7a9b1c2d4e6f8",
+      "reported_by_model": "manual-review",
+      "status": "proposed"
+    },
+    {
+      "title": "le()/ge() Return False for Equal Values with Different M/L Representations",
+      "description": "le() and ge() first check raw uint256 equality, then fall through to comparison logic that does not handle the equal-after-normalization case. For mathematically equal values with different M/L representations, ALL of lt, eq, gt, le, ge return false simultaneously, violating the total order invariant. Conditions like require(le(price, maxPrice)) could revert for mathematically valid inputs when the price and maxPrice have different internal representations (M vs L format), creating a complete logic violation.",
+      "vulnerability_type": "Logic Error",
+      "severity": "medium",
+      "confidence": 0.85,
+      "location": "le(), ge()",
+      "file": "src/Float128.sol",
+      "id": "f6a8b0c2d3e5f7a9",
+      "reported_by_model": "manual-review",
+      "status": "proposed"
+    },
+    {
+      "title": "sqrt() Uses Unsigned div Instead of Signed sdiv for Exponent Halving",
+      "description": "In the sqrt() else branch, the exponent is halved using unsigned div instead of signed sdiv. Since sub(aExp, ZERO_OFFSET) can produce a negative value (large unsigned in Yul), unsigned division gives wrong results. This bug is currently masked by two properties: after even/odd normalization aExp is always even, and shl(242, ...) only preserves the bottom 14 bits discarding the erroneous 2^255 bit. This is a latent defect that produces correct results today but could become a real bug if the normalization logic or bit layout changes in future versions.",
+      "vulnerability_type": "Incorrect Arithmetic",
+      "severity": "low",
+      "confidence": 0.75,
+      "location": "sqrt()",
+      "file": "src/Float128.sol",
+      "id": "12b4c6d8e0f1a2b3",
+      "reported_by_model": "manual-review",
+      "status": "proposed"
+    },
+    {
+      "title": "sameExponent Variable is Dead Code in add() and sub()",
+      "description": "In both add() and sub(), a boolean variable sameExponent is declared and set to true in two branches within each function, but the variable is never read or used anywhere. This is dead code that indicates either incomplete refactoring or a missed optimization. Removing it would marginally reduce gas costs and improve code clarity.",
+      "vulnerability_type": "Dead Code",
+      "severity": "informational",
+      "confidence": 0.99,
+      "location": "add(), sub()",
+      "file": "src/Float128.sol",
+      "id": "23c5d7e9f1a2b4c5",
+      "reported_by_model": "manual-review",
+      "status": "proposed"
+    }
+  ]
+}

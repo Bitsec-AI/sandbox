@@ -1,0 +1,176 @@
+{
+  "project": "code4rena_next-generation_2025_05",
+  "agent": "agent317",
+  "status": "success",
+  "timestamp": "2026-04-09T11:29:50.970409",
+  "elapsed_seconds": 5.2,
+  "total_expected": 1,
+  "total_found": 21,
+  "true_positives": 1,
+  "false_negatives": 0,
+  "false_positives": 20,
+  "detection_rate": 1.0,
+  "precision": 0.047619047619047616,
+  "f1_score": 0.0909090909090909,
+  "matched_findings": [
+    {
+      "id": "code4rena_next-generation_2025_05_expected_000",
+      "expected": "Cross-chain signature replay attack due to user-supplieddomainSeparatorand missing deadline check",
+      "matched": "Replay Attack Vulnerability Due to Missing Domain Separator in Signature Verification",
+      "confidence": 0.9,
+      "justification": "Finding 0 correctly identifies the Forwarder contract's vulnerability related to the domain separator in signature verification, which aligns with the expected vulnerability of cross-chain signature replay attacks due to user-supplied domainSeparator and missing deadline check.",
+      "severity": "high",
+      "expected_description": "Submitted by\nPelz\n, also found by\n0xGondar\n,\n0xvd\n,\nAbysser\n,\nagadzhalov\n,\naua_oo7\n,\ndemonhat12\n,\nfarismaulana\n,\nfirmanregar\n,\ngregom\n,\nHardlyDifficult\n,\nhyuunn\n,\ni3arba\n,\nInfect3d\n,\nJCN\n,\nJumcee\n,\nkomane007\n,\nLamsy\n,\nLimbooo\n,\nLouisTsai\n,\nok567\n,\npatitonar\n,\npersik228\n,\nPocas\n,\nPrestige\n,\nreflectedxss\n,\ns4bot3ur\n,\nsabanaku77\n,\nsafie\n,\nsantipu_\n,\nSBSecurity\n,\nskypper\n,\nubl4nk\n,\nweb3km\n,\nwiasliaw\n, and\nX0sauce\n\nhttps://github.com/code-423n4/2025-01-next-generation/blob/499cfa50a56126c0c3c6caa30808d79f82d31e34/contracts/Forwarder.sol#L101\n\nhttps://github.com/code-423n4/2025-01-next-generation/blob/499cfa50a56126c0c3c6caa30808d79f82d31e34/contracts/Forwarder.sol#L153\n\nThe\n_verifySig\nfunction in\nForwarder.sol\naccepts the\ndomainSeparator\nas a user-provided input instead of computing it internally. This introduces a vulnerability where signatures can be replayed across different chains if the user\u2019s nonce matches on both chains.\n\nAdditionally, there is no deadline check, meaning signatures remain valid indefinitely. This lack of expiration increases the risk of signature replay attacks and unauthorized transaction execution.\n\nCross-Chain Signature Replay Attack\n\u2013 An attacker can reuse a valid signature on a different chain where the user\u2019s nonce is the same, potentially leading to unauthorized fund transfers.\nIndefinite Signature Validity\n\u2013 Without a deadline check, an attacker could store valid signatures and execute them at any point in the future.\n\nAffected Code\n\n_verifySig\nfunction (user-controlled\ndomainSeparator\nand no deadline check):\n\nfunction\n_verifySig\n(\nForwardRequest\nmemory\nreq\n,\nbytes32\ndomainSeparator\n,\nbytes32\nrequestTypeHash\n,\nbytes\nmemory\nsuffixData\n,\nbytes\nmemory\nsig\n)\ninternal\nview\n{\nrequire\n(\ntypeHashes\n[\nrequestTypeHash\n],\n\"NGEUR Forwarder: invalid request typehash\"\n);\nbytes32\ndigest\n=\nkeccak256\n(\nabi\n.\nencodePacked\n(\n\"\n\\x19\\x01\n\"\n,\ndomainSeparator\n,\nkeccak256\n(\n_getEncoded\n(\nreq\n,\nrequestTypeHash\n,\nsuffixData\n)))\n);\nrequire\n(\ndigest\n.\nrecover\n(\nsig\n) ==\nreq\n.\nfrom\n,\n\"NGEUR Forwarder: signature mismatch\"\n);\n}\n\n_getEncoded\nfunction (included in the signature computation):\n\nfunction\n_getEncoded\n(\nForwardRequest\nmemory\nreq\n,\nbytes32\nrequestTypeHash\n,\nbytes\nmemory\nsuffixData\n)\npublic\npure\nreturns\n(\nbytes\nmemory\n) {\nreturn\nabi\n.\nencodePacked\n(\nrequestTypeHash\n,\nabi\n.\nencode\n(\nreq\n.\nfrom\n,\nreq\n.\nto\n,\nreq\n.\nvalue\n,\nreq\n.\ngas\n,\nreq\n.\nnonce\n,\nkeccak256\n(\nreq\n.\ndata\n)),\nsuffixData\n);\n}\n\nexecute\nfunction (where\n_verifySig\nis used):\n\nfunction\nexecute\n(\nForwardRequest\ncalldata\nreq\n,\nbytes32\ndomainSeparator\n,\nbytes32\nrequestTypeHash\n,\nbytes\ncalldata\nsuffixData\n,\nbytes\ncalldata\nsig\n)\nexternal\npayable\nreturns\n(\nbool\nsuccess\n,\nbytes\nmemory\nret\n) {\n_verifyNonce\n(\nreq\n);\n_verifySig\n(\nreq\n,\ndomainSeparator\n,\nrequestTypeHash\n,\nsuffixData\n,\nsig\n);\n_updateNonce\n(\nreq\n);\nrequire\n(\nreq\n.\nto\n==\n_eurfAddress\n,\n\"NGEUR Forwarder: can only forward NGEUR transactions\"\n);\nbytes4\ntransferSelector\n=\nbytes4\n(\nkeccak256\n(\n\"transfer(address,uint256)\"\n));\nbytes4\nreqTransferSelector\n=\nbytes4\n(\nreq\n.\ndata\n[:\n4\n]);\nrequire\n(\nreqTransferSelector\n==\ntransferSelector\n,\n\"NGEUR Forwarder: can only forward transfer transactions\"\n);\n(\nsuccess\n,\nret\n) =\nreq\n.\nto\n.\ncall\n{gas:\nreq\n.\ngas\n, value:\nreq\n.\nvalue\n}(\nabi\n.\nencodePacked\n(\nreq\n.\ndata\n,\nreq\n.\nfrom\n));\nrequire\n(\nsuccess\n,\n\"NGEUR Forwarder: failed tx execution\"\n);\n_eurf\n.\npayGaslessBasefee\n(\nreq\n.\nfrom\n,\n_msgSender\n());\nreturn\n(\nsuccess\n,\nret\n);\n}\n\nA user signs a valid transaction on Chain A.\nAn attacker copies the signature and submits it on Chain B (where the user has the same nonce).\nSince\ndomainSeparator\nis not verified by the contract, the signature is accepted on both chains.\nThe attacker successfully executes a transaction on Chain B without the user\u2019s consent.\n\nAdditional Risk:\nThe absence of a deadline check means an attacker could store a signature indefinitely and execute it at any time in the future.\n\nCompute\ndomainSeparator\nOn-Chain:\nInstead of accepting\ndomainSeparator\nas a function argument, compute it within the contract using\nblock.chainid\nto ensure domain uniqueness.\nEnforce a Deadline Check:\nIntroduce a deadline verification within\n_verifySig\nto ensure signatures expire after a reasonable time. Example:\nif\n(\nblock\n.\ntimestamp\n>\nreq\n.\ndeadline\n)\nrevert\nDeadlineExpired\n(\nreq\n.\ndeadline\n);\nUse Chain-Specific Identifiers:\nIncorporate\nblock.chainid\ninto the domain separator computation to prevent cross-chain signature reuse.\n\nBy implementing these fixes, the contract can prevent signature replay attacks and unauthorized transactions across different chains.\n\n0xsomeone (judge) increased severity to High and commented\n:\n\nThe submission and its duplicates outline that the domain separator is passed in as an argument to the\nForwarder\nand thus a replay attack is possible due to this trait.\nThe replay attack would be possible only if the trusted forwarder is re-deployed without any modifications, an event that is considered unlikely. Any upgrade of the\nForwarder\nwould need to inherit the utilized nonces of the previous implementation and thus would prevent a replay from occurring, at least in the scenario a few of the submissions focus on.\nThe in-scope documentation of the project, however, states that the system is expected to be deployed across three distinct blockchains rendering the attack feasible and thus the vulnerability to be of high severity justifiably.\nAny submission that did not highlight the cross-chain aspect of the vulnerability will be penalized by 25% (i.e. rewarded 75%) as the local-chain redeployment should\nnormally\nnot be exploitable and would be considered a medium-severity flaw.\nTo note, L-5 of the bot report has identified this vulnerability but has failed to give it the attention it requires. Specifically, the bot report marked it as a low-severity finding even though it is a high-severity one based on the project\u2019s intentions to be deployed across chains. As the severity has effectively shifted two levels (\nL -> H\n), I consider this submission to be in-scope in accordance with previous rulings.\n\ngivn (warden) commented\n:\n\nHaving the domain separator supplied from the caller is definitely an issue and should be fixed. There is one thing that\u2019s interesting about this attack path that wasn\u2019t mentioned anywhere.\nOne part of the signed data is\nForwardRequest.to\n, which contains the EURF contract address. If we sign a transfer on chain A, then an attacker submits the same tx on chain B, for the exploit to succeed the EURF contract should be deployed on the same address. Otherwise, the following require statement will revert the tx on chain B:\nrequire(req.to == _eurfAddress, \"NGEUR Forwarder: can only forward NGEUR transactions\");\nDid a quick check on the contracts for the major stable coins and all of them had different addresses across various chains. What are the odds that EURF will be deployed on the same address?\n\n0xsomeone (judge) commented\n:\n\nHey @givn, the major stable coins have been deployed several years in the past, prior to consistent addresses across chains becoming the norm (i.e. via\ncreate2\nor other similar avenues of deterministic deployment addresses).\nThe issue outlined is significant and applicable to the concept of the cross-chain deployment that the project intends, especially when we consider that the MPC system they will deploy will lead to a consistent address across chains and thus a potentially consistent deployment address for the contracts on each chain.\nI would like to note that the sponsors have also confirmed the severity of this finding directly, indicating that they anticipate their deployment will be at the same address across multiple chains, and consider the inclusion of both a salt and a\nblock.chainid\nto be imperative for the security of the\nForwarder\nimplementation.",
+      "found_description": "The Forwarder contract's signature verification process is vulnerable to replay attacks across different domains because the domain separator is not properly incorporated into the signature hash. The _verifySig function uses `abi.encodePacked(domainSeparator, ...)` which can lead to hash collisions when different domain separators produce the same packed encoding. This allows a signature valid in one domain to be replayed in another domain, potentially enabling unauthorized transfers.\n\n**Mathematical Proof:**\nConsider two different domain separators: DS1 = 0x1234... and DS2 = 0x1234...5678. When using abi.encodePacked, if DS2 has trailing zeros that align with the start of the next parameter, the packed encoding might produce identical hashes:\n- Hash1 = keccak256(abi.encodePacked(DS1, requestData))\n- Hash2 = keccak256(abi.encodePacked(DS2, requestData))\nIf Hash1 == Hash2, a signature valid for DS1 becomes valid for DS2.\n\n**Exploitation Scenario:**\nAn attacker obtains a signed ForwardRequest for domain A. They then submit the same signature with domain B's separator. If the packed encoding produces a hash collision, the signature verifies, allowing the attacker to execute the transfer on domain B without authorization.\n\n**Financial Impact:**\nUnauthorized transfer of EURF tokens from the victim's account to the attacker's specified recipient. The victim loses the entire transferred amount.",
+      "found_id": "def44b38a235832f",
+      "tool_finding_index": 18
+    }
+  ],
+  "missed_findings": [],
+  "undecided_findings": [],
+  "extra_findings": [
+    {
+      "id": "code4rena_next-generation_2025_05_tool_000",
+      "title": "Admin Role Assignment Vulnerability in Constructor",
+      "description": "The __ERC20Admin_init_unchained() function grants the ADMIN role to address(0) (zero address), which is a non-functional address that cannot execute transactions. This permanently locks the ADMIN role functionality since the setAdministrator() function requires DEFAULT_ADMIN_ROLE to revoke the current ADMIN role member, but the zero address cannot be revoked or replaced. This renders all ADMIN-protected functions (blacklist/unblacklist, pause/unpause, forceTransfer) permanently inaccessible after initialization.",
+      "severity": "high",
+      "original_id": "ae09dd062477054a"
+    },
+    {
+      "id": "code4rena_next-generation_2025_05_tool_001",
+      "title": "Missing Access Control on Blacklist Management Functions",
+      "description": "The blacklist() and unblacklist() functions are publicly callable without any access control modifiers, allowing any address to blacklist or unblacklist any other address. This enables attackers to disrupt token transfers by blacklisting legitimate users or unblacklisting malicious addresses. The setBlacklist() function has the onlyRole(ADMIN) modifier, but the public wrapper functions lack this protection.",
+      "severity": "high",
+      "original_id": "7e6f8abcb60eb834"
+    },
+    {
+      "id": "code4rena_next-generation_2025_05_tool_002",
+      "title": "Inconsistent Access Control in adminSanity Check",
+      "description": "The adminSanity() function has inconsistent logic: it bypasses pause and sender blacklist checks for ADMIN role holders, but still enforces recipient blacklist checks. This creates a security gap where ADMINs can forceTransfer from blacklisted addresses (bypassing sender check) but cannot transfer to blacklisted addresses. This inconsistency could lead to unexpected behavior and potential exploitation if ADMIN privileges are compromised.",
+      "severity": "medium",
+      "original_id": "4abdfa16c453b22b"
+    },
+    {
+      "id": "code4rena_next-generation_2025_05_tool_003",
+      "title": "Unauthorized Master Minter Role Assignment",
+      "description": "The __ERC20ControlerMinter_init_unchained function grants the MASTER_MINTER role to address(0) (zero address), which is a non-functional address. This creates a situation where no account initially holds the MASTER_MINTER role, making it impossible to add minters or update minting allowances. The setMasterMinter function requires the caller to have MASTER_MINTER role, but since address(0) holds it and cannot call functions, the protocol becomes permanently locked. Mathematical proof: MASTER_MINTER is granted to address(0) during initialization. setMasterMinter() checks if caller has MASTER_MINTER role, but address(0) cannot call this function. Therefore, no account can ever become MASTER_MINTER, permanently disabling minter management.",
+      "severity": "high",
+      "original_id": "4087996358c0de3e"
+    },
+    {
+      "id": "code4rena_next-generation_2025_05_tool_004",
+      "title": "Inconsistent Minter Allowance Tracking for MASTER_MINTER",
+      "description": "The mint function has inconsistent allowance tracking logic. When MASTER_MINTER mints tokens, it bypasses the minter allowance check entirely (lines 147-152), but when MINTER_ROLE mints, it deducts from their allowance. However, the addMinter function sets minterAllowed[minter] for both MASTER_MINTER and MINTER_ROLE addresses, but MASTER_MINTER can mint without allowance restrictions. This creates state desynchronization where minterAllowed[masterMinter] shows a specific value but the master minter can mint unlimited tokens. Mathematical proof: If MASTER_MINTER address is added as minter with allowance 1000, minterAllowed[masterMinter] = 1000. But MASTER_MINTER can mint 1,000,000 tokens without restriction. The displayed allowance (1000) doesn't reflect actual minting capability, creating misleading accounting.",
+      "severity": "medium",
+      "original_id": "65804bc51397b3a5"
+    },
+    {
+      "id": "code4rena_next-generation_2025_05_tool_005",
+      "title": "Missing Access Control on addController and removeController",
+      "description": "The addController and removeController functions have no access control modifiers, allowing any address to grant or revoke the CONTROLLER role. This enables unauthorized parties to become controllers and call the safetySwitch function to disable contract operations. Exploitation: Attacker calls addController(attackerAddress) to gain CONTROLLER role, then calls safetySwitch() to disable minting and burning operations, effectively freezing the protocol. Financial impact: Protocol operations can be permanently disabled by any attacker, preventing legitimate minters from minting tokens and users from burning tokens.",
+      "severity": "high",
+      "original_id": "894177847b093087"
+    },
+    {
+      "id": "code4rena_next-generation_2025_05_tool_006",
+      "title": "Safety Switch Authorization Bypass",
+      "description": "The safetySwitch function has flawed authorization logic when turning operations back on. When _operating is false, it allows either DEFAULT_ADMIN_ROLE or the original _operatingController to re-enable operations. However, an attacker who becomes a CONTROLLER can disable operations, then use removeController to remove all other controllers including the DEFAULT_ADMIN, making themselves the only entity that can re-enable operations. Mathematical proof: Attacker gains CONTROLLER role (via unsecured addController), calls safetySwitch() to disable operations (_operatingController = attacker), then removes all other controllers. Now only attacker can re-enable operations, holding the protocol hostage.",
+      "severity": "high",
+      "original_id": "2325a147927f19a5"
+    },
+    {
+      "id": "code4rena_next-generation_2025_05_tool_007",
+      "title": "Missing Access Control on Trusted Forwarder Update Function",
+      "description": "The setTrustedForwarder function lacks access control, allowing any caller to change the trusted forwarder address. This enables an attacker to set themselves as the trusted forwarder, which would allow them to spoof the _msgSender() function and bypass authorization checks. The attacker could then execute meta-transactions on behalf of any user by manipulating the calldata to appear as if it came from the victim's address.\n\nMathematical Proof:\n- Attacker calls setTrustedForwarder(attackerAddress)\n- _trustedForwarder is now attackerAddress\n- When attacker calls any function through the forwarder, _msgSender() returns the address extracted from calldata\n- Attacker can set this to victimAddress, making the contract think the victim is the caller\n- This bypasses all approval/authorization checks that rely on _msgSender()\n\nExploitation Scenario:\n1. Attacker calls setTrustedForwarder(attackerAddress)\n2. Attacker crafts a meta-transaction with victim's address as the 'sender'\n3. Contract processes transaction as if victim called it directly\n4. Attacker can transfer victim's tokens or approve spending without authorization\n\nFinancial Impact: Complete loss of user funds - attacker can transfer any user's tokens to themselves.",
+      "severity": "critical",
+      "original_id": "5359c9bab2e85122"
+    },
+    {
+      "id": "code4rena_next-generation_2025_05_tool_008",
+      "title": "Replay Attack Vulnerability Due to Shared Nonce Between Permit and TransferWithAuthorization",
+      "description": "The contract uses the same nonce counter for both permit() and transferWithAuthorization() functions. This allows signature replay attacks where a signature intended for one function can be reused for the other function. Since both functions use the same nonce increment pattern, an attacker can intercept a permit signature and use it for transferWithAuthorization, or vice versa.\n\nMathematical Proof:\n- Both functions call _useNonce(owner) which increments the same counter\n- A signature for permit(owner, spender, value, deadline, v, r, s) uses nonce N\n- The same signature components can be used for transferWithAuthorization(owner, spender, value, deadline, v, r, s) with nonce N\n- After one function uses nonce N, the other function can still use the same signature before nonce N+1 is used\n\nExploitation Scenario:\n1. User signs a permit to approve spender for 100 tokens (nonce = 5)\n2. Attacker intercepts the signature\n3. Attacker calls transferWithAuthorization with the same signature parameters\n4. Contract processes the transfer, moving 100 tokens from user to spender\n5. User's intended permit is still valid and can be used later\n\nFinancial Impact: Unauthorized token transfers - attacker can move user's tokens without proper authorization.",
+      "severity": "high",
+      "original_id": "9d8ae69890056358"
+    },
+    {
+      "id": "code4rena_next-generation_2025_05_tool_009",
+      "title": "Incorrect _update Function Call in transferWithAuthorization",
+      "description": "The transferWithAuthorization function calls _update(holder, spender, value) instead of _transfer(holder, spender, value). The _update function does not exist in ERC20Upgradeable - this appears to be a typo. This will cause the function to revert, making transferWithAuthorization completely non-functional. However, if _update is implemented elsewhere as an internal transfer function, it may have incorrect behavior.\n\nMathematical Proof:\n- ERC20Upgradeable has _transfer, _mint, _burn functions but no _update function\n- Calling _update(holder, spender, value) will revert with undefined function\n- This breaks the core functionality of transferWithAuthorization\n\nExploitation Scenario:\n- Normal users cannot use transferWithAuthorization functionality\n- If _update is implemented incorrectly elsewhere, it could lead to incorrect token accounting\n\nFinancial Impact: Protocol functionality broken - users cannot execute authorized transfers as intended.",
+      "severity": "high",
+      "original_id": "be3d5527c17317c3"
+    },
+    {
+      "id": "code4rena_next-generation_2025_05_tool_010",
+      "title": "Uninitialized Trusted Forwarder Allows Spoofing by Default",
+      "description": "The trusted forwarder is initialized to address(0) and there's no requirement to set it before use. Since address(0) is a valid Ethereum address, an attacker could deploy a contract at address(0) (though difficult) or more realistically, if the contract is used without properly initializing the trusted forwarder, any caller could spoof _msgSender() by making the contract think they are a trusted forwarder.\n\nMathematical Proof:\n- _trustedForwarder = address(0) by default\n- If contract is used without calling setTrustedForwarder\n- Attacker can call functions with crafted calldata that makes isTrustedForwarder(msg.sender) return true\n- _msgSender() will then extract sender from calldata instead of using msg.sender\n\nExploitation Scenario:\n1. Contract deployed but setTrustedForwarder never called\n2. Attacker calls any function with extra 20 bytes at end of calldata\n3. Contract treats attacker as trusted forwarder\n4. Attacker can spoof any address as the message sender\n\nFinancial Impact: Complete authorization bypass if trusted forwarder not properly initialized.",
+      "severity": "high",
+      "original_id": "2426b8f16fa4962d"
+    },
+    {
+      "id": "code4rena_next-generation_2025_05_tool_011",
+      "title": "Missing Access Control on Critical Fee Configuration Functions",
+      "description": "The contract exposes three critical configuration functions (setFeeFaucet, setTxFeeRate, setGaslessBasefee) without any access control modifiers. This allows any attacker to change fee rates, fee destinations, and gasless base fees arbitrarily. An attacker can set the transaction fee rate to 100% (10,000), redirect all fees to their own address, or set gasless base fees to drain funds from the system.\n\n**Mathematical Proof:**\n- Current FEE_RATIO constant: 10,000\n- Attacker calls setTxFeeRate(10000) \u2192 _txfeeRate = 10000\n- When calculateTxFee(1000) is called: (1000 * 10000) / 10000 = 1000\n- 100% of transaction amount is taken as fee\n\n**Exploitation Scenario:**\n1. Attacker calls setFeeFaucet(attackerAddress) to redirect all fees\n2. Attacker calls setTxFeeRate(10000) to set 100% fee rate\n3. Any transaction using _payTxFee will send 100% of txAmount to attacker's address\n4. Attacker can also manipulate gasless base fees to extract additional value\n\n**Financial Impact:** Complete loss of user funds through fee extraction. All transaction fees can be stolen by the attacker, and the protocol becomes unusable.",
+      "severity": "critical",
+      "original_id": "c29d516ac686fdee"
+    },
+    {
+      "id": "code4rena_next-generation_2025_05_tool_012",
+      "title": "Integer Underflow Vulnerability in Fee Rate Validation",
+      "description": "The setTxFeeRate function incorrectly checks for negative values using '< 0' comparison, which is impossible for uint256 types. This creates a logical error where the validation will never trigger for negative values (since uint256 cannot be negative), but the condition suggests the developer expected negative values to be possible. This indicates a misunderstanding of integer types that could lead to other vulnerabilities.\n\n**Mathematical Proof:**\n- uint256 type range: 0 to 2^256-1 (only positive values)\n- Condition: `newTxFeeRate < 0` will always be false\n- Attacker can set fee rate to 0 (bypassing intended negative check)\n- If protocol expects negative rates for some functionality, this breaks that logic\n\n**Exploitation Scenario:**\nWhile the immediate impact is limited due to uint256 constraints, this indicates poor understanding of type safety. If the contract is extended or integrated with other contracts that do handle signed integers, this could lead to unexpected behavior. The validation logic is fundamentally flawed.\n\n**Financial Impact:** Potential logic errors in fee calculations if negative rates were intended for certain scenarios. Low immediate impact but high risk for future extensions.",
+      "severity": "medium",
+      "original_id": "58b86cb352ac2b79"
+    },
+    {
+      "id": "code4rena_next-generation_2025_05_tool_013",
+      "title": "Division Rounding Error in Fee Calculation",
+      "description": "The calculateTxFee function uses integer division which rounds down to the nearest integer. For small transaction amounts, this can result in zero fees being calculated even when a non-zero fee rate is set, allowing attackers to avoid paying fees entirely.\n\n**Mathematical Proof:**\n- Assume _txfeeRate = 100 (1% fee rate)\n- Transaction amount = 99 (small amount)\n- Calculation: (99 * 100) / 10000 = 9900 / 10000 = 0 (rounded down)\n- Expected fee: 0.99 \u2192 rounded to 0\n- Attacker can split large transactions into many small transactions of 99 units each to avoid fees\n\n**Exploitation Scenario:**\n1. Attacker wants to transfer 10,000 tokens\n2. Instead of one transaction (fee = 100 tokens), attacker makes 102 transactions of 98 tokens each\n3. Each transaction: (98 * 100) / 10000 = 0.98 \u2192 rounded to 0 fee\n4. Total fees paid: 0 instead of 100 tokens\n\n**Financial Impact:** Protocol loses expected fee revenue. Attackers can avoid paying transaction fees by batching small transactions.",
+      "severity": "medium",
+      "original_id": "d818d3ab20bceac5"
+    },
+    {
+      "id": "code4rena_next-generation_2025_05_tool_014",
+      "title": "Unimplemented Critical Payment Functions",
+      "description": "The contract declares two critical payment functions (_payTxFee and payGaslessBasefee) as virtual without providing implementations. These functions are intended to handle actual fee transfers but contain no logic. If inherited contracts don't properly override these functions, fees will not be collected or distributed correctly.\n\n**Exploitation Scenario:**\n1. Contract is deployed with inherited FeesHandlerUpgradeable\n2. Developer forgets to implement _payTxFee function\n3. Users make transactions expecting fees to be collected\n4. No fees are actually transferred to the fee faucet\n5. Protocol loses all fee revenue\n\n**Financial Impact:** Complete loss of fee revenue for the protocol. Fees are calculated but never actually collected or distributed.",
+      "severity": "high",
+      "original_id": "fbdbdfd7bf37d9c0"
+    },
+    {
+      "id": "code4rena_next-generation_2025_05_tool_015",
+      "title": "Critical Access Control Vulnerability in setOwner Function",
+      "description": "The setOwner function lacks access control, allowing any address to take ownership of the contract. This function grants the DEFAULT_ADMIN_ROLE to a new address and revokes it from the current owner, effectively transferring contract ownership without authorization. An attacker can call this function to become the owner, gaining control over all privileged operations including upgrades, fee settings, and admin functions.",
+      "severity": "critical",
+      "original_id": "b38b188867ba4b35"
+    },
+    {
+      "id": "code4rena_next-generation_2025_05_tool_016",
+      "title": "Insufficient Balance Check in Transfer Functions",
+      "description": "The transferSanity function checks if balanceOf(from) >= txFees + amount, but this check occurs before the actual transfer. If the sender's balance is exactly equal to txFees + amount, the transfer will succeed but leave the sender with zero balance. However, the _payTxFee function performs an internal transfer after the main transfer, which could fail if the sender's balance becomes insufficient. This creates a potential state where the main transfer succeeds but the fee payment fails, leaving the protocol in an inconsistent state.",
+      "severity": "high",
+      "original_id": "7d1540b04e8f9826"
+    },
+    {
+      "id": "code4rena_next-generation_2025_05_tool_017",
+      "title": "Missing Zero Amount Validation in Transfer Functions",
+      "description": "The transfer, transferFrom, and transferWithAuthorization functions do not validate that the amount parameter is greater than zero. While transferring zero tokens might not directly cause financial loss, it can be exploited to trigger fee payments without actual value transfer. If txFeeRate > 0, transferring zero amount would still calculate and attempt to transfer txFees, which could be exploited to drain accounts through repeated zero-value transactions with fees.",
+      "severity": "medium",
+      "original_id": "d896b8b81de00bef"
+    },
+    {
+      "id": "code4rena_next-generation_2025_05_tool_019",
+      "title": "Gasless Fee Payment Bypass via Malicious ForwardRequest",
+      "description": "The execute function pays gasless fees to the executor (_msgSender()) without validating that the executor is the intended beneficiary. An attacker can craft a ForwardRequest where req.to is _eurfAddress but the calldata encodes a transfer to the attacker's address. When executed by a legitimate relayer, the attacker receives the tokens while the relayer pays the gas and receives the fee.\n\n**Mathematical Proof:**\n- Attacker creates ForwardRequest: from=VICTIM, to=_eurfAddress, data=transfer(ATTACKER, AMOUNT)\n- Relayer calls execute() with this request, paying gas\n- Contract transfers AMOUNT tokens from VICTIM to ATTACKER\n- Contract pays gasless fee to relayer (_msgSender())\n- Attacker gains AMOUNT tokens without spending gas\n\n**Exploitation Scenario:**\nAn attacker signs a malicious transfer request from a victim's account to their own address. They trick a relayer into executing it by making it appear legitimate. The relayer pays gas costs and gets a small fee, while the attacker steals the victim's tokens.\n\n**Financial Impact:**\nVictim loses the entire transferred token amount. The financial impact is the full value of the unauthorized transfer.",
+      "severity": "high",
+      "original_id": "36a4372aa8d8d791"
+    },
+    {
+      "id": "code4rena_next-generation_2025_05_tool_020",
+      "title": "Signature Malleability Due to Direct Signature Usage",
+      "description": "The contract uses ECDSA.recover() directly without checking for signature malleability. Ethereum's ecrecover has known malleability issues where signatures with high S values can be modified to create different valid signatures for the same message. This could allow replay attacks if the contract doesn't properly handle signature uniqueness.\n\n**Mathematical Proof:**\nECDSA signatures (r,s) are malleable if s > secp256k1n/2. An attacker can create a modified signature (r, secp256k1n - s) that verifies for the same message and public key. If the contract only checks signature validity without enforcing s value constraints, both signatures will be valid.\n\n**Exploitation Scenario:**\nAn attacker observes a valid signature (r,s) where s > secp256k1n/2. They create the malleable signature (r, secp256k1n - s) and submit it before the original signature is processed. If the nonce hasn't been incremented yet, both signatures could potentially be used.\n\n**Financial Impact:**\nPotential double-spending or replay attacks could lead to unauthorized token transfers. The victim could lose funds if the same signed request is executed multiple times.",
+      "severity": "medium",
+      "original_id": "bfc97de0f61b2ff2"
+    }
+  ],
+  "input_tokens": 2899,
+  "output_tokens": 71,
+  "cached_tokens": 45
+}

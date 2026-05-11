@@ -1,0 +1,772 @@
+{
+  "project": "sherlock_perennial_v2_update_3_2024_08",
+  "agent": "agent794",
+  "status": "success",
+  "timestamp": "2026-04-06T16:47:19.231497",
+  "elapsed_seconds": 4627.7,
+  "total_expected": 7,
+  "total_found": 100,
+  "true_positives": 1,
+  "false_negatives": 6,
+  "false_positives": 99,
+  "detection_rate": 0.14285714285714285,
+  "precision": 0.01,
+  "f1_score": 0.018691588785046728,
+  "matched_findings": [
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_expected_000",
+      "expected": "Market coordinator can steal all market collat-",
+      "matched": "Unprotected State Updates in _accumulateSettlementFee and _accumulateLiquidationFee Enable Fee Manipulation",
+      "confidence": 0.8,
+      "justification": "Finding 5 describes unprotected state updates in _accumulateSettlementFee and _accumulateLiquidationFee that enable fee manipulation, which aligns with the expected vulnerability about market coordinator stealing collateral through fee manipulation. The finding correctly identifies the core issue: lack of access control on fee accumulation functions allowing a coordinator to manipulate fees to steal funds. While the expected vulnerability mentions 'adiabatic fees' specifically, Finding 5 captures the essential security flaw of fee manipulation by the coordinator.",
+      "severity": "high",
+      "expected_description": "Source: https://github.com/sherlock-audit/2024-08-perennial-v\n\neral by changing adiabatic fees\nSource: https://github.com/sherlock-audit/2024-08-perennial-v 2-update-3-judgin\ng/issues/27\nThe protocol has acknowledged this issue.\nFound by\npanprog Summary The README states the following:\nQ: Please list any known issues and explicitly state the acceptable risks\nfor each known issue. Coordinators are given broad control over the\nparameters of the markets they coordinate. The protocol parameter is\ndesigned to prevent situations where parameters are set to malicious\nsteal funds. If the coordinator can operate within the bounds of\nreasonable protocol parameters to negatively affect markets we would\nlike to know about it\nEven when protocol parameters are reasonable, market coordinator can steal all\nmarket funds by utilizing the adiabatic fees change. The adiabatic fees are fees\ntaken from takers when they increase skew (difference between open longs and\nshorts) and paid to takers when they decrease skew to incentivize orders which\nreduce price risk for makers. The issue is that market coordinator can set adiabatic\nfees to 0, open large maker/taker positions (taker position paying 0 adiabatic fees),\nthen immediately set adiabatic fees to max possible (e.g. 1%) and close\ntaker/maker positions (receiving the adiabatic fee). This fees difference when\nadiabatic fees are changed by market coordinator is subtracted from market 's\nglobalexposure , which is supposed to be paid/received by the owner. I.e. when\nadiabatic fees are increased, this increases exposure to be paid by the owner with\ncoordinator being able to withdraw this amount to himself (up to total market 's\ncollateral available), meaning coordinator can steal all market funds.\nRoot Cause The root cause is the protocol design of adiabatic fees, it 's hard to\npinpoint any specific code which is the root cause.\nWhen market risk parameters are updated, Global.update is called with new risk\nparameters, which changes the global exposure :\nhttps://github.com/sherlock-audit/2024-08-perennial-v 2-update-3/blob/main/pere\nnnial-v 2/packages/perennial/contracts/types/Global.sol#L 54-L 56\nThis global exposure has to be covered or received by owner by calling\nclaim Exposure : https://github.com/sherlock-audit/2024-08-perennial-v 2-update-3\n/blob/main/perennial-v 2/packages/perennial/contracts/Market.sol#L 329-L 339\n3\n\nSince market coordinator can change adiabatic fees, this allows market coordinator\nto control the owner 's exposure, which is essentially what lets coordinator to take\nadvantage of this and steal funds.\nInternal pre-conditions Coordinator is malicious OR User front-runs adiabatic fees\nincrease transaction\nExternal pre-conditions None.\nAttack Path\n1. Coordinator sets adiabatic fees and all the other fees to 0, also increases\nmaker Limit to large amount to cause larger impact\n2. Coordinator opens large maker position and large taker position (paying 0\nfees)\n3. Wait for 1 oracle version to settle maker and taker positions\n4. Coordinator sets adiabatic fees to max allowed value (e.g. 1%)\n5. Coordinator closes taker position, settles it, closes maker position, settles it\n6. At this point maker should have about the same amount of collateral as\ndeposited, and taker should have deposited collateral + adiabatic fees paid to\ntaker for closing the position. Both maker and taker accounts withdraw all\ncollateral. Most likely total collateral will be higher than the market has, so\nsimply withdraw all collateral market has\nAt this point all funds are stolen by coordinator (and if not - simply repeat from step\n1 until all funds are stolen). The other users will have positive collateral balances,\nbut they will be unable to withdraw anything since market token balance will be 0\n(market owner will have large negative exposure).\nAlternative attack scenario:\n1. Coordinator wants to increase adiabatic fees\n2. User listens to coordinator transaction and front-runs it by creating huge taker\nposition (possibly 2 taker positions - long+short to be delta-neutral, also\nmaybe maker position if necessary, to be able to open large taker positions).\nThis doesn 't need to be classic front-run, maybe the coordinator will\nannounce risk parameter changes in the forum or somewhere, and user opens\nthese positions in anticipation of adiabatic fees increase\n3. Coordinator transaction to increase adiabatic fees goes through\n4. User closes his positions, receiving large profit from adiabatic fees only\n(which should more than cover all the other fees, and market price risk can be\nneutralized by opening delta-neutral positions), at the expense of the owner 's\nexposure\n4\n\nImpact All market collateral token balance is stolen.\nPo C\nit ('Coordinator steals all funds ', async () => {\n// collateral to pay fee only\nconst A_COLLATERAL = parse 6 decimal ( '10000000 ')\nconst C_COLLATERAL = parse 6 decimal ( '1000000 ')\nconst A_POSITION = parse 6 decimal ( '100000 ')\ndsu.transfer From.when Called With (user.address, market.address,\nA_COLLATERAL.mul (1 e 12)).returns (true) ,!\ndsu.transfer From.when Called With (user B.address, market.address,\nA_COLLATERAL.mul (1 e 12)).returns (true) ,!\ndsu.transfer From.when Called With (user C.address, market.address,\nC_COLLATERAL.mul (1 e 12)).returns (true) ,!\n// honest user C simply deposits $1 M collateral, not even opening position\nawait market\n.connect (user C)\n['update (address, uint 256, uint 256, uint 256, int 256, bool) '](user C.address,\n0, 0, 0, C_COLLATERAL, false) ,!\nconst malicious Risk Parameter = {\n...risk Parameter,\nmaker Limit: parse 6 decimal ( '100000 '),\ntaker Fee: {\n...risk Parameter.taker Fee,\nadiabatic Fee: parse 6 decimal ( '0.00 '), // this is paid by taker when taker\nopens, so make it 0 ,!\nscale: parse 6 decimal ( '5000.000 '),\n},\nmaker Fee: {\n...risk Parameter.maker Fee,\nscale: parse 6 decimal ( '5000.000 '),\n},\n// set utilization curve to 0 to better showcase the adiabatic Fee impact\nutilization Curve: {\n...risk Parameter.utilization Curve,\nmin Rate: parse 6 decimal ( '0.0'),\nmax Rate: parse 6 decimal ( '0.0'),\ntarget Rate: parse 6 decimal ( '0.0'),\ntarget Utilization: parse 6 decimal ( '0.50 '),\n},\n}\nawait market.connect (coordinator).update Risk Parameter (malicious Risk Parameter)\n5\n\n// coordinator uses 2 accounts to open maker and taker positions with\nadiabatic fees = 0 (taker doesn 't pay any fees) ,!\nawait market\n.connect (user)\n['update (address, uint 256, uint 256, uint 256, int 256, bool) '](user.address,\nA_POSITION, 0, 0, A_COLLATERAL, false) ,!\nawait market\n.connect (user B)\n['update (address, uint 256, uint 256, uint 256, int 256, bool) '](user B.address,\n0, A_POSITION, 0, A_COLLATERAL, false) ,!\noracle.at.when Called With (ORACLE_VERSION_2.timestamp).returns ([ORACLE_VERSION c\n_2, INITIALIZED_ORACLE_RECEIPT]) ,!\noracle.status.returns ([ORACLE_VERSION_2, ORACLE_VERSION_3.timestamp])\noracle.request.when Called With (user.address).returns ()\nawait settle (market, user B)\nvar loc = await market.locals (user B.address);\nconsole.log (\"User B collateral with open taker: \" + loc.collateral);\n// now set adiabatic fees to max allowed (1%) to receive them back when\nclosing taker ,!\nconst malicious Risk Parameter 2 = {\n...malicious Risk Parameter,\ntaker Fee: {\n...malicious Risk Parameter.taker Fee,\nadiabatic Fee: parse 6 decimal ( '0.01 '), // set max fee since this will be\npaid to taker on close ,!\n},\n}\nawait\nmarket.connect (coordinator).update Risk Parameter (malicious Risk Parameter 2) ,!\n// close maker and taker which should pay adiabatic fees to taker\nawait market\n.connect (user B)\n['update (address, uint 256, uint 256, uint 256, int 256, bool) '](user B.address,\n0, 0, 0, 0, false) ,!\noracle.at.when Called With (ORACLE_VERSION_3.timestamp).returns ([ORACLE_VERSION c\n_3, INITIALIZED_ORACLE_RECEIPT]) ,!\noracle.status.returns ([ORACLE_VERSION_3, ORACLE_VERSION_4.timestamp])\noracle.request.when Called With (user.address).returns ()\n6\n\nawait market\n.connect (user)\n['update (address, uint 256, uint 256, uint 256, int 256, bool) '](user.address, 0,\n0, 0, 0, false) ,!\noracle.at.when Called With (ORACLE_VERSION_4.timestamp).returns ([ORACLE_VERSION c\n_4, INITIALIZED_ORACLE_RECEIPT]) ,!\noracle.status.returns ([ORACLE_VERSION_4, ORACLE_VERSION_5.timestamp])\noracle.request.when Called With (user.address).returns ()\nawait settle (market, user)\nawait settle (market, user B)\nawait settle (market, user C)\nvar loc = await market.locals (user.address);\nconsole.log (\"User collateral after closing: \" + loc.collateral);\nvar loc = await market.locals (user B.address);\nconsole.log (\"User B collateral after closing: \" + loc.collateral);\nvar loc = await market.locals (user C.address);\nconsole.log (\"User C collateral after closing: \" + loc.collateral);\nvar glob = await market.global ();\nconsole.log (\"Exposure to be paid by owner: \" + glob.exposure);\n})\nConsole output:\nUser B collateral with open taker: 10000000000000\nUser collateral after closing: 10000060000000\nUser B collateral after closing: 11229933600000\nUser C collateral after closing: 1000000000000\nExposure to be paid by owner: -1230000000000\nNotice, that all 3 users deposited a total of 21 M, but after the attack collateral of\ncoordinator 's users (user and user B) is 21.2 M and user C collateral is still 1 M, but the\ntotal of all 3 users is 22.2 M, 1.2 M is the exposure which should be covered by the\nowner.\nMitigation This is the design issue, so mitigation only depends on the intended\ndesign. Possible options:\n1. Remove adiabatic fees altogether\n2. Limit the total exposure amount which can be created by the coordinator (not\nfull fix, but at least limits the loss)\n3. Force coordinator to pay exposure instead of owner (this is just partial fix\n7\n\nthough, and if exposure which can be received is also due to coordinator, this\nopens reverse attack vector of draining funds from existing users by\ndecreasing adiabatic fees)\n8",
+      "found_description": "The functions _accumulateSettlementFee and _accumulateLiquidationFee directly modify state variables (next.settlementFee and next.liquidationFee) without access control, allowing any caller to manipulate settlement and liquidation fee accumulation by triggering accumulation with forged OracleReceipt values. Since these fees are used in economic calculations (marketFee, liquidation risk), an attacker can artificially inflate or suppress fees to avoid paying fees or extract protocol revenue. The vulnerability exists because _accumulate is externally callable and does not restrict who can initiate accumulation, enabling front-running or timing attacks where an attacker submits a malicious OracleReceipt to manipulate fee accumulation before legitimate updates.",
+      "found_id": "b9ba32fcd0e66ba7",
+      "tool_finding_index": 70
+    }
+  ],
+  "missed_findings": [
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_expected_001",
+      "title": "Market coordinator can liquidate all users in",
+      "description": "Source: https://github.com/sherlock-audit/2024-08-perennial-v\n\nthe market\nSource: https://github.com/sherlock-audit/2024-08-perennial-v 2-update-3-judgin\ng/issues/29\nFound by\npanprog Summary The README states the following:\nQ: Please list any known issues and explicitly state the acceptable risks\nfor each known issue. Coordinators are given broad control over the\nparameters of the markets they coordinate. The protocol parameter is\ndesigned to prevent situations where parameters are set to malicious\nsteal funds. If the coordinator can operate within the bounds of\nreasonable protocol parameters to negatively affect markets we would\nlike to know about it\nMarket coordinator can change margin and maintenance ratios and min USD\namounts, and these do not have any upside limitation. This means that malicious\ncoordinator can set these values to extremely high amounts (like 1000%), which will\nmake all users positions unhealthy, allowing malicious coordinator to liquidate all\nusers, negatively affecting all market users.\nSince the coordinator also controls the fees, the full attack can consist of setting\nhigh margin and maintenance amounts, max fees, then liqudating all makers,\nopening small maker position and liquidating all takers, receiving max fee\npercentage off all users notional.\nRoot Cause It's probably not possible to avoid some users becoming liquidatable\nwhen the margin ratio is increased, even by well-intended coordinator. Still, there\nare neither timelock to let users know of the changes in advance, nor any sanity\nupside limit for the margin, the only limit is downside (so that it can 't be set to 0):\nhttps://github.com/sherlock-audit/2024-08-perennial-v 2-update-3/blob/main/pere\nnnial-v 2/packages/perennial/contracts/types/Risk Parameter.sol#L 147-L 157\nInternal pre-conditions Malicious market coordinator.\nExternal pre-conditions None.\nAttack Path\n1. Coordinator sets max margin and maintenance ratios, max allowed liquidation\nfee and all the other fees\n2. Coordinator liquidates all makers\n3. Coordinator opens small maker position\n9\n\n4. Coordinator liquidates all takers, which earns small liquidation fees + all\nposition closure fees (which are percentage-based, e.g. 1%) are accumulated\nto coordinator 's maker, which is the only maker in the market\n5. Coordinator closes maker position and withdraws all collateral\nImpact At least 1% or more is stolen from all market users, along with all market\npositions being liquidated.\nPo C Not needed.\nMitigation\n1. Force coordinator time lock, so that all users know well in advance of incoming\nmarket parameters changes\n2. Optionally add some sanity upside limit to margin, maintenance, min Margin\nand min Maintenance (set via protocol Parameters).\nDiscussion\nsherlock-admin 2\nThe protocol team fixed this issue in the following PRs/commits:\nhttps://github.com/equilibria-xyz/perennial-v 2/pull/464\n10",
+      "severity": "high",
+      "reason": "Not found"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_expected_002",
+      "title": "Market coordinator can steal all market col-",
+      "description": "Source: https://github.com/sherlock-audit/2024-08-perennial-v\n\nlateral by abusing very low value of scale\nSource: https://github.com/sherlock-audit/2024-08-perennial-v 2-update-3-judgin\ng/issues/40\nThe protocol has acknowledged this issue.\nFound by\npanprog Summary The README states the following:\nQ: Please list any known issues and explicitly state the acceptable risks\nfor each known issue. Coordinators are given broad control over the\nparameters of the markets they coordinate. The protocol parameter is\ndesigned to prevent situations where parameters are set to malicious\nsteal funds. If the coordinator can operate within the bounds of\nreasonable protocol parameters to negatively affect markets we would\nlike to know about it\nMarket coordinator can set both maker Limit andscale fortaker Fee at very low\namount (like 1), which will charge absurdly high taker proportional fee to existing\npositions, because proportional fee formula is\nchange.abs ().mul (price).muldiv (change.abs (), scale).mul (fee) , i.e. the fee is\n(order_size) \u02c62 * price * fee when scale is 1. The same issue is with maker\nproportional fee and taker adiabatic fee - all of them multiply by order size divided\nbyscale .\nThe only limitation for scale setting is that it must be larger than some percentage\nofmaker Limit and there is no limitation on maker Limit :\nUFixed 6 scale Limit =\nself.maker Limit.div (self.efficiency Limit).mul (protocol Parameter.min Scale); ,!\nif (self.taker Fee.scale.lt (scale Limit) || self.maker Fee.scale.lt (scale Limit))\nrevert Risk Parameter Storage Invalid Error ();\nThis allows to set any scale amount, the maker Limit just has to be set to a similar\namount, or alternatively efficiency Limit can be set to a huge amount (there is only\ndownside limitation for it), which will make scale Limit very low, allowing very low\nscale values.\nMarket coordinator can abuse this by opening large maker position (settling it),\nopening large taker position (unsettled), changing risk parameter maker Limit and\nscale to 1, then at the next oracle version the large taker position will be settled\nusingscale = 1 , charging fees much higher than 100%, putting taker position into\nhuge bad debt, while all makers will have huge profit (larger than market collateral),\n11\n\nwhich coordinator can immediately withdraw from his maker position, stealing all\nmarket collateral.\nRoot Cause The exact root cause is hard to determine here. It might be the lack of\nrisk parameter settings validations: the only scale check is against scale Limit\ncalculated from maker Limit , but there is no conditions on maker Limit itself:\nhttps://github.com/sherlock-audit/2024-08-perennial-v 2-update-3/blob/main/pere\nnnial-v 2/packages/perennial/contracts/types/Risk Parameter.sol#L 159-L 161\nOn the other hand, it 's probably hard to set correct protocol-wide limitation for this,\nso maybe the issue is with the design of the proportional and adiabatic fees, where\ntheorder_size / scale multiplication is quite dangerous as it is unlimited.\nInternal pre-conditions Coordinator is malicious.\nExternal pre-conditions None.\nAttack Path\n1. Coordinator opens large maker position, settles it\n2. Coordinator opens large taker position (but doesn 't settle it yet)\n3. Coordinator sets risk parameter: maker Limit = 1 , taker Fee.scale = 1 and\ntaker Fee.propotional Fee set to max.\n4. Coordinator commits oracle version of the taker position, settles maker+taker\npositions: taker is in huge bad debt, maker is in huge profit (larger than all\nmarket collateral)\n5. Coordinator withdraws all market collateral\nNote: step 1 and 2 are preparation, steps 3-5 can be performed in 1 transaction\nAlternatives:\n\u2022Settingtake Fee.scale = 1 andefficiency Limit to a very high value.\n\u2022All taker trades after the scale = 1 is set will incur huge fee, so it 's possible to\nhave settled taker position before the risk params change, and then close it by\nliquidation, incuring huge fees. Coordinator doesn 't even have to open his own\ntaker position, he can simply liquidate any large existing taker.\n\u2022Use adiabatic fees scale instead of taker proportional fees\n\u2022Use maker propotional fees (and use only maker accounts)\nImpact All market collateral stolen.\nAdditional impact: if the market is part of any vault, almost all this vault funds can\nbe stolen. This can be done by forcing the vault to re-balance (depositing or\nwithdrawing some amount), which will charge huge fees, making vault 's collateral in\n12\n\nthe market negative. Next re-balance will add more collateral into the market,\nwhich can be stolen again, repeated until most vault funds are stolen.\nPo C\nit ('Coordinator steals all funds by reducing fees scale ', async () => {\n// collateral to pay fee only\nconst A_COLLATERAL = parse 6 decimal ( '100000 ')\nconst C_COLLATERAL = parse 6 decimal ( '10000 ')\nconst A_POSITION = parse 6 decimal ( '1000 ')\ndsu.transfer From.when Called With (user.address, market.address,\nA_COLLATERAL.mul (1 e 12)).returns (true) ,!\ndsu.transfer From.when Called With (user B.address, market.address,\nA_COLLATERAL.mul (1 e 12)).returns (true) ,!\ndsu.transfer From.when Called With (user C.address, market.address,\nC_COLLATERAL.mul (1 e 12)).returns (true) ,!\n// honest user C simply deposits $1 M collateral, not even opening position\nawait market\n.connect (user C)\n['update (address, uint 256, uint 256, uint 256, int 256, bool) '](user C.address,\n0, 0, 0, C_COLLATERAL, false) ,!\n// coordinator is the only maker in the market for simplicity\nawait market\n.connect (user)\n['update (address, uint 256, uint 256, uint 256, int 256, bool) '](user.address,\nA_POSITION, 0, 0, A_COLLATERAL, false) ,!\n// wait for the next oracle version to settle maker\noracle.at.when Called With (ORACLE_VERSION_2.timestamp).returns ([ORACLE_VERSION c\n_2, INITIALIZED_ORACLE_RECEIPT]) ,!\noracle.status.returns ([ORACLE_VERSION_2, ORACLE_VERSION_3.timestamp])\noracle.request.when Called With (user.address).returns ()\nawait market.settle (user.address)\n// coordinator uses another accounts to open large taker positions\n(unsettled) ,!\nawait market\n.connect (user B)\n['update (address, uint 256, uint 256, uint 256, int 256, bool) '](user B.address,\n0, A_POSITION, 0, A_COLLATERAL, false) ,!\nvar loc = await market.locals (user.address);\n13\n\nconsole.log (\"User collateral (maker) : \" + loc.collateral);\nvar loc = await market.locals (user B.address);\nconsole.log (\"User B collateral (taker) : \" + loc.collateral);\nvar loc = await market.locals (user C.address);\nconsole.log (\"User C collateral (honest): \" + loc.collateral);\nconst malicious Risk Parameter = {\n...risk Parameter,\nmaker Limit: 1000000, // minimal maker limit\ntaker Fee: {\n...risk Parameter.taker Fee,\nproportional Fee: parse 6 decimal ( '0.01 '), // set max fee since this will\nbe paid to taker on close ,!\nscale: 1000000, // minimal scale\n},\n// set utilization curve to 0 to better showcase the scale impact\nutilization Curve: {\n...risk Parameter.utilization Curve,\nmin Rate: parse 6 decimal ( '0.0'),\nmax Rate: parse 6 decimal ( '0.0'),\ntarget Rate: parse 6 decimal ( '0.0'),\ntarget Utilization: parse 6 decimal ( '0.50 '),\n},\n}\n// coordinator sets very low maker limit and very low scale (1), his taker\nposition is still pending ,!\nawait market.connect (coordinator).update Risk Parameter (malicious Risk Parameter)\noracle.at.when Called With (ORACLE_VERSION_3.timestamp).returns ([ORACLE_VERSION c\n_3, INITIALIZED_ORACLE_RECEIPT]) ,!\noracle.status.returns ([ORACLE_VERSION_3, ORACLE_VERSION_4.timestamp])\noracle.request.when Called With (user.address).returns ()\n// user position is settled with a large amount (much higher than maker) but\nnew risk parameters (very low scale) ,!\nawait settle (market, user)\nawait settle (market, user B)\nconsole.log (\"After attack\");\nvar loc = await market.locals (user.address);\nconsole.log (\"User collateral (maker) : \" + loc.collateral);\nvar loc = await market.locals (user B.address);\nconsole.log (\"User B collateral (taker) : \" + loc.collateral);\nvar loc = await market.locals (user C.address);\nconsole.log (\"User C collateral (honest): \" + loc.collateral);\n14\n\n})\nConsole output from execution:\nUser collateral (maker) : 100000000000\nUser B collateral (taker) : 100000000000\nUser C collateral (honest): 10000000000\nAfter attack\nUser collateral (maker) : 1330000000000\nUser B collateral (taker) : -1130000000000\nUser C collateral (honest): 10000000000\nNotice: honest user deposits 10 K, coordinator deposits 100 K+100 K, after attack\ncoordinator has collateral of 1.33 M (much more than total collateral of 210 K), which\nhe can withdraw.\nMitigation Depends on protocol design choice. Possibilities I see:\n\u2022Makescale validation more strict: possibly use max (maker Limit,\ncurrent Global Position.long, short, maker ) instead of maker Limit in\nscale Limit calculation, so that scale should obey not just maker Limit\npercentage, but also max from currently opened positions. Additionally\nvalidate efficiency Limit max value (limit to 1?)\n\u2022Change proportional and adiabatic fee formulas for something more\npercentage-based so that there is a strict max fee limit\n\u2022Add hard percentage cap on proportional and adiabatic fees (currently\nproportional fee = 1% doesn 't mean that it 's max 1% - it 's actually unlimited, 1%\nis some arbitrary number not telling anything about real percentage charged,\nso it makes sense to still have a cap for it)\n15",
+      "severity": "high",
+      "reason": "Not found"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_expected_003",
+      "title": "Maliciously specifying a very large intent.price",
+      "description": "Source: https://github.com/sherlock-audit/2024-08-perennial-v\n\n**Summary:**\nWhen Market.sol generates an order, if you specify a very large intent.price, you don't need additional collateral to guarantee it, and the order is submitted normally. But the settlement will generate a large revenue pnl, the user can maliciously construct a very large intent.price, steal revenue Root Cause in Checkpoint Lib.sol#L 79 when the order is settled override pnl is calculated pnl = (to Version.price - Intent.price) * taker () This value is counted towards the collateral local.collateral However, when adding a new order, there is no limit on Intent.price , and the user only needs small collateral that is larger than what is required by taker () * last Version.price In this way, a malicious user can specify a very large Intent.price , and both parties need only a small amount of collateral to generate a successful order But at settlement, the profitable party gets the enlarged pnl and converts it to collateral, which the user can then steal. Internal pre-conditions No response External pre-conditions No response 16 Attack Path Example last Verson.price = 123 Intent.price = 1250000000000 (Far more than the normal price) Intent.postion = 5 1. Alice deposit collateral = 10000 (As long as it is greater than Intent.postion * last Verson.price ) 2. Alice_fake_user deposit collateral = 10000 (As long as it is greater than Intent.postion * last Verson.price ) 3. alice execute update (account= alice, Intent = {account=Alice_fake_user , postion = 5 , price = 1250000000000 ) \u2022This order can be submitted successfully because the collateral is only related to Intent.postion and last Verson.price 4. last Verson.price still = 123 5. settle (alice) , pnl (Intent.price - last Verson.price) * Intent.postion = (1250000000000 - 123) * 5 Note: Alice_fake_user will be a huge loss, but that 's ok, relative to profit, giving up very small collateral 10,000 .\n\n**Impact:**\nMaliciously specifying a very large intent.price will result in a large gain at settlement, stealing funds Po C The following example demonstrates that specifying a very large intent.price with a very small collateral generating a very large return to collateral add to/perennial-v 2/packages/perennial/test/unit/market/Market.test.ts it ('test_intent_price ', async () => { factory.parameter.returns ({ max Pending Ids: 5, protocol Fee: parse 6 decimal ( '0.50 '), max Fee: parse 6 decimal ( '0.01 '), max Fee Absolute: parse 6 decimal ( '1000 '), max Cut: parse 6 decimal ( '0.50 '), max Rate: parse 6 decimal ( '10.00 '), min Maintenance: parse 6 decimal ( '0.01 '), min Efficiency: parse 6 decimal ( '0.1'), referral Fee: parse 6 decimal ( '0.20 '), min Scale: parse 6 decimal ( '0.001 '), 17 }) const market Parameter = { ...(await market.parameter ()) } market Parameter.taker Fee = parse 6 decimal ( '0.01 ') await market.update Parameter (market Parameter) const risk Parameter = { ...(await market.risk Parameter ()) } await market.update Risk Parameter ({ ...risk Parameter, taker Fee: { ...risk Parameter.taker Fee, linear Fee: parse 6 decimal ( '0.001 '), proportional Fee: parse 6 decimal ( '0.002 '), adiabatic Fee: parse 6 decimal ( '0.004 '), }, }) const test_price = '1250000000000 '; const SETTLEMENT_FEE = parse 6 decimal ( '0.50 ') const intent: Intent Struct = { amount: POSITION.div (2), price: parse 6 decimal (test_price), fee: parse 6 decimal ( '0.5'), originator: liquidator.address, solver: owner.address, collateralization: parse 6 decimal ( '0.01 '), common: { account: user.address, signer: liquidator.address, domain: market.address, nonce: 0, group: 0, expiry: 0, }, } await market .connect (user B) ['update (address, uint 256, uint 256, uint 256, int 256, bool) '](user B.address, POSITION, 0, 0, COLLATERAL, false) ,! await market .connect (user) ['update (address, uint 256, uint 256, uint 256, int 256, bool) '](user.address, 0, 0, 0, COLLATERAL, false) ,! await market .connect (user C) 18 ['update (address, uint 256, uint 256, uint 256, int 256, bool) '](user C.address, 0, 0, 0, COLLATERAL, false) ,! verifier.verify Intent.returns () // maker factory.authorization .when Called With (user C.address, user C.address, constants. Address Zero, liquidator.address) ,! .returns ([true, false, parse 6 decimal ( '0.20 ')]) // taker factory.authorization .when Called With (user.address, user C.address, liquidator.address, liquidator.address) ,! .returns ([false, true, parse 6 decimal ( '0.20 ')]) console.log (\"before collateral:\"+(await market.locals (user C.address)).collateral.div (1000000)); ,! await market .connect (user C) [ 'update (address,(int 256, int 256, uint 256, address, address, uint 256,(address, c address, address, uint 256, uint 256, uint 256)), bytes) ' ,! ](user C.address, intent, DEFAULT_SIGNATURE); oracle.at .when Called With (ORACLE_VERSION_2.timestamp) .returns ([ORACLE_VERSION_2, { ... INITIALIZED_ORACLE_RECEIPT, settlement Fee: SETTLEMENT_FEE }]) ,! oracle.at .when Called With (ORACLE_VERSION_3.timestamp) .returns ([ORACLE_VERSION_3, { ... INITIALIZED_ORACLE_RECEIPT, settlement Fee: SETTLEMENT_FEE }]) ,! oracle.status.returns ([ORACLE_VERSION_3, ORACLE_VERSION_4.timestamp]) oracle.request.when Called With (user.address).returns () await settle (market, user) await settle (market, user B) await settle (market, user C) console.log (\"after collateral:\"+(await market.locals (user C.address)).collateral.div (1000000)); ,! }) 19 $ yarn test --grep test_intent_price Market already initialized #update signer before collateral:10000 after collateral:6250000009384 test_intent_price (44878 ms) Mitigation intent.price - last Version.price needs to be within a reasonable range and the difference must not be too large. And the difference needs to be secured by collateral.",
+      "severity": "high",
+      "reason": "Not found"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_expected_004",
+      "title": "Lack of access control in the",
+      "description": "Source: https://github.com/sherlock-audit/2024-08-perennial-v\n\n**Summary:**\nAn attacker can set himself as an extension , which is an allowed protocol-wide operator . As such, he can act on an account 's behalf in all its positions and, for example, withdraw its collateral.\n\n**Vulnerability Detail:**\nA new authorization functionality was introduced in Perennial 2.3 update to allow for signers and extensions to act on behalf of the account. Unfortunately, the update Extension () function within the Market Factory is missing the only Owner access control modifier. File: Market Factory.sol 100:@> function update Extension (address extension, bool new Enabled) external { 101: extensions[extension] = new Enabled; 102: emit Extension Updated (extension, new Enabled); 103: } Thisextensions mapping is later used in the authorization () function to determine if the sender is an account operator: File: Market Factory.sol 77: function authorization ( 78: address account, 79: address sender, 80: address signer, 81: address order Referrer 82: ) external view returns (bool is Operator, bool is Signer, UFixed 6 order Referral Fee) { ,! 83: return ( 84:@> account == sender || extensions[sender] || operators[account][sender], ,! 85: account == signer || signers[account][signer], 86: referral Fees (order Referrer) 21 87: ); 88: } Theauthorization () function is used within the Market contract to authorize the order in the name of the account: File: Market.sol 500: // load factory metadata 501: (update Context.operator, update Context.signer, update Context.order Referral Fee) = ,! 502:@> IMarket Factory (address (factory ())).authorization (context.account, msg.sender, signer, order Referrer);,! ,! 503: if (guarantee Referrer != address (0)) update Context.guarantee Referral Fee = guarantee Referral Fee; ,! 504: } File: Invariant Lib.sol 78: if ( 79: !update Context.signer && // sender is relaying the account 's signed intention ,! 80:@> !update Context.operator && // sender is operator approved for account ,! 81: !(new Order.is Empty () && new Order.collateral.gte (Fixed 6 Lib. ZERO)) // sender is depositing zero or more into account, without position change ,! 82: ) revert IMarket. Market Operator Not Allowed Error (); As can be seen, anyone without authorization can set himself as an extension and act as the operator of any account, leading to the loss of all funds.\n\n**Impact:**\n\u2022Loss of funds. \u2022Missing access control.\n\n**Code Snippet:**\nhttps://github.com/sherlock-audit/2024-08-perennial-v 2-update-3/blob/main/pere\nnnial-v 2/packages/perennial/contracts/Market Factory.sol#L 100-L 103\nhttps://github.com/sherlock-audit/2024-08-perennial-v 2-update-3/blob/main/pere\nnnial-v 2/packages/perennial/contracts/Market Factory.sol#L 77-L 88\nhttps://github.com/sherlock-audit/2024-08-perennial-v 2-update-3/blob/main/pere\nnnial-v 2/packages/perennial/contracts/Market.sol#L 500-L 504\n22\n\nhttps://github.com/sherlock-audit/2024-08-perennial-v 2-update-3/blob/main/pere\nnnial-v 2/packages/perennial/contracts/libs/Invariant Lib.sol#L 78-L 82\nTool used\nManual Review\n\n**Recommendation:**\nAdd the only Owner modifier to the Market Factory.update Extension () function.",
+      "severity": "high",
+      "reason": "Not found"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_expected_005",
+      "title": "Market coordinator can set stale After to a huge",
+      "description": "Source: https://github.com/sherlock-audit/2024-08-perennial-v\n\nvalue allowing anyone to steal all market collateral when\nthere are no transactions for some time\nSource: https://github.com/sherlock-audit/2024-08-perennial-v 2-update-3-judgin\ng/issues/58\nFound by\npanprog Summary The README states the following:\nQ: Please list any known issues and explicitly state the acceptable risks\nfor each known issue. Coordinators are given broad control over the\nparameters of the markets they coordinate. The protocol parameter is\ndesigned to prevent situations where parameters are set to malicious\nsteal funds. If the coordinator can operate within the bounds of\nreasonable protocol parameters to negatively affect markets we would\nlike to know about it\nMarket coordinator can set stale After risk parameter to any value (there is no\nvalidation at all). If set to a huge amount, he can steal all market collateral by\nabusing the price commited long time ago to open huge position which is already in\nbad debt using current price, when the current price is already very far away from\nthe last commited price.\nRoot Cause Nostale After validation in Risk Parameter :\nhttps://github.com/sherlock-audit/2024-08-perennial-v 2-update-3/blob/main/pere\nnnial-v 2/packages/perennial/contracts/types/Risk Parameter.sol#L 132-L 162\nInternal pre-conditions\n\u2022Malicious market coordinator\nExternal pre-conditions\n\u2022Last commited price differs from current price by more than margin\nrequirement\nAttack Path\n1. Coordinator opens huge long position + huge short position of the same size\nfrom 2 accounts (delta neutral portfolio) ...\n2. Situation happens: no transactions for a long time and current price deviates\naway from last commited price by more than margin amount (such situation is\nvery easily possible when the market is not super active, during quick price\nmoves just a few minutes without transactions are enough for such price\nmove).\n24\n\n3. Coordinator sets very large stale After value (e.g. uint 24.max ) and minimum\nmargin andmaintenance requirements\n4. Coordinator withdraws max collateral from either long or short position\n(depending on whether current price is more or less than last commited price)\n5. Next oracle version is commited (with current price), making the coordinator 's\nposition with collateral withdrawn go into bad debt.\n6. Coordinator closes the other position, withdrawing all profit from it (collateral\nwithdrawn from bad debt position + collateral withdrawn from closing the\nother position = initial collateral of both positions + bad debt)\n7. The bad debt of the losing position is the profit of 2 combined positions, if\npositions are large enough, the bad debt will be greater than all market\ncollateral, thus the user steals all of it.\nIf needed, the attack can be repeated until all market collateral is stolen.\nImpact All market collateral stolen. The severity is \"High\" even with market move\npre-condition, because large stale After amount allows to wait enough time for the\nprice to move away, and even in active live markets there are often large periods of\ninactivity (lack of market transactions and lack of new price commits since there\nare no requests).\nPo C Not needed.\nMitigation Add sanity check for stale After risk parameter.\nDiscussion\nsherlock-admin 2\nThe protocol team fixed this issue in the following PRs/commits:\nhttps://github.com/equilibria-xyz/perennial-v 2/pull/463\n25",
+      "severity": "high",
+      "reason": "Not found"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_expected_006",
+      "title": "Perennial account users with rebalance group",
+      "description": "Source: https://github.com/sherlock-audit/2024-08-perennial-v\n\n**Summary:**\nThe checks in check Market only consider proportions and not values, users with 0 collateral in a rebalance group may get attacked to drain all DSU in their perennial accounts. Root Cause This vulnerability has two predicate facts: 1. Attacker can donate any value to any account. Invariant Lib.sol:78-82 if ( !update Context.signer && // sender is relaying the account 's signed intention ,! !update Context.operator && // sender is operator approved for account ,! !(new Order.is Empty () && new Order.collateral.gte (Fixed 6 Lib. ZERO)) // sender is depositing zero or more into account, without position change ,! ) revert IMarket. Market Operator Not Allowed Error (); Users can sign an order if: 1. He is an signer or 2. He is an operator or 3. He is trying to deposit some value to the account without position change. 2. Consider a group with multiple markets, only one market has minimal collateral (1 e-6 DSU, the minimum precision of Fixed 6) and other markets have no collateral. Such group can be rebalanced infinitely. Controller.sol:223 function _rebalance Group (address owner, uint 256 group) internal { // settles each markets, such that locals are up-to-date _settle Markets (owner, group); // determine imbalances (, bool can Rebalance, Fixed 6[] memory imbalances) = check Group (owner, group); 26 if (!can Rebalance) revert Controller Group Balanced Error (); IAccount account = IAccount (get Account Address (owner)); // pull collateral from markets with surplus collateral for (uint 256 i; i < imbalances.length; i++) { IMarket market = group To Markets[owner][group][i]; if (Fixed 6.unwrap (imbalances[i]) < 0) account.market Transfer (market, imbalances[i]); ,! } // push collateral to markets with insufficient collateral for (uint 256 i; i < imbalances.length; i++) { IMarket market = group To Markets[owner][group][i]; if (Fixed 6.unwrap (imbalances[i]) > 0) account.market Transfer (market, imbalances[i]); ,! } emit Group Rebalanced (owner, group); } Controller.sol:92 function check Group (address owner, uint 256 group) public view returns ( Fixed 6 group Collateral, bool can Rebalance, Fixed 6[] memory imbalances ) { // query owner 's collateral in each market and calculate sum Fixed 6[] memory actual Collateral; (actual Collateral, group Collateral) = _query Market Collateral (owner, group); imbalances = new Fixed 6[](actual Collateral.length); // determine if anything is outside the rebalance threshold for (uint 256 i; i < actual Collateral.length; i++) { IMarket market = group To Markets[owner][group][i]; Rebalance Config memory market Rebalance Config = _rebalance Configs[owner][group][address (market)]; ,! (bool can Market Rebalance, Fixed 6 imbalance) = Rebalance Lib.check Market (market Rebalance Config, group Collateral, actual Collateral[i]); ,! imbalances[i] = imbalance; can Rebalance = can Rebalance || can Market Rebalance; } } Rebalance Lib.sol:18 27 function check Market ( Rebalance Config memory market Config, Fixed 6 group Collateral, Fixed 6 market Collateral ) external pure returns (bool can Rebalance, Fixed 6 imbalance) { // determine how much collateral the market should have Fixed 6 target Collateral = group Collateral.mul (Fixed 6 Lib.from (market Config.target)); ,! // if market is empty, prevent divide-by-zero condition if (market Collateral.eq (Fixed 6 Lib. ZERO)) return (false, target Collateral); // calculate percentage difference between target and actual collateral Fixed 6 pct From Target = Fixed 6 Lib. ONE.sub (target Collateral.div (market Collateral)); ,! // if this percentage exceeds the configured threshold, the market may be rebelanced ,! can Rebalance = pct From Target.abs ().gt (market Config.threshold); // return negative number for surplus, positive number for deficit imbalance = target Collateral.sub (market Collateral); } In Controller.check Group () : group Collateral = 1 e-6, actual Collateral = 1 e-6 for one market, = 0 for other markets. After passed into Rebalance Lib , for all markets, target Collateral = group Collateral.mul (Fixed 6 Lib.from (market Config.target)); Sincemarket Config.target < Fixed 6. ONE (It is the percentage of a single market), target Collateral will be less than the precision of Fixed 6, so it round down to 0. For the market with collateral, target Collateral = 0 butmarket Collateral = 1 e-6. Sopct From Target = 1 - 0/1 e-6 = 1 = 100%. Socan Rebalance = pct From Target.abs ().gt (market Config.threshold) = 1. For the market without collateral, target Collateral = 0 and market Collateral = 0. can Rebalance = 0 but it does not matter. Now we have proven such group can always get rebalanced. Next we will show that each rebalance does not change the market allocation: imbalance = target Collateral.sub (market Collateral); 28 For the market with collateral, imbalance = 0- 1 e-6 = -1 e-6. For markets without collateral, imbalance = 0 - 0 = 0. When Controller tries to perform the market transfer, the 1 e-6 collateral will be transfered back to victim\u2018s perennial account. Now we reached the initial state: all markets in the group have no fund in it. Internal pre-conditions 1. Perennial account owner has activated a valid group. 2. All markets in the group reach a state where all market Collateral = 0. This can happen in many situations: a. The owner withdraw from all these markets. b. The owner was liquidated in these markets and no margin left. (This is possible due to high leverage). c. The owner just activated the group and haven 't had a chance to put money in it yet. 3. The perennial account has some fund in it. External pre-conditions N/A Attack Path 1. Attacker donate 1 e-6 DSU as collateral to one of victim 's market in the group. 2. Attacker call Controller_Incentivized.rebalance Group () to perform the attack and resume group state. 3. Attacker repeat step 1 and 2 to drain the whole DSU and USDC balance in victim 's account.\n\n**Impact:**\nVictim 's account balance can get drained when they have an empty group. Po C No response Mitigation There should be a minimum rebalance value check to prevent this issue and prevent users pay more keeper fee than the rebalanced margin when margin is tiny. 29",
+      "severity": "high",
+      "reason": "Not found"
+    }
+  ],
+  "undecided_findings": [],
+  "extra_findings": [
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_000",
+      "title": "Incorrect Unit Handling in claimFee() Leads to Underpayment of Protocol Fees",
+      "description": "The claimFee() function incorrectly handles the unit conversion when transferring protocol, oracle, and risk fees. It uses UFixed6Lib.ZERO and UFixed6 for fee accumulation, but then calls token.push(msg.sender, UFixed18Lib.from(feeReceived)) to transfer the fee. However, UFixed6 and UFixed18 have different decimal precisions (6 vs 18). The function accumulates fees in UFixed6 (1e-6 scale) but converts them to UFixed18 (1e-18 scale) using UFixed18Lib.from(), which does NOT perform a scaling conversion \u2014 it merely reinterprets the same numeric value as if it were in 18 decimals. This causes the fee to be underpaid by a factor of 1e12. For example, a protocol fee of 1.0 UFixed6 (1,000,000 in raw units) is interpreted as 1.0 UFixed18 (1 in raw units), resulting in a 99.9999% fee loss. This affects protocol, oracle, and risk fees, which are all subject to the same bug. The beneficiary and coordinator are systematically underpaid, leading to permanent loss of protocol revenue.",
+      "severity": "critical",
+      "original_id": "a254e1d8b94e05ad"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_001",
+      "title": "Automatic Processing of Withdrawal Funds Triggers Unauthorized Deposit Logic",
+      "description": "The Market contract's _update function automatically transfers tokens to/from the sender when collateral changes occur, without verifying the source of the funds. This allows an attacker to send funds directly to the contract (e.g., via a withdrawal refund from an external system) and have those funds automatically processed as a deposit, effectively converting withdrawal returns into new deposits. This breaks the fundamental accounting separation between user-initiated deposits and system-generated returns, leading to incorrect position and collateral calculations.",
+      "severity": "critical",
+      "original_id": "f4a78b77b823bb0d"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_002",
+      "title": "Access Control Bypass on _processOrderGlobal and _processOrderLocal Enables Fee Manipulation",
+      "description": "The functions _processOrderGlobal and _processOrderLocal, which are responsible for settling positions and distributing fees (liquidation, solver, referrer fees), are called indirectly via _settle() without access control. Since _settle() is publicly callable by any user (via update() or settle()), an attacker can trigger settlement at arbitrary times to manipulate the timing of fee accrual and distribution. This allows the attacker to front-run or delay settlement to capture fees intended for legitimate referrers or the protocol, effectively stealing fee revenue. The state variables _pendingOrder, _guarantee, _versions, and _checkpoints are read and updated during settlement, and their timing-dependent state is critical for correct fee calculation. Because these functions lack access control, users can manipulate the timing of settlement relative to oracle price updates and pending order readiness, leading to misallocation of fees.",
+      "severity": "high",
+      "original_id": "7b8e565cc175b2e7"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_003",
+      "title": "Unit Mismatch in _credit() Causes Incorrect Fee Distribution Due to Fixed6 vs UFixed6 Inconsistency",
+      "description": "The _credit() function credits claimable amounts using UFixed6 (unsigned 6-decimal fixed point), but the accumulationResponse.liquidationFee, subtractiveFee, and solverFee returned by CheckpointLib.accumulate() and VersionLib.accumulate() are of type Fixed6 (signed 6-decimal fixed point). When a negative fee (e.g., a rebate) is generated, Fixed6 can be negative, but UFixed6 cannot represent negative values. When _credit() receives a negative Fixed6 value from accumulationResponse, it is implicitly cast to UFixed6, causing underflow and wrapping to a large positive value. This results in the attacker being credited with a massive, unintended fee amount. The call chain is: _processOrderLocal \u2192 CheckpointLib.accumulate() \u2192 returns Fixed6 fee \u2192 _credit() \u2192 casts to UFixed6 \u2192 wraps \u2192 credits attacker. This leads to direct theft of protocol collateral.",
+      "severity": "critical",
+      "original_id": "b8e4c24ee6690b4c"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_004",
+      "title": "Desynchronized Order ID Iteration in _settle() Causes Missed Fee Claims and Position Updates",
+      "description": "In _settle(), the while loops for processing global and local pending orders use context.global.latestId and context.local.latestId as iteration bounds. However, these latestId values are not updated atomically with the pending order storage. An attacker can submit a series of orders with increasing IDs, then call _settle() multiple times. Between calls, the attacker can call update() to increment context.global.latestId and context.local.latestId, but the pending order storage (_pendingOrder, _pendingOrders) is not cleared. This causes the while loops to skip orders whose IDs are between the old and new latestId values. For example, if latestId = 5, and an attacker calls update() to set latestId = 7, then _settle() will only process order ID 6 (if ready), skipping ID 7 entirely. This results in missed fee distributions (liquidation, referrer, solver fees) and unprocessed position updates, leading to permanent loss of fee revenue and incorrect position accounting. The attack is repeatable and scalable.",
+      "severity": "high",
+      "original_id": "edfe9327bbda7bfe"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_005",
+      "title": "Mathematical Domain Violation in VersionLib.accumulate with Negative Exposure",
+      "description": "The VersionLib.accumulate function, called during settlement, processes oracle data without validating that the exposure value is non-negative before performing logarithmic or square root operations (implied by fixed-point math library usage). The Fixed6 type can represent negative values, and if the global exposure becomes negative during settlement, mathematical functions like ln() or sqrt() may be applied to invalid inputs, producing undefined or meaningless results without error. This leads to incorrect position valuations and potential fund misallocation.",
+      "severity": "high",
+      "original_id": "9d4fd273d62105d7"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_006",
+      "title": "State Commitment Before External Call in _updateAndStore",
+      "description": "In _updateAndStore, state is committed via _storeContext before the token transfer logic in _update. If the token.transfer (via token.pull/push) reverts due to insufficient balance or external contract failure, the position and order state changes are already committed, but the collateral transfer fails. This leaves the market with an inconsistent state: the user's position is updated and fees are accrued, but collateral is not transferred, creating a liability that cannot be recovered.",
+      "severity": "critical",
+      "original_id": "a93d6553abc4c4ca"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_007",
+      "title": "Authorization Context Not Bound in update Intent Signature Verification",
+      "description": "The verifier.verifyIntent() validates the signature of the intent but does not bind the executor (msg.sender) to the signed intent. An attacker can front-run a legitimate intent by submitting the same signed intent with a malicious msg.sender (e.g., a contract that drains funds). The signature is valid, the intent is processed, but the attacker's address is used as the counterparty, allowing them to claim the position and collateral without having signed the intent.",
+      "severity": "high",
+      "original_id": "5ffd35942dbe99a3"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_008",
+      "title": "Incomplete State Restoration in _settle During Oracle Version Failure",
+      "description": "During _processOrderGlobal and _processOrderLocal, if the oracle version is invalid (oracleVersion.valid == false), the order and guarantee are invalidated via newOrder.invalidate() and newGuarantee.invalidate(). However, the global and local positions (context.latestPositionGlobal and context.latestPositionLocal) are still updated via update(newOrder) even when invalidated. This means the position is advanced to a timestamp with no valid price, but the order is marked invalid \u2014 creating a state where the position reflects a price that cannot be trusted, and no mechanism exists to roll it back.",
+      "severity": "high",
+      "original_id": "027f6e45b5c858d4"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_009",
+      "title": "Precision Loss in Fixed6 to UFixed18 Conversion During Token Transfers",
+      "description": "In _update, collateral transfers use UFixed18Lib.from(newOrder.collateral.abs()). Since newOrder.collateral is Fixed6 (6 fractional bits), and UFixed18Lib.from() assumes 18 fractional bits, the conversion truncates the lower 12 bits of precision. For example, a collateral of 1.000001 (Fixed6) becomes 1.000000000000000000 (UFixed18), losing 0.000001 units. Over many trades, this accumulates into significant unaccounted-for funds, effectively a stealth tax on users.",
+      "severity": "medium",
+      "original_id": "438df5746291975a"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_010",
+      "title": "Inconsistent Unit Handling in claimFee Leads to Underpayment of Oracle Fees",
+      "description": "The claimFee function incorrectly handles unit conversion between UFixed6 and UFixed18, causing oracle fees to be underpaid by a factor of 10^12. The function claims a fee from the market using market.claimFee(address(this)), which returns a value in UFixed18 (18 decimals), but then attempts to return a portion of it to msg.sender using UFixed18Lib.from(settlementFeeRequested), where settlementFeeRequested is UFixed6 (6 decimals). This conversion is invalid because UFixed18Lib.from(UFixed6) does not perform a decimal scaling conversion \u2014 it merely reinterprets the raw value as UFixed18, effectively multiplying the intended fee by 10^12. As a result, the oracle provider factory receives 10^12 times less than intended, while the beneficiary receives 10^12 times more than intended. This is a critical accounting error that systematically steals value from the keeper (oracle provider factory) and overpays the beneficiary.",
+      "severity": "critical",
+      "original_id": "ce01f2da2d8e3c66"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_011",
+      "title": "Desynchronized Oracle Version Iteration in `at()` Function Leads to Missing Historical Data",
+      "description": "The `at()` function iterates backward through the `oracles` mapping using a loop that breaks when it encounters a timestamp lower than the target. However, the iteration bound is based on `global.current - 1` and decrements down to 1, skipping index 0 entirely. This means historical oracle versions at index 0 are permanently inaccessible, even if they are the only valid version for a given timestamp. Since `global.current` starts at 0 after initialization and increments only on `update()`, any oracle version stored at index 0 (the initial provider) is never accessible via `at()`, violating the contract's stated purpose of providing historical oracle data. This creates a data integrity breach where users and downstream systems (e.g., liquidation engines, settlement protocols) cannot retrieve valid historical prices, leading to incorrect valuations and potential insolvency events.",
+      "severity": "high",
+      "original_id": "7e60111813e5a263"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_012",
+      "title": "Inconsistent Unit Representation in `claimFee()` Leads to Fee Underpayment and Loss of Incentive Tokens",
+      "description": "The `claimFee()` function receives `settlementFeeRequested` as a UFixed6 (6 decimal places) and uses it to transfer tokens via `UFixed18Lib.from(settlementFeeRequested)`, which converts it to UFixed18 (18 decimals). However, `market.claimFee(address(this))` returns a fee in the market's native token representation, which is likely UFixed18 (standard for Perennial). The function then subtracts the converted settlement fee from the received fee and emits the difference. But the problem is: `claimFee()` does not validate that the returned `feeReceived` is in the same unit as the settlement fee. If `market.claimFee()` returns a value in UFixed6 (e.g., 1000000 for 1 token), but `UFixed18Lib.from(settlementFeeRequested)` converts 1 UFixed6 (1000000) to 1e18 UFixed18, then the subtraction `feeReceived.sub(settlementFeeRequested)` becomes 1e6 - 1e18 = negative underflow (reverts) or massive underpayment if no revert. This unit mismatch causes the keeper to receive either 0 or a fraction of the intended fee, while the beneficiary loses the remainder. The economic impact is permanent loss of incentive tokens to the keeper and misallocation of oracle fees.",
+      "severity": "high",
+      "original_id": "03dec727fed059fb"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_013",
+      "title": "Access Control Bypass in `_updateCurrent()` Allows Oracle Provider Manipulation and Fee Theft",
+      "description": "The `_updateCurrent()` function is only called by `update()`, which is guarded by `onlyFactory`. However, `_updateCurrent()` internally calls `oracles[++global.current] = Epoch(newProvider, uint96(newProvider.current()))`, which sets the timestamp of the new oracle to `newProvider.current()`. The `current()` function returns a raw price value (e.g., 1.5e18 for $1.50). If an attacker gains access to the factory (e.g., via compromised admin or governance), they can call `update()` with a malicious provider that returns a manipulated `current()` value (e.g., 0). This sets the new oracle's timestamp to 0, which is then used in `_handleLatest()` and `at()` to determine the latest valid version. If the attacker then calls `request()` with a timestamp just after the last valid one, the system may accept the 0-timestamped oracle as the latest, causing all subsequent price queries to return 0. This allows the attacker to trigger liquidations at 0 price (stealing collateral) or prevent settlements. The economic impact: users lose collateral to liquidators, and the protocol becomes insolvent. The access control is technically present, but the state update function `_updateCurrent()` allows arbitrary timestamp injection via `current()`, which is not validated for reasonableness.",
+      "severity": "critical",
+      "original_id": "2fb171f4cb542098"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_014",
+      "title": "Oracle Fee Claim Allows Unauthorized Fund Extraction via msg.sender Spoofing",
+      "description": "The claimFee function allows any address to claim fees by impersonating a registered oracle provider, because it only verifies msg.sender against the current or latest oracle provider addresses without binding the call to a specific authorization context. An attacker can deploy a malicious contract that forwards calls with the same address as a registered oracle provider, enabling them to claim the full settlement fee and receive the difference as a refund, effectively stealing funds from the market's incentive pool.",
+      "severity": "critical",
+      "original_id": "bbbcceee7df319d6"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_015",
+      "title": "State Commitment Before Operation Completion in _updateCurrent",
+      "description": "The _updateCurrent function increments global.current and updates the oracle registry before verifying that the new provider's status is valid or that the update can be safely applied. This commits state (global.current) before ensuring the operation will succeed, leaving the oracle in an inconsistent state if the provider's latest() or current() calls revert or return invalid data.",
+      "severity": "critical",
+      "original_id": "8a327abfd9492261"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_016",
+      "title": "Inconsistent Latest Version Handling in _handleLatest Causes Incorrect Oracle Readouts",
+      "description": "The _handleLatest function conditionally re-queries the oracle at a timestamp using the at() function, but does not validate that the returned version is semantically consistent with the provider's state. This can cause the oracle to return a version from a different provider than intended, leading to incorrect price feeds being served to markets. The function assumes that at(latestOracleTimestamp) returns a valid version from the correct provider, but at() may return a version from an older provider due to the for-loop logic.",
+      "severity": "high",
+      "original_id": "d9666b3101348f24"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_017",
+      "title": "Precision Loss in UFixed6 to UFixed18 Conversion in claimFee",
+      "description": "The claimFee function converts a UFixed6 settlementFeeRequested to UFixed18 using UFixed18Lib.from(settlementFeeRequested). UFixed6 has 6 fractional bits (max precision 1/64), while UFixed18 has 18 fractional bits. When converting from lower to higher precision, the value is left-shifted, but if the original UFixed6 value has non-zero bits beyond the 6th fractional bit (which is impossible by definition), no truncation occurs. However, the reverse is not checked: if the market.claimFee returns a fee that is not representable in UFixed6 (e.g., > 2^6 - 1/64), the subtraction feeReceived.sub(settlementFeeRequested) may underflow or produce incorrect results due to implicit type coercion. The UFixed6 type is used for fee requests, but the actual fee received may exceed its range, leading to silent precision loss.",
+      "severity": "high",
+      "original_id": "b1b9285ab5d9f37b"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_018",
+      "title": "Authorization Context Not Bound in onlySubOracle Modifier",
+      "description": "The onlySubOracle modifier authorizes either the current or latest oracle provider to call claimFee. However, the authorization is bound only to the contract address, not to the specific operation context (e.g., settlementFeeRequested). An attacker can front-run a legitimate claimFee call by observing a pending transaction, then submitting their own claimFee with a different settlementFeeRequested value, consuming the authorization nonce and stealing the fee difference. The signature or authorization does not bind the requested fee amount, allowing context manipulation.",
+      "severity": "high",
+      "original_id": "1ac926ef7f90e94f"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_019",
+      "title": "at() Function Infinite Loop Risk Due to Unbounded For-Loop",
+      "description": "The at() function iterates from global.current - 1 down to 1 using a for-loop without a bound check on the array size. If global.current is 0 or 1, the loop condition i > 0 may still execute with i = 0, but the real danger is if global.current is very large (e.g., > 2^256 - 1, though unlikely) or if oracles array is sparse. More critically, if global.current is 0, the loop condition i > 0 is false and safe, but if global.current is 1, i becomes 0 and the loop exits. However, if the oracles mapping has gaps (e.g., oracles[5] exists but oracles[4] is uninitialized), the provider assignment may be incorrect. The loop assumes contiguous epochs, but the mapping allows sparse storage. This can cause the function to return a version from an unintended provider, leading to incorrect price feeds.",
+      "severity": "medium",
+      "original_id": "78c97c85b401b1dc"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_020",
+      "title": "Missing Domain Validation in _latestStale for Timestamp Comparisons",
+      "description": "The _latestStale function compares timestamps without validating that the timestamps are non-zero or monotonically increasing. If an oracle provider returns a timestamp of 0 (e.g., due to a bug or malicious behavior), the condition 'uint256(oracles[global.latest].timestamp) >= currentOracleLatestVersion.timestamp' may evaluate to true when it should not, causing the oracle to incorrectly believe the latest is not stale. This can prevent oracle updates indefinitely, freezing price feeds. Since timestamps are uint96 and can be 0, and no validation is performed, this creates a denial-of-service vector.",
+      "severity": "high",
+      "original_id": "948bac4e1b26a8d4"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_021",
+      "title": "State Synchronization Failure in _updateLatest and _handleLatest Causes Incorrect Oracle Version Retrieval",
+      "description": "The _updateLatest and _handleLatest functions contain a critical state synchronization flaw where the global.latest pointer is updated based on a stale or inconsistent view of the current oracle's latest version. This causes the at() function to return incorrect or outdated oracle versions when queried, leading to incorrect pricing for derivatives, liquidations, or margin calculations. The issue arises because _handleLatest conditionally re-queries the oracle using at() with a timestamp derived from global.latest, but global.latest may not reflect the true latest committed version due to timing gaps between oracle updates and state commits. This creates a window where users and external systems rely on an outdated price, resulting in financial loss during liquidations or settlements.",
+      "severity": "critical",
+      "original_id": "ba1cb79ab7668aea"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_022",
+      "title": "claimFee Allows Sub-Oracle to Steal Oracle Fees by Manipulating settlementFeeRequested",
+      "description": "The claimFee function allows a malicious sub-oracle provider to claim more than the actual fee received from the market by setting settlementFeeRequested arbitrarily high. The function calls market.claimFee(address(this)) to retrieve the actual fee, but then sends settlementFeeRequested (controlled by the caller) to msg.sender (the sub-oracle factory), and only returns the difference. Since msg.sender is not validated against the actual oracle provider's address beyond a weak check in onlySubOracle, an attacker can deploy a fake oracle provider that claims to be the current or latest provider, then call claimFee with a large settlementFeeRequested. This results in the market transferring the full fee to the attacker, and the oracle protocol losing the difference between the actual fee and the requested fee. No validation ensures settlementFeeRequested <= feeReceived, enabling theft.",
+      "severity": "critical",
+      "original_id": "573fa8aa748f7fae"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_023",
+      "title": "request() Function Allows Market to Trigger Unbounded Oracle Updates, Leading to State Bloat and Potential DoS",
+      "description": "The request() function, callable only by the market, triggers an update to the oracle's current epoch and calls .request() on the underlying provider. However, it does not validate whether the current oracle provider has actually advanced its version since the last request. This allows a malicious market to call request() repeatedly, creating a new epoch entry in the oracles[] mapping for every call, even if no new data is available. Since oracles[] is an unbounded mapping and each entry consumes storage, this leads to exponential state bloat. Eventually, this will cause gas costs for status(), at(), or update() to exceed block limits, rendering the oracle unusable. No rate-limiting, timestamp-based throttling, or version-checking prevents this abuse.",
+      "severity": "high",
+      "original_id": "8d288320f51fd7d2"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_024",
+      "title": "at() Function Has Infinite Loop Risk Due to Unbounded For-Loop Over Epochs",
+      "description": "The at() function iterates backward from global.current - 1 down to 1 using a for-loop without a bound check on the number of epochs. If an attacker has triggered many request() calls (as in the previous vulnerability), global.current can reach very high values (e.g., 10,000+). The loop will then iterate over thousands of entries, consuming more gas than available in a single block. This causes the function to revert on gas exhaustion, making historical price queries impossible. Since at() is used for liquidations, settlements, and dispute resolution, this DoS prevents critical protocol functions from operating, locking user positions and funds indefinitely.",
+      "severity": "high",
+      "original_id": "23d42f68d8aa7c52"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_025",
+      "title": "onlySubOracle Modifier Allows Any Previously Used Oracle Provider to Claim Fees, Enabling Replay Attacks",
+      "description": "The onlySubOracle modifier allows either the current or latest oracle provider to call claimFee. However, once an oracle provider is replaced (via update()), it is no longer active but still qualifies as 'latest'. A malicious actor who previously owned an oracle provider can re-deploy the same contract and call claimFee, even if they are no longer the current or latest provider. Since the modifier only checks msg.sender against the stored addresses of current or latest providers, and those addresses are never cleared or invalidated after replacement, this creates a replay vulnerability. An attacker can claim fees indefinitely using old oracle provider addresses, draining the market's incentive pool.",
+      "severity": "high",
+      "original_id": "59528de81cda23d6"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_026",
+      "title": "update() Function Allows Factory to Bypass Oracle Version Consistency, Leading to Price Manipulation",
+      "description": "The update() function allows the factory to replace the current oracle provider with a new one, but it does not validate that the new provider's latest() timestamp is greater than or equal to the current provider's timestamp. An attacker controlling the factory can replace the oracle provider with one that reports an older or manipulated price (e.g., a price from 1 hour ago). The _updateCurrent function only checks that global.current == global.latest (to prevent out-of-sync updates), but does not validate temporal consistency of the new provider's data. This allows the factory to roll back the oracle version, causing the system to use an outdated price for pricing derivatives, triggering unjustified liquidations or preventing valid ones.",
+      "severity": "high",
+      "original_id": "d55d8a20616259d7"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_027",
+      "title": "Incorrect Socialization Calculation in _socialize Leads to Permanent Loss of User Assets",
+      "description": "The _socialize function incorrectly calculates the claim amount by using context.global.assets as the denominator while using context.totalCollateral as the numerator, but context.totalCollateral includes collateral from all markets and is not synchronized with context.global.assets. This causes the socialization multiplier to be greater than 1, allowing users to claim more assets than are actually available in the vault, resulting in permanent loss of protocol assets. The error occurs because context.totalCollateral is the sum of all market collateral (including pending deposits and withdrawals), while context.global.assets represents only the net settled assets. This mismatch causes the formula to overstate the available collateral relative to assets, leading to an inflated claim amount that exceeds the vault's actual asset balance.",
+      "severity": "critical",
+      "original_id": "e0ab5cbf7e74724d"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_028",
+      "title": "Missing User Protection in Position Reduction via update() Functions",
+      "description": "The update() functions allow users to reduce their position (e.g., close long/short) or withdraw collateral without requiring users to specify minimum acceptable outcomes. This enables front-running and malicious price manipulation by oracles or MEV bots to force unfavorable position closures, resulting in user losses. There is no slippage tolerance, minimum output, or execution bounds parameter, violating Pattern 1 (User Control Over Execution Outcomes).",
+      "severity": "critical",
+      "original_id": "57038db16c2ad9b6"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_029",
+      "title": "Validation After State Change in _update() Leading to Invalid Position Updates",
+      "description": "In _update(), the state is modified (position, pending orders, collateral) before validation via InvariantLib.validate(). This violates Pattern 2 (Validation Timing). If the invariant check fails, the state has already been corrupted, and the revert occurs after irreversible changes. This allows invalid state transitions to be committed temporarily, potentially leading to incorrect accounting or insolvency.",
+      "severity": "high",
+      "original_id": "700784b5dcb56497"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_030",
+      "title": "Inconsistent Accounting Between Requested and Actual Execution in _processOrderLocal()",
+      "description": "In _processOrderLocal(), the function processes a pending order using versioned oracle data (versionTo), but the accounting for fees (liquidationFee, subtractiveFee, solverFee) is based on the original order's metadata, not the actual executed state. If the oracle version is stale or invalid, the order is invalidated (newOrder.invalidate()), but the fee credits to referrers and liquidators still occur using accumulationResponse, which may be derived from invalid data. This creates a mismatch: the position is invalidated (no real exposure change), yet fees are paid out as if the trade executed. This violates Pattern 3: accounting does not align with actual execution outcome. For example: a user places a 100 ETH long order at $2000, but oracle is stale at $1900. Order is invalidated due to stale price, yet $100 in solver fees are still paid to referrer based on accumulationResponse derived from invalid data. User loses no position, but protocol pays out fees incorrectly, draining protocol treasury.",
+      "severity": "high",
+      "original_id": "feb44ac268167483"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_031",
+      "title": "Access Control Missing in IMarket Interface for Critical Functions",
+      "description": "The IMarket interface declares public functions such as update(), settle(), claimFee(), and claimExposure() without any access control modifiers (e.g., onlyOwner, onlyCoordinator). This interface design implies these functions are callable by anyone, which contradicts the actual contract's use of modifiers like onlyOwner, onlyCoordinator, and onlyOperator. This violates Pattern 4: Interface access control expectations. Attackers can exploit this mismatch by calling functions via the interface that should be restricted, potentially bypassing intended access controls if the interface is used by external contracts that assume permissive access.",
+      "severity": "high",
+      "original_id": "ffabdd2a72ca9eab"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_032",
+      "title": "Incorrect Recipient Selection in _credit() for Liquidation Fees",
+      "description": "In _processOrderLocal(), liquidation fees are credited to liquidators[account][newOrderId], but this mapping is set in _update() only if newOrder.protected() is true (i.e., when msg.sender is the one calling update with protect=true). However, liquidators are also set via external calls (e.g., liquidate() function not shown, but referenced). If a liquidator is set externally and the order is later settled via _processOrderLocal(), the fee is paid to that address. But if the order was invalidated (e.g., stale oracle), the liquidator mapping is not cleared. This creates a scenario where a malicious actor can set themselves as liquidator for a future order ID (via a prior call), then wait for a stale price settlement to trigger a fee payout to themselves \u2014 even though no valid liquidation occurred. This violates Pattern 5: Conditional recipient selection does not verify execution validity before payment.",
+      "severity": "high",
+      "original_id": "4feaf19ecb16ac83"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_033",
+      "title": "State Synchronization Failure in _settle() Leading to Stale Position Updates",
+      "description": "In _settle(), the function calls _processOrderGlobal() and _processOrderLocal() to update positions, but the state updates to _position and _positions are only performed in _storeContext(), which is called after _settle() completes. However, during _processOrderGlobal() and _processOrderLocal(), the context.latestPositionGlobal and context.latestPositionLocal are modified in-memory, but if an error occurs during _processOrderLocal() (e.g., oracle revert), the entire transaction reverts \u2014 yet the global state (_position) remains unchanged. This is acceptable. However, the issue arises in the 'sync' phase: if context.latestOracleVersion.timestamp > context.latestPositionGlobal.timestamp, _processOrderGlobal() is called with the current latestId (not next). But if the current latestId's order is already processed, this call may process an order that has already been settled, leading to double-counting of position changes. This violates Pattern 6: state is read and modified in a chain where dependent functions may operate on inconsistent state. Example: User has position at timestamp 100. Oracle advances to 105. _settle() calls _processOrderGlobal() with latestId=5 (order at 105). It processes it. Then immediately calls _processOrderGlobal() again with latestId=5 (same order) because context.latestPositionGlobal.timestamp is still 100. This double-applies the order, inflating position and fees.",
+      "severity": "high",
+      "original_id": "6e27b8e0e8456571"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_034",
+      "title": "Return Value Unit Mismatch in claimFee()",
+      "description": "The claimFee() function returns a UFixed6 feeReceived, but internally calls token.push(msg.sender, UFixed18Lib.from(feeReceived)). UFixed6 is scaled by 1e6, while UFixed18 is scaled by 1e18. UFixed18Lib.from(feeReceived) performs a direct bit-cast conversion without scaling: UFixed18Lib.from(x) = UFixed18(x.value). This means a feeReceived of 1e6 (1.0 in UFixed6) becomes 1e6 in UFixed18 (0.000001 in 18-decimal terms), not 1.0. This is a unit mismatch: the function returns a value in 6-decimal units but transfers in 18-decimal units without conversion. This violates Pattern 9 (Return Value Unit Consistency). For example: if a user claims 1000000 UFixed6 (1 token), they receive only 0.001 token. This is a 99.9% loss of claimed fees. The error propagates to all fee claimants, draining protocol revenue.",
+      "severity": "critical",
+      "original_id": "a4380fa2ee42223a"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_035",
+      "title": "State Commitment Before External Call in _update()",
+      "description": "In _update(), state is committed via _storeUpdateContext() before the token transfers (pull/push) occur. If the token.transfer() reverts (e.g., due to insufficient balance or paused token), the state changes (position, pending orders, referrer assignments) are already committed. This violates Pattern 7 (State Commitment Timing). An attacker can call update() with a malicious token contract that reverts on transfer, causing the protocol to permanently record a position change and fee assignment without the collateral being moved. This leads to protocol insolvency: users are credited with positions they didn't collateralize, and referrers are paid fees without collateral backing.",
+      "severity": "critical",
+      "original_id": "dee16acecee6d628"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_036",
+      "title": "External Oracle Assumption Violation in _processOrderGlobal()",
+      "description": "_processOrderGlobal() assumes that oracle.at(timestamp) always returns a valid OracleVersion and OracleReceipt, and that the oracle will never return a version with timestamp < latestPositionGlobal.timestamp. However, if the oracle contract is forked or upgraded (e.g., to a different version with different semantics), the return structure may change. The code assumes fixed ABI: (OracleVersion memory, OracleReceipt memory). If the external oracle returns a different number of values or struct layout, the call reverts. This violates Pattern 8 (External System Assumptions). Since the oracle is external and upgradable, this creates a permanent DoS risk: if the oracle is upgraded to a non-compatible version, _processOrderGlobal() reverts, freezing all settlement for the market. No user can close positions or claim fees.",
+      "severity": "high",
+      "original_id": "effa0f0ad14fb5c0"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_037",
+      "title": "Partial Execution Risk in _settle() with Multiple Order Processing",
+      "description": "_settle() processes multiple pending orders in while loops. If one order fails during _processOrderGlobal() or _processOrderLocal() (e.g., due to oracle revert or invariant violation), the entire transaction reverts. However, if the oracle is slow and multiple orders are ready, the protocol cannot settle any of them. This is not a direct fund loss, but it creates systemic risk: users cannot exit positions during volatility, leading to forced liquidations or insolvency. More critically, if an attacker triggers a revert in one order (e.g., by manipulating oracle data for one ID), they can prevent settlement of all pending orders for that account, locking user funds indefinitely. This violates Pattern 9 (Systematic Partial Execution Analysis): the function does not handle partial success, and users have no mechanism to settle individual orders. This is a protocol-level DoS vector.",
+      "severity": "high",
+      "original_id": "4fca15616895c579"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_038",
+      "title": "Automatic Processing of Withdrawal Funds via External Call Returns",
+      "description": "The Vault contract has no protection against external calls returning funds to the contract during settlement or rebalance operations. When external markets (via _settleUnderlying()) return collateral to the vault, these funds are indistinguishable from user deposits and are immediately consumed by the _manage() function for rebalancing. This prevents users from successfully withdrawing their funds because withdrawal amounts are treated as new deposits and reallocated to markets, effectively locking user funds in the protocol.",
+      "severity": "critical",
+      "original_id": "52f47c6e6218bd01"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_039",
+      "title": "Missing User Protection in _update Function - No Minimum Output Bounds for RedeemShares",
+      "description": "The _update function allows users to redeem shares without any mechanism to specify a minimum acceptable asset output. This enables front-running and MEV attacks where an attacker can manipulate market prices between the user's redemption request and execution, causing the user to receive significantly fewer assets than expected. The function uses UFixed6Lib.MAX as a magic value to redeem all shares, but provides no protection against unfavorable execution outcomes.",
+      "severity": "high",
+      "original_id": "6b56b398add59df4"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_040",
+      "title": "Validation Timing Vulnerability in _update Function - State Changes Before Validation",
+      "description": "The _update function performs state changes (context.global.update, context.local.update, context.currentCheckpoint.update) before validating critical invariants like depositAssets.gt(_maxDeposit(context)) and redeemShares being within bounds. This allows invalid operations to partially execute before being reverted, potentially leaving the vault in an inconsistent state or enabling front-running of state updates.",
+      "severity": "high",
+      "original_id": "d31f3a7f46c5a6a1"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_041",
+      "title": "Inconsistent Accounting in _socialize Function - Misuse of context.global.assets in Redemption Calculation",
+      "description": "The _socialize function incorrectly uses context.global.assets in the socialization formula, which represents the total assets in the vault before the current operation. However, the function is called during _update, where depositAssets and redeemShares are being processed. This causes the socialization calculation to use stale values, leading to incorrect asset distribution. For example, if a user redeems 100 shares worth 1000 assets, but context.global.assets is 5000 (from previous state), the socialization formula will incorrectly calculate the claim amount based on outdated total assets, resulting in users receiving less than their fair share.",
+      "severity": "high",
+      "original_id": "cc952c1a0a9bdfc4"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_042",
+      "title": "State Synchronization Issue in _settle Function - Global State Updated Before Local State",
+      "description": "The _settle function updates global state (context.global.processGlobal) before settling local state (context.local.processLocal). However, _manage is called after _settle and depends on context.global.assets and context.global.deposit to calculate eligible collateral. If a user redeems shares during the same transaction, the _manage function will use the updated global state before the local state is settled, leading to incorrect collateral allocation calculations. This creates a window where the vault's internal accounting is inconsistent, potentially causing over-allocation of collateral or under-collateralization.",
+      "severity": "high",
+      "original_id": "55ac03644d5c3f1f"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_043",
+      "title": "Return Value Unit Mismatch in _checkpointAtId Function - Returns PerennialCheckpoint Without Proper Scaling",
+      "description": "The _checkpointAtId function returns a PerennialCheckpoint struct containing collateral, tradeFee, and settlementFee values that are aggregated from external markets. However, these values are not scaled to match the UFixed6 unit used throughout the vault. When these values are used in _manage and _ineligible functions, they are treated as UFixed6 values, but they are actually in the external market's native unit (likely 18 decimals). This unit mismatch causes incorrect calculations in _ineligible, where context.totalCollateral (UFixed6) is subtracted by context.global.assets (UFixed6) and context.global.deposit (UFixed6), but the aggregated collateral from _checkpointAtId is treated as if it were in the same unit. This leads to massive underestimation of eligible collateral, causing the vault to under-allocate and lock user funds.",
+      "severity": "critical",
+      "original_id": "0400a941a863bf32"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_044",
+      "title": "State Commitment Timing Vulnerability in _update Function - State Committed Before External Calls",
+      "description": "In the _update function, state is committed via _saveContext before the _manage function executes external calls to market.update. If any market.update call fails (e.g., due to insufficient liquidity or reentrancy), the state changes (context.global.update, context.local.update, context.currentCheckpoint.update) have already been committed, consuming the user's deposit/redeem request. This creates a scenario where users pay gas and lose assets without receiving the intended outcome, and the protocol cannot revert the state to its original condition.",
+      "severity": "high",
+      "original_id": "afbc2f4bff93eeb1"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_045",
+      "title": "External System Assumption in _registerMarket - No Validation of Market Oracle Sync",
+      "description": "The _registerMarket function assumes that all markets are on the same 'clock' (same oracle timestamp) as stated in the contract docstring, but does not validate this assumption. It only checks that the market's token matches the vault's asset. If a malicious actor registers a market with a different oracle update frequency or timestamp drift, the vault's _settleUnderlying function will use inconsistent timestamps, causing incorrect checkpoint calculations and potential asset misallocation. This breaks the core invariant of the protocol and can lead to systemic insolvency.",
+      "severity": "high",
+      "original_id": "789d063a353829ee"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_046",
+      "title": "Partial Execution Risk in _manage Function - Market Updates May Partially Fail",
+      "description": "The _manage function iterates over markets and calls market.update for each. If one market.update call reverts due to insufficient liquidity or other reasons, the entire transaction reverts, but the state changes from _update (context.global.update, context.local.update) have already been committed. This creates a scenario where users have their shares redeemed or assets deposited, but the underlying collateral is not properly rebalanced, leading to permanent misallocation of assets and potential protocol insolvency. There is no mechanism to handle partial success or rollback collateral adjustments.",
+      "severity": "critical",
+      "original_id": "8257f58ef85f86cc"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_047",
+      "title": "Oracle Factory Allows Reinitialization of Already-Created Oracles via update()",
+      "description": "The update() function allows an owner to replace the underlying oracle provider for an existing oracle instance without validating that the new provider is compatible with the oracle's current state or that the oracle's internal logic can safely handle the swap. This creates a critical state inconsistency risk: if the new oracle provider has different data structures, fee models, or price aggregation logic, the oracle's output can become corrupted or manipulated, leading to incorrect pricing in dependent DeFi protocols. Since oracles feed prices to collateralized lending, derivatives, and AMMs, this can cause systemic insolvency. The vulnerability is exacerbated by the fact that the oracle's ID remains unchanged, so external systems continue to reference the same oracle address while its underlying logic is replaced with arbitrary, potentially malicious code.",
+      "severity": "critical",
+      "original_id": "4ffed3ff3a87945e"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_048",
+      "title": "create() Function Allows Creation of Oracle with Invalid or Zero Address via factory.oracles(id)",
+      "description": "The create() function calls factory.oracles(id) to obtain an oracle provider address, but does not validate that the returned address is a deployed contract with expected functionality. An attacker can register a malicious IOracleProviderFactory that returns address(0) or a non-oracle contract (e.g., a simple ERC20) for a given id. The create() function then proceeds to deploy a new oracle instance using _create() with abi.encodeCall(IOracle.initialize, (address(0), name)), which will revert during initialization due to invalid parameters. However, if the malicious factory returns a non-zero but non-oracle address (e.g., a contract without initialize() or with incompatible signature), the _create() call may succeed but produce a non-functional oracle. Subsequent price queries on this oracle will fail silently or return garbage data, corrupting all dependent protocols. No validation ensures the returned address implements IOracleProvider correctly, creating a silent failure vector.",
+      "severity": "high",
+      "original_id": "0f4a7c3ed5b36ac9"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_049",
+      "title": "updateId() Enables Oracle ID Spoofing and Double-Spending of Oracle Instances",
+      "description": "The updateId() function allows the owner to arbitrarily reassign any oracle instance to any bytes32 id, bypassing the create() function's uniqueness check. An attacker can create an oracle with id1, then call updateId(oracle, id2) to map the same oracle instance to a second id. Now both id1 and id2 point to the same oracle. If id1 is used in one DeFi protocol and id2 in another, and the oracle's price is updated, both protocols receive the same price \u2014 but if one protocol expects a different asset or time window, this causes catastrophic mispricing. Worse, if the oracle is later updated via update(id1, newFactory), the change affects both id1 and id2 simultaneously, creating uncontrolled cross-protocol interference. This breaks the fundamental assumption that each oracle id maps to a unique, independent price feed.",
+      "severity": "critical",
+      "original_id": "c3fc432374c98df0"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_050",
+      "title": "withdraw() Function Allows Owner to Drain All Accrued Fees Without Accounting for Oracle-Specific Fee Balances",
+      "description": "The withdraw() function calls token.push(owner()), which transfers the entire balance of the specified token from the OracleFactory contract to the owner. However, the OracleFactory does not track per-oracle or per-factory fee accruals. If multiple oracles are created and each accumulates fees independently (e.g., via their underlying providers), the total balance in OracleFactory is a sum of all fees. The withdraw() function drains the entire balance without distinguishing which fees belong to which oracle. This allows the owner to steal fees that were intended for oracle providers, liquidity providers, or governance. For example, if Oracle A accrues 1000 USDC and Oracle B accrues 500 USDC, the owner can withdraw 1500 USDC in one call, stealing 500 USDC that should belong to Oracle B's stakeholders. No mechanism exists to distribute or allocate fees correctly.",
+      "severity": "high",
+      "original_id": "f74ea7286413279b"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_051",
+      "title": "initialize() Function Allows Reinitialization of _parameter After Deployment, Enabling Fee Manipulation",
+      "description": "The initialize() function calls _parameter.store(OracleParameter(1, UFixed6Lib.ZERO, UFixed6Lib.ZERO)) without checking if it has already been initialized. This means the owner can call initialize() multiple times, resetting the global oracle parameters (e.g., fee rate, slippage tolerance) to zero at any time. If the oracle system relies on these parameters to calculate fees or price adjustments (e.g., a 0.1% fee rate), resetting them to zero allows the owner to disable all fees retroactively. This enables fee avoidance: an attacker could create an oracle, let it accrue fees for days, then call initialize() to reset parameters to zero, and withdraw all fees via withdraw(). The reset invalidates all prior economic assumptions and allows the owner to steal accumulated value. This is a direct economic manipulation vulnerability.",
+      "severity": "critical",
+      "original_id": "e1543f55906f84dd"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_052",
+      "title": "Missing Access Control on Oracle Creation and Update Allows Unauthorized Oracle Deployment",
+      "description": "The create() and update() functions are marked with onlyOwner, but the IOracleFactory interface does not declare any access control modifiers. This creates a security mismatch where external systems or auditors relying on the interface may incorrectly assume these functions are publicly callable, potentially leading to unauthorized oracle deployment or manipulation if the interface is used in off-chain logic or by other contracts that assume interface-level access control. Furthermore, the create() function allows any owner to deploy an oracle with any ID and factory, but there is no validation that the oracle provider returned by the factory is authorized or safe, creating a risk of deploying malicious or non-compliant oracle implementations.",
+      "severity": "high",
+      "original_id": "ad09fc1a4d82b435"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_053",
+      "title": "State Synchronization Failure in create() Function Allows Oracle ID Hijacking",
+      "description": "In the create() function, the oracle instance is created via _create() and then assigned to oracles[id] and ids[newOracle] in sequence. However, if the _create() call reverts (e.g., due to internal logic in the oracle implementation), the state variables oracles[id] and ids[newOracle] are still updated, leaving a dangling or invalid oracle entry. This creates a state inconsistency where an oracle ID is permanently reserved but no valid oracle instance exists, preventing future use of that ID. Additionally, if the oracle implementation reverts after the factory.oracles(id) call but before state assignment, the factory's oracle provider may be consumed without proper accounting, allowing an attacker to exhaust valid oracle provider IDs by triggering reverts.",
+      "severity": "high",
+      "original_id": "1d787fd693581593"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_054",
+      "title": "No Validation of Oracle Provider Implementation Safety Before Deployment",
+      "description": "The create() function calls factory.oracles(id) and immediately uses the returned address to deploy an oracle without validating that the returned contract is a legitimate, non-malicious oracle implementation. An attacker can register a malicious IOracleProviderFactory that returns a contract with a malicious initialize() function (e.g., one that transfers funds to the attacker or reverts with a specific pattern). Since the oracle is created via _create(abi.encodeCall(...)), the initialize() function is called immediately with no safeguards. This allows an attacker to deploy a malicious oracle under a legitimate ID, potentially compromising all systems that rely on that oracle's data.",
+      "severity": "critical",
+      "original_id": "04ef8209564720e7"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_055",
+      "title": "Reentrancy Risk in Oracle Initialization via _create()",
+      "description": "The create() function uses _create(abi.encodeCall(IOracle.initialize, (...))) to deploy and initialize an oracle. The _create() function (inherited from Factory) uses CREATE to deploy a new contract and then immediately calls initialize() on it. If the oracle's initialize() function makes an external call (e.g., to a malicious contract), reentrancy into OracleFactory is possible before the state variables oracles[id] and ids[newOracle] are set. An attacker could exploit this to call create() again with the same ID, bypassing the 'already created' check and deploying multiple oracles under the same ID, leading to oracle ID hijacking and potential data manipulation.",
+      "severity": "critical",
+      "original_id": "3cadd68592916d8a"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_056",
+      "title": "Withdraw Function Allows Owner to Drain Any Token Without Restriction",
+      "description": "The withdraw(Token18 token) function allows the owner to withdraw any ERC20 token held by the contract without any limit or validation. This includes tokens deposited by users for oracle fees, collateral, or other protocol purposes. Since the contract holds no explicit accounting of token balances per token type, the owner can drain any token sent to the contract, including those not intended for withdrawal. This is a critical design flaw: the contract acts as a generic token sink with no safeguards, enabling the owner to steal any deposited assets.",
+      "severity": "critical",
+      "original_id": "15380c08208c12dc"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_057",
+      "title": "Access Control Bypass on _updateMarket Allows Manipulation of Market Weights and Leverage Before Settlement",
+      "description": "The _updateMarket function is called by public functions updateWeights and updateLeverage, which are restricted to onlyOwner. However, _updateMarket itself is private and not directly callable, but it updates critical state variables (weight and leverage) that are used in the StrategyLib.allocate() calculation during _manage(). The vulnerability arises because _settleUnderlying() is called before updateWeights and updateLeverage, but the actual market weight and leverage changes are not reflected in the global state until the next settlement. An attacker can call updateWeights or updateLeverage immediately before a user calls update() or rebalance(), causing the vault to rebalance based on outdated weights/leverage while the new weights are stored but not yet settled. This allows the attacker to manipulate the allocation of collateral to markets with lower risk or higher yield, effectively stealing value from other users by skewing the portfolio allocation before settlement. The economic impact is a misallocation of collateral that benefits the attacker at the expense of depositors.",
+      "severity": "high",
+      "original_id": "61d1db4d93d13fa4"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_058",
+      "title": "Unit Mismatch in _socialize Function Causes Incorrect Claim Asset Distribution",
+      "description": "The _socialize function calculates claimAmount using UFixed6 values but performs a division with context.global.assets (UFixed6) and context.totalCollateral (UFixed6), which are both in the same unit. However, context.totalCollateral is the sum of collateral from all markets, which is tracked as Fixed6 (signed) in the Context struct, while context.global.assets is UFixed6 (unsigned). The function uses UFixed6Lib.unsafeFrom(context.totalCollateral), which interprets a potentially negative Fixed6 value as a large positive UFixed6 due to two's complement wraparound. This causes the min(context.totalCollateral, context.global.assets) to return an incorrect value \u2014 often the maximum UFixed6 \u2014 leading to claimAssets being multiplied by an inflated factor. As a result, users claiming assets receive vastly more than they are entitled to, while the vault's assets are drained. The call chain is: _update() \u2192 _socialize() \u2192 miscomputed claimAmount \u2192 asset.push() transfers excess assets to user. This is a critical financial loss to the vault.",
+      "severity": "critical",
+      "original_id": "ffffe6507d0505d0"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_059",
+      "title": "Desynchronized Loop Bounds in _settleUnderlying and _checkpointAtId Cause Incomplete Market Settlement and Checkpoint Aggregation",
+      "description": "The _settleUnderlying() function iterates over totalMarkets to call settle() on each market. However, totalMarkets is incremented in _registerMarket() without any synchronization with the _registrations mapping. If a market is unregistered (not implemented in code) or if totalMarkets is manually manipulated, the loop may skip markets or access invalid indices. More critically, _checkpointAtId() iterates over context.registrations.length, which is set from totalMarkets in _loadContext(). But if a market is registered after _loadContext() is called (e.g., during a concurrent update), the loop in _checkpointAtId() will not include it, causing the checkpoint to undercount collateral, tradeFee, and settlementFee. This leads to incorrect totalAssets() and totalShares() calculations. For example: if totalMarkets=3, but a new market is registered and totalMarkets=4, then a user calling update() will load context with length=3, and _checkpointAtId() will miss the 4th market's checkpoint. This causes the vault to understate its total assets by the full value of the 4th market's collateral, allowing users to redeem shares for more assets than the vault holds. Mathematical proof: Assume 3 markets each with 1000 assets. totalAssets() = 3000. An attacker registers a 4th market with 1000 assets. totalMarkets=4. A user calls update(). _loadContext() reads totalMarkets=4? No \u2014 because _loadContext() is called before the registration completes. If registration happens between _loadContext() and _checkpointAtId(), the loop in _checkpointAtId() still uses length=3. totalAssets() = 3000, but actual collateral = 4000. User redeems 1000 shares (1/3 of totalShares). They receive 1000 assets, but vault actually has 4000 assets and 4000 shares \u2014 so they should receive 1000 * (4000/4000) = 1000. But because totalAssets() is reported as 3000, totalShares() is also wrong. If totalShares was 4000, but calculated as 3000, then user redeeming 1000 shares gets 1000 * (3000/3000) = 1000 \u2014 which is correct? Wait \u2014 no: totalAssets() is computed from checkpoint.assets + deposit - redemption. If checkpoint.assets is undercounted by 1000, then totalAssets() is 2000, totalShares() is 2000. User redeems 1000 shares \u2192 gets 1000 * (2000/2000) = 1000. But vault has 4000 assets. So user gets 1000, vault has 3000 left \u2014 correct? Not if the user's shares were minted based on the correct 4000 total. The real flaw is that _checkpointAtId() undercounts, so checkpoint.assets is wrong, so totalAssets() is wrong, so convertToAssets() is wrong. A user who deposited 1000 assets when totalAssets=3000 gets 1000 shares. Later, totalAssets becomes 4000 due to new market. User redeems 1000 shares \u2192 should get 1333.33 assets. But because checkpoint.assets is still 3000, totalAssets() is 3000, so they get 1000 * (3000/3000) = 1000. Vault loses 333.33 assets. The attacker can register a market with high collateral right before a redemption, then the redemption calculation is based on old checkpoint, stealing value from the vault.",
+      "severity": "high",
+      "original_id": "5fa0f4900831ef30"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_060",
+      "title": "Mathematical Domain Violation in _socialize Function: Division by Zero",
+      "description": "The _socialize function performs a division by context.global.assets without validating that it is non-zero, leading to a silent division-by-zero error that reverts the transaction. However, the function's logic assumes context.global.assets > 0 to proceed with multiplication, but when context.global.assets == 0, the division reverts, breaking the socialization mechanism entirely. This is a domain validation failure: logarithmic/division functions must validate their domain, and here the divisor is unchecked.",
+      "severity": "high",
+      "original_id": "87678f52e380dce8"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_061",
+      "title": "Incomplete State Restoration in _settle: Global Latest Not Updated for Local Settlement",
+      "description": "In _settle, when settling a local account (account != address(0)), the function updates context.local.processLocal but does not update context.global.latest even when global checkpoints are processed. This causes a divergence: global.latest may be behind context.global.current, but local settlement uses context.local.current without advancing global.latest. This leads to checkpoint state being inconsistently applied across global and local contexts, causing double-counting or missed socialization in future operations.",
+      "severity": "high",
+      "original_id": "c2e579cbf9c900e3"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_062",
+      "title": "Precision Loss in UFixed6 Conversion via muldiv: Truncation Without Rounding",
+      "description": "The convertToShares and convertToAssets functions use muldiv (from Math.sol) which truncates toward zero. When converting between assets and shares, if totalAssets and totalShares are not perfectly aligned (e.g., 1000 assets / 999 shares), a deposit of 1 asset yields 0 shares due to truncation. This causes users to lose fractional share value permanently. For example: totalAssets=1000, totalShares=999, deposit=1 \u2192 shares = 1 * 999 / 1000 = 0 (truncated). The user deposits 1 asset but receives 0 shares, and future redemption of 0 shares returns 0 assets \u2014 permanent loss.",
+      "severity": "high",
+      "original_id": "f01f54e023ab5562"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_063",
+      "title": "Authorization Context Binding Failure: update Allows Any Caller to Operate on Any Account",
+      "description": "The update function allows any caller to operate on any account if they are an operator (via IVaultFactory.operators). However, the authorization (operator status) is not bound to the specific parameters (depositAssets, redeemShares, claimAssets). An attacker can obtain a valid operator signature for a small deposit and then front-run by submitting a malicious update with large redeemShares, draining the victim's position. The signature authorizes 'operator' status but not the operation context \u2014 enabling parameter substitution attacks.",
+      "severity": "high",
+      "original_id": "99d0b4e76ad22761"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_064",
+      "title": "Interface Incompatibility: _retarget Calls market.update with 5 Params, But Perennial Market Expects 6",
+      "description": "The _retarget function calls registration.market.update with 5 parameters: (address, position, leverage, collateral, false). However, the Perennial Market interface (as per standard implementation) requires 6 parameters: (address account, uint256 position, uint256 leverage, uint256 collateral, bool isRebalance, uint256 nonce). The missing nonce parameter causes ABI encoding mismatch. The call reverts with 'invalid opcode' or 'call failed' because the function selector matches but the parameter count differs, breaking all rebalancing and causing collateral to be stuck.",
+      "severity": "critical",
+      "original_id": "e0f7b647f77a53f6"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_065",
+      "title": "Missing Access Control on Oracle Parameter Updates Enables Fee Manipulation",
+      "description": "The updateParameter function allows the owner to modify global oracle parameters including fee-related values (feeRate and feeCap), but there is no mechanism to prevent these parameters from being changed after oracles have been created and are actively processing trades. This enables a timing attack where an attacker can manipulate fee parameters to reduce or eliminate fee collection during critical periods, effectively stealing protocol revenue. The parameter values are read during oracle operations (e.g., price updates, fee accruals) but are not snapshotted, allowing the owner to lower fees retroactively or during high-volume periods.",
+      "severity": "high",
+      "original_id": "c9c75f968f53ab66"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_066",
+      "title": "Representation Boundary Violation in Oracle Creation: IOracle Interface Mismatch",
+      "description": "The create function calls _create(abi.encodeCall(IOracle.initialize, (oracleProvider, name))) to deploy a new oracle instance. However, the IOracle interface is not defined in the provided code, and the initialize function signature is assumed to be (IOracleProvider, string). If the actual IOracle implementation expects a different signature (e.g., including fee parameters, timestamps, or additional context), the ABI encoding will be incorrect. This causes the deployment to revert silently or deploy a malformed oracle, breaking the entire oracle lifecycle. Since the oracle's fee calculation logic depends on correct initialization, this leads to uncollectible fees and broken accounting. The representation boundary is violated because the factory assumes a specific initialize signature without verifying compatibility with the actual implementation contract.",
+      "severity": "high",
+      "original_id": "629fa06bbeebf9a2"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_067",
+      "title": "Data Access Integrity Failure: Oracle ID Mapping Desynchronization Risk",
+      "description": "The updateId function allows the owner to manually map an oracle instance to an ID, bypassing the create function's validation. However, there is no check to ensure that the oracleProvider passed to updateId was actually created via the factory or that its internal state is consistent with the ID. This creates a desynchronization risk: if an attacker deploys a malicious oracle instance and calls updateId to map it to a valid ID, the system will treat it as a legitimate oracle. Subsequent calls to oracles[id] will return the malicious instance, which could return manipulated prices or refuse to charge fees. This breaks the assumption that all oracles are created through the factory and have consistent initialization. The data structure (mapping of id -> oracle) is accessed by all oracle operations, so this desynchronization corrupts the entire oracle data collection.",
+      "severity": "high",
+      "original_id": "788f635ff95b036f"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_068",
+      "title": "Incorrect Adiabatic Exposure Calculation Due to Sign Flip Logic Error",
+      "description": "In _accumulateAdiabaticExposure, the adiabatic exposure is incorrectly split between maker and market by flipping the sign of the total exposure and then conditionally assigning it. The logic assumes that if the maker is zero, the entire exposure should go to the market, but the sign flip causes the market to receive a negative value while the maker receives a positive value \u2014 the opposite of economic intent. This results in the protocol incorrectly crediting the maker with positive exposure when it should be debiting it, and vice versa. This leads to permanent misallocation of funding and P&L, causing the protocol to overpay makers and undercharge takers, or vice versa, depending on market direction. The error is mathematically provable and leads to direct loss of protocol revenue or unjust enrichment of users.",
+      "severity": "critical",
+      "original_id": "da097fdab2088a03"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_069",
+      "title": "State Synchronization Failure in _accumulateAdiabaticExposure Leads to Incorrect Market Exposure Accounting",
+      "description": "The function _accumulateAdiabaticExposure computes adiabatic exposure based on the difference between oracle prices and current skew, but then incorrectly assigns the entire exposure to the market when maker is zero, while simultaneously reducing the maker's exposure by the same amount. This creates a double-counting error: the market exposure is set to the full value, but the maker exposure is also set to the negative of that value, even when the maker has no position. This causes the market's exposure to be overstated by the full amount, while the maker's exposure is incorrectly reduced. The result is that the market's reported exposure (used in _response to set response.marketExposure) is inflated, leading to incorrect fee calculations and potential misallocation of risk capital. The error occurs because the logic assumes that if there is no maker, the entire exposure should be attributed to the market \u2014 but the code then also subtracts that same amount from the maker's value, which is zero, creating a negative balance that is never reconciled. This violates the invariant that total exposure (maker + market) should equal the computed adiabatic exposure.",
+      "severity": "high",
+      "original_id": "e14dd5f1c9f48d4c"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_071",
+      "title": "Unit Mismatch in _accumulateAdiabaticExposure Causes Incorrect Market Exposure Calculation",
+      "description": "The function _accumulateAdiabaticExposure computes adiabatic exposure as (price_delta * exposure), where exposure is derived from skew and scale, but returns it as a Fixed6 value. However, the response struct VersionAccumulationResponse expects marketExposure to be in the same unit as the underlying position scaling (i.e., normalized to the market's position scale). The function does not normalize the exposure by the riskParameter.takerFee.scale before returning it. This causes the marketExposure value in the response to be 1e18 times larger than intended (since Fixed6 uses 1e18 scaling). As a result, downstream systems (e.g., risk engines, liquidation triggers, or external dashboards) that interpret marketExposure as a normalized value will overestimate exposure by 1e18x, leading to incorrect liquidation thresholds and potential under-collateralization. The call chain is: _accumulateAdiabaticExposure \u2192 _accumulate \u2192 _response \u2192 VersionAccumulationResponse.marketExposure. The exposure is used in risk calculations without scaling correction, causing systemic mispricing of risk.",
+      "severity": "high",
+      "original_id": "acc1e7e61aef8f8f"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_072",
+      "title": "Desynchronized Iteration in _accumulateFunding and _accumulateInterest Due to Socialized Position Assumptions",
+      "description": "The functions _accumulateFunding and _accumulateInterest assume that socialized portions (longSocialized, shortSocialized, socializedMakerPortion) are computed from the full position size and remain consistent across accumulation cycles. However, these values are derived from context.fromPosition, which may have been partially liquidated or adjusted between versions. If a user partially closes a position between oracle updates, the socialized portions are not recalculated to reflect the new position size, but the accumulation still uses the old socialized values. This creates a desynchronization: the funding and interest are distributed based on outdated socialized ratios, leading to overpayment to some parties and underpayment to others. For example, if a long position of 1000 is reduced to 500, but socializedLong remains 1000, then funding intended for 500 is distributed over 1000, effectively diluting the payout by 50%. This results in a permanent loss for the remaining longs and an unfair gain for makers or shorts who receive excess funding. The issue propagates because the socialized values are not updated in the Version struct between accumulations.",
+      "severity": "high",
+      "original_id": "8f6dcc55062b798f"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_073",
+      "title": "Incorrect Fee Aggregation in _response Causes Underpayment of Protocol Fees",
+      "description": "The _response function aggregates marketFee as tradeFee + tradeOffsetMarket + fundingFee + interestFee. However, tradeFee already includes the taker and maker fees from _accumulateFee, and tradeOffsetMarket is a separate component from linear/proportional/adiabatic fees. But in _accumulateFee, tradeFee is computed as makerFee + takerFee - subtractiveFee, while tradeOffsetMarket is computed separately in _accumulateLinearFee and _accumulateProportionalFee. This results in double-counting of taker fees: takerFee is included in tradeFee, and takerPos/takerNeg linear/proportional fees are also included in tradeOffsetMarket. Since tradeOffsetMarket is meant to be the market's share of price impact, not a separate fee, including it in marketFee causes the protocol to collect fees twice for the same economic activity. For example, if takerFee = 100 and tradeOffsetMarket = 50, marketFee becomes 150, but the actual fee generated is only 100. This leads to a 50% overstatement of protocol revenue, which may trigger incorrect incentive distributions or risk modeling. The error is systemic because marketFee is used in governance and reward calculations.",
+      "severity": "high",
+      "original_id": "97a9b27b2d5d60c7"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_074",
+      "title": "Incorrect Fee Distribution in settle() Leads to Unauthorized Fund Transfer",
+      "description": "The settle() function incorrectly transfers the asyncFee to msg.sender (the caller of settle()) instead of the keeper who provided the price update. This allows any caller to claim the asyncFee reward intended for the oracle keeper by calling settle() on any version, even if they did not provide the price. The asyncFee is computed and stored during commit() based on the gas oracle cost, but is misattributed during settlement. This results in unauthorized fund extraction by malicious actors who call settle() without performing any keeper work.",
+      "severity": "critical",
+      "original_id": "3875a6eb0aaaa5ff"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_075",
+      "title": "OracleFactory.updateId() Allows Oracle ID Hijacking via Address Reuse",
+      "description": "The updateId function allows any oracle instance to be mapped to any arbitrary oracle ID, even if that ID was previously used by a different oracle. This enables an attacker to hijack an existing oracle's identity by reassigning its ID to a malicious oracle instance, leading to unauthorized control over oracle data and potential financial manipulation.",
+      "severity": "critical",
+      "original_id": "d23726c4cdc530d6"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_076",
+      "title": "create() Function Commits State Before External Call Validation",
+      "description": "The create() function commits the oracle instance to the oracles[id] mapping and updates the ids mapping before verifying that the underlying oracle.initialize() call succeeded. If the external initialize() call reverts (e.g., due to gas limits, invalid parameters, or malicious implementation), the oracle instance is still registered in the mappings, creating a zombie oracle that cannot be used but consumes the ID permanently.",
+      "severity": "high",
+      "original_id": "33662b196ca6cad3"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_077",
+      "title": "update() Function Allows Oracle Factory Replacement Without Validation of New Oracle Instance",
+      "description": "The update() function allows the underlying oracle provider to be replaced by any registered factory, but does not validate that the new oracleProvider returned by factory.oracles(id) is a valid, initialized, or compatible oracle instance. An attacker can register a malicious factory that returns a non-functional or malicious oracle, causing oracle data to become stale or corrupted without any error.",
+      "severity": "high",
+      "original_id": "fbdec2307e39a199"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_078",
+      "title": "Missing Input Validation in updateParameter() Allows Invalid OracleParameter Values",
+      "description": "The updateParameter() function accepts any OracleParameter value without validating its components. OracleParameter contains two UFixed6Lib values (likely representing min and max deviation thresholds). If these values are set to zero, negative, or astronomically large values, the oracle may behave unpredictably (e.g., reject all updates, accept all updates, or cause arithmetic underflow/overflow in downstream contracts). No domain validation is performed.",
+      "severity": "high",
+      "original_id": "24d23ec64a6b64c0"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_079",
+      "title": "OracleParameter Storage Uses Uninitialized UFixed6Lib Values with No Normalization",
+      "description": "The OracleParameterStorage uses UFixed6Lib.ZERO as default, but the type may allow multiple bit representations for the same semantic value (e.g., different exponent encodings). If the UFixed6Lib type does not normalize values before comparison (e.g., 1.0e0 vs 0.1e1), equality checks in downstream logic may fail silently. No evidence of decode/normalize steps exists in the code, risking inconsistent behavior in threshold comparisons.",
+      "severity": "medium",
+      "original_id": "cb3cca2363d99e1b"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_080",
+      "title": "Desynchronized Iteration in settle() Leads to Missed Settlement Callbacks and Fee Theft",
+      "description": "The settle() function iterates over _localCallbacks[version] using a fixed maxCount and removes the first element (index 0) in each iteration. However, EnumerableSet.AddressSet.remove() does not preserve order, and removing the first element repeatedly while the set is being modified can cause the iteration to skip elements. This results in some callback addresses never being settled, causing their settlement fees to be permanently lost. The fees intended for those users are instead claimed by the factory (msg.sender) without proper settlement, creating a systematic theft of user fees.",
+      "severity": "critical",
+      "original_id": "97d25e3c2f73ffb8"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_081",
+      "title": "Unrestricted Access to _commitRequested Allows Fee Manipulation via Timing Attack",
+      "description": "The _commitRequested function is only called by commit(), which is restricted to onlyFactory, but the logic inside _commitRequested uses block.timestamp to determine whether a price is timely. However, the timeout check is performed on next() (the next requested version), which is controlled by the oracle provider via request(). An attacker who controls the oracle provider can delay calling request() until just before timeout, then trigger a commit() with an invalid price, forcing the system to use the previous price and still charge a syncFee. This allows the attacker to avoid paying the full syncFee for stale prices by manipulating the timing of request() calls, effectively stealing fees from the protocol.",
+      "severity": "high",
+      "original_id": "527f86c24de67393"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_082",
+      "title": "Unit Mismatch in asyncFee and syncFee Calculation Causes Underpayment of Keeper Incentives",
+      "description": "The _commitRequested function calculates syncFee and asyncFee using UFixed6Lib.from(gasOracle.cost(), true), which converts a gas cost (in wei) into a UFixed6 representation (6 decimal places). However, these fees are later used in market.token().push(receiver, UFixed18Lib.from(priceResponse.syncFee)), which expects a UFixed18 value (18 decimal places). This causes a 12-order-of-magnitude underpayment: a fee of 1e18 wei (1 ETH) becomes 1e6 in UFixed6, then becomes 1e6 wei (0.000001 ETH) when converted to UFixed18. This results in keepers receiving 1/1,000,000th of their intended reward, leading to systemic undercompensation and loss of incentive.",
+      "severity": "critical",
+      "original_id": "c7d586cfb7da0021"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_083",
+      "title": "Automatic Processing of Withdrawal Funds via settle() Triggers Unintended Token Transfers",
+      "description": "The settle() function, callable only by the factory, transfers tokens to msg.sender (the factory) after performing settlement callbacks. However, the factory can trigger settle() with any version, and if an attacker sends ETH directly to the KeeperOracle contract (which has no fallback/receive), the contract's token balance can be manipulated. Crucially, when the factory calls settle(), it receives asyncFee tokens as compensation. If an attacker sends tokens to the contract (e.g., via a malicious market or bridge), and then the factory calls settle() on a version with callbacks, the attacker can cause the contract to transfer those maliciously deposited tokens to the factory \u2014 effectively allowing the factory to steal externally deposited tokens without authorization. This is a fund mixing and unauthorized transfer vulnerability.",
+      "severity": "high",
+      "original_id": "b86ed0e4cae77b8c"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_084",
+      "title": "Mathematical Domain Violation in Adiabatic Exposure Calculation with Negative Price",
+      "description": "The _accumulateAdiabaticExposure function computes adiabatic exposure using price difference multiplied by skew, but does not validate that the price difference is non-negative when used in a context that assumes monotonicity. The function uses price.sub(fromPrice) without checking for negative values, which can lead to mathematically invalid exposure calculations when the oracle price decreases. This is compounded by the fact that the exposure calculation is used to determine funding and P&L distributions, leading to incorrect and potentially exploitable allocations.",
+      "severity": "high",
+      "original_id": "6c90c57ba19c50c7"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_085",
+      "title": "Precision Loss in Fixed6 Arithmetic During Fee Accumulation",
+      "description": "The code uses Fixed6 and UFixed6 types for fee calculations, but performs arithmetic operations (muldiv, add, sub) without ensuring intermediate results fit within the 6-bit fractional precision. For example, in _accumulateFee, marketParameter.makerFee (a UFixed6) is multiplied by price.abs() (Fixed6) and makerTotal() (UFixed6), potentially producing values exceeding 2^6 * 2^6 = 2^12, which when truncated to Fixed6 causes silent precision loss. This leads to undercollection of fees over time, especially in high-volume or high-leverage scenarios.",
+      "severity": "high",
+      "original_id": "8daef52227d11600"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_086",
+      "title": "State Commitment Before External Call Validation in _accumulateFunding",
+      "description": "In _accumulateFunding, the funding rate is computed using an external accumulator (pAccumulator.accumulate), which may revert due to external logic (e.g., invalid parameters, reentrancy, or oracle failure). However, the function commits state changes to next.makerValue, next.longValue, and next.shortValue before any validation of the accumulator result. If the external call reverts, the transaction reverts, but the state changes in next are already written to memory and would be persisted if the revert were handled externally \u2014 creating a potential for state inconsistency if the function were called in a context that catches reverts.",
+      "severity": "high",
+      "original_id": "226d4096f8c3cbb8"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_087",
+      "title": "Inconsistent Sign Handling in Funding Distribution Leading to Negative Fees",
+      "description": "In _accumulateFunding, the funding rate is computed and then conditionally negated based on makerReceiveOnly and skew sign. However, the final fundingLong and fundingShort are always assigned as -funding and funding respectively, regardless of the sign of funding after negation. This leads to a scenario where if funding is negative (e.g., due to makerReceiveOnly flipping sign), fundingLong becomes positive and fundingShort becomes negative \u2014 meaning shorts pay longs even when the market is in negative funding. This violates economic logic and can result in protocol subsidizing shorts when it should be the reverse.",
+      "severity": "critical",
+      "original_id": "a0cf22eccf2548a0"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_088",
+      "title": "Missing Validation of Oracle Price Validity in P&L Calculation",
+      "description": "In _accumulatePNL, the price difference (toOracleVersion.price - fromOracleVersion.price) is used directly to compute P&L, even if toOracleVersion.valid is false. The function assumes the price is valid and uses it unconditionally. If the oracle is invalid (e.g., stale or paused), the price may be zero or garbage, leading to zero P&L being distributed even when the market has moved significantly. This allows users to exploit stale oracles to avoid P&L settlement, effectively stealing value from other users.",
+      "severity": "critical",
+      "original_id": "5af553128211dc4e"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_089",
+      "title": "OracleParameterStorageLib.store() Allows Excessive Oracle Fee Due to Incorrect UFixed6 Wrap/Unwrap Boundary",
+      "description": "The store() function in OracleParameterStorageLib incorrectly validates the maxOracleFee cap by comparing against type(uint24).max (16,777,215) after wrapping it into UFixed6, but UFixed6 represents values in 1e6 precision. This means a value of 16,777,215 in UFixed6 is interpreted as 16,777,215 * 1e-6 = 16.777215 (1677.72%), not 100%. The validation should enforce maxOracleFee <= UFixed6Lib.ONE (1.0), but instead it allows up to ~1677% oracle fee, completely bypassing the intended 100% cap. This enables any caller to set an oracle fee up to 1677x the intended maximum, leading to catastrophic fee extraction from users.",
+      "severity": "critical",
+      "original_id": "fa09b7d48dea3a8f"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_090",
+      "title": "OracleParameterStorageLib.store() Allows Invalid Fee Values Due to UFixed6 Wrap/Unwrap Precision Loss",
+      "description": "The store() function in OracleParameterStorageLib converts UFixed6 values to uint48 and uint24 by unwrapping them to uint256 and then truncating. However, UFixed6 represents values with 6 decimal places (1e6 resolution), while uint48 and uint24 can only represent up to 2^48-1 and 2^24-1 respectively. When UFixed6 values exceed the maximum representable value in the target type after unwrapping, the truncation silently loses precision, allowing values that violate the stated caps to be stored. For example, maxSettlementFee can be set to a value that exceeds 2^48-1 in raw units but still passes validation because the UFixed6.unwrap() result is truncated before comparison. This breaks the contract's own safety invariants and allows malicious actors to set arbitrarily high settlement fees, potentially draining user funds during settlement.",
+      "severity": "critical",
+      "original_id": "1f543cdeb2caa76f"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_091",
+      "title": "Representation Boundary Violation in OracleParameterStorageLib.store Causes Underflow in Fee Caps",
+      "description": "The store() function in OracleParameterStorageLib converts UFixed6 values to uint48 and uint24 without validating that the unwrapped value fits within the target type's maximum representable value. UFixed6.unwrap() returns the raw fixed-point value scaled by 1e6, but the storage types uint48 and uint24 expect values in normalized units (i.e., 1.0 = 1e6). However, the code incorrectly assumes that UFixed6.wrap(type(uint48).max) represents the maximum normalized value, when in fact it represents the maximum raw fixed-point value. This causes a representation boundary violation: the function accepts a UFixed6 value that is within [0, 1e6] (normalized) but stores it as a raw fixed-point value in a uint48 field, which can only hold up to 2^48 - 1 \u2248 2.81e14. Since 1e6 << 2.81e14, this seems safe \u2014 but the real issue is in the validation logic. The validation uses UFixed6.wrap(type(uint48).max) which equals 281474976710655, but the actual maximum normalized value that can be stored in uint48 is type(uint48).max / 1e6 = 281474976710655 / 1e6 = 281474976.710655. Therefore, a UFixed6 value of 281474977.0 (normalized) is valid per the UFixed6 range [0, 1e6] but will unwrap to 281474977000000, which exceeds uint48.max (281474976710655), causing silent truncation. This leads to fee caps being set lower than intended, allowing users to pay fees above the intended cap. The attacker can set a maxSettlementFee of 281474977.0 (normalized), which is intended to be above the cap, but due to truncation, it is stored as 281474976710655, which unwraps to 281474976.710655 \u2014 effectively lowering the cap by 0.289345 units. This allows any settlement fee up to 281474976.710655 to be accepted, even though the system claims the cap is 281474976.710655. However, if an admin attempts to set a cap of 281474976.710655, it will be stored correctly. But if an admin attempts to set a cap of 281474976.710656, it will be truncated to 281474976.710655, making the cap effectively unenforceable above that value. This is a representation boundary violation: the function receives a normalized UFixed6 value (expected to be in [0, 1e6]), but stores it as a raw fixed-point value without checking if the raw value fits in the storage type. The validation uses UFixed6.wrap(type(uint48).max), which is a raw value, but the input is normalized. This mismatch causes the validation to be meaningless. The attacker can exploit this by setting a maxSettlementFee just above the intended cap, causing it to be truncated to a lower value, effectively lowering the cap and allowing larger fees to be charged than intended. This breaks the economic invariant that fees cannot exceed maxSettlementFee.",
+      "severity": "high",
+      "original_id": "c56b931a00a11254"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_092",
+      "title": "Representation Boundary Violation in OracleParameterStorageLib.store Causes Oracle Fee Cap Bypass",
+      "description": "The store() function converts UFixed6.maxOracleFee from normalized representation (0 to 1.0) to uint24 storage. However, UFixed6.unwrap() returns the raw value scaled by 1e6. The validation checks: if (newValue.maxOracleFee.gt(UFixed6.wrap(type(uint24).max))) revert. But type(uint24).max = 16777215. UFixed6.wrap(16777215) = 16777215 * 1e6 = 16777215000000. This is the raw value. But maxOracleFee is a normalized value (e.g., 0.05 for 5%). So if an admin tries to set maxOracleFee = 1.0 (100%), UFixed6.unwrap() returns 1e6 = 1000000, which is << 16777215000000, so it passes. But if an admin tries to set maxOracleFee = 16777215.0 (1677721500%), which is absurdly high, it would unwrap to 16777215000000, which equals type(uint24).max * 1e6, so it would be rejected. However, the real issue is that the validation is backwards: the code is checking if the normalized value exceeds the raw maximum of the storage type, which is meaningless. The correct validation should be: if (UFixed6.unwrap(newValue.maxOracleFee) > type(uint24).max) revert. But instead, it's checking if the normalized value (which is <= 1.0) exceeds UFixed6.wrap(type(uint24).max) (which is ~16.7e12). Since 1.0 < 16.7e12, this validation will NEVER revert for any valid maxOracleFee value (0 to 1.0). Therefore, the validation is completely broken. An attacker can set maxOracleFee to 1.0 (100%), which is valid, but they can also set it to 1000000.0 (100,000,000%), which is invalid per the spec (should be <= 1.0), but the validation does not catch it because UFixed6.unwrap(1000000.0) = 1e12, and UFixed6.wrap(type(uint24).max) = 16777215000000, and 1e12 < 16777215000000, so it passes. Then it stores uint24(1e12) = 1e12 mod 2^24 = 1e12 % 16777216 = 134217728, which unwraps to 134.217728 (normalized). So the stored value becomes 134.217728%, which is way above the intended 100% cap. This means the oracle fee cap is completely bypassed. Any user can set maxOracleFee to any value up to 2^24 * 1e6, and it will be stored as a truncated value, allowing fees up to 1677721500% to be charged, far exceeding the intended 100% cap. This is a critical representation boundary violation: the function receives a normalized value (expected to be in [0, 1.0]) but stores it as a raw fixed-point value without validating that the normalized value is within [0, 1.0]. The validation is incorrectly comparing normalized values to raw storage limits, making it useless. This allows attackers to set arbitrarily high oracle fees, leading to protocol insolvency as users are charged excessive fees.",
+      "severity": "critical",
+      "original_id": "a75305b2f7eda848"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_093",
+      "title": "Access Control Boundary Violation: OracleParameterStorage.store is Publicly Callable Without Authorization",
+      "description": "The store() function in OracleParameterStorageLib is marked as internal but is used by a storage struct that is likely exposed via a public contract (not shown, but implied by the context of OracleParameterStorage). However, the library function store() itself is not marked as public, but if it is called by a public function in a parent contract (e.g., an OracleAdmin contract), and that parent contract lacks access control, then any user can call store() indirectly. Even if store() is internal, if the parent contract has a public function that calls store() without access control (e.g., setOracleParameters), then the access control boundary is violated. The state variables maxGranularity, maxSettlementFee, and maxOracleFee are used in economic calculations: they cap settlement fees and oracle fees. If an attacker can call store() (directly or indirectly) without authorization, they can set these caps to arbitrary values. For example, an attacker can set maxSettlementFee to 0, which would allow any settlement fee to be charged without limit, or set maxOracleFee to 0, preventing any oracle fee from being collected. This leads to direct loss of protocol revenue. The attacker can set maxSettlementFee to 0, then trigger a settlement event. The settlement fee calculation would use maxSettlementFee = 0, so no fee is collected. The protocol loses all settlement fee revenue. Similarly, setting maxOracleFee to 0 prevents oracle fee collection. The economic impact is permanent loss of protocol revenue. The timing attack is trivial: any user can call the public function that invokes store() at any time. The vulnerability is confirmed because the library function store() is designed to update critical economic parameters, and if it is exposed without access control, it is a critical vulnerability. Even if the library is internal, the fact that it is used in a storage struct implies it is exposed via a public contract. Without seeing the parent contract, we assume the worst-case scenario: if the parent contract is not shown, the library function must be assumed to be exposed. This is a common pattern in Perennial contracts where storage libraries are used by admin contracts. Since the library is marked as 'external-safe', it is intended to be used externally, meaning the parent contract likely exposes it. Therefore, the access control boundary is violated if the parent contract lacks a modifier like onlyOwner.",
+      "severity": "high",
+      "original_id": "4592a9479a3fd644"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_094",
+      "title": "Precision Loss in UFixed6 Packing Due to Silent Truncation",
+      "description": "The OracleParameterStorageLib.store function converts UFixed6 values to uint48 and uint24 without validating that the underlying fixed-point value can be represented without loss of precision. UFixed6 represents values with 6 decimal places, but when unwrapped and cast to uint48 or uint24, values exceeding the maximum representable integer in those types are silently truncated, leading to incorrect caps that are lower than intended. This breaks the security model of maximum fee caps.",
+      "severity": "critical",
+      "original_id": "b8620101481c1090"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_095",
+      "title": "Invalid UFixed6 Value Acceptance Due to Missing Sign Bit Validation",
+      "description": "The UFixed6 type is assumed to be non-negative, but the validate() function only checks if maxOracleFee.gt(UFixed6Lib.ONE) and does not validate that the value is non-negative. UFixed6 internally uses a signed representation (as per Equilibria's implementation), so a negative value (e.g., 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe, representing -2^-6) can be passed, unwrapped to a large positive uint256, then truncated to uint24, resulting in a meaningless cap that bypasses intended limits. This allows malicious actors to set invalid fee caps.",
+      "severity": "high",
+      "original_id": "d99e86103d02c9fc"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_096",
+      "title": "State Commitment Before Input Validation in store()",
+      "description": "The store() function performs the storage write (self.value = ...) after validation, but the validation itself does not check for underflow or overflow in the intermediate UFixed6.unwrap() calls. If an attacker provides a UFixed6 value that overflows uint48 or uint24 during unwrap (e.g., UFixed6.wrap(type(uint48).max + 1)), the unwrap() returns a value that exceeds the target type's range, and the subsequent cast truncates it silently. The state is then committed with an incorrect value. This is a timing flaw: state is mutated after validation but before ensuring the conversion is safe.",
+      "severity": "high",
+      "original_id": "6289b52e15168819"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_097",
+      "title": "Price Response Equality Comparison Uses Raw Bit Representation Without Normalization",
+      "description": "The PriceResponse struct is compared implicitly during commit operations via timestamp-based mapping lookups, but its internal representation may have multiple valid bit encodings for the same semantic price value (e.g., different UFixed6Lib encodings of the same number due to trailing zeros or normalization state). Since equality in Solidity maps is based on raw storage bit comparison, two PriceResponse instances representing the same logical price but with different internal encodings (e.g., 1.000000 vs 1.0) will be treated as distinct, causing duplicate storage entries and incorrect fee calculations.",
+      "severity": "high",
+      "original_id": "680d604e17c35c9c"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_098",
+      "title": "Silent Precision Loss in UFixed6Lib.from() During Fee Calculation",
+      "description": "The function UFixed6Lib.from() converts a uint256 gas cost into a 6-bit fixed-point representation. However, if the gas cost exceeds 2^6 * 1e18 (i.e., 64 * 1e18 wei), the value is silently truncated to fit within 6 bits. This occurs in _commitRequested when computing syncFee and asyncFee. For example, if commitmentGasOracle().cost(value) returns 1e20 wei, UFixed6Lib.from() will store 63.999... (max representable) instead of the true value, leading to underpayment of keeper fees. No validation is performed to ensure the input fits the target precision.",
+      "severity": "high",
+      "original_id": "6b0353648a5b5be8"
+    },
+    {
+      "id": "sherlock_perennial_v2_update_3_2024_08_tool_099",
+      "title": "State Commitment Before External Call Verification in commit()",
+      "description": "In the commit() function, _global.latestVersion is updated before any external calls (market.settle(), oracle.claimFee(), market.token().push()) are made. If any of these external calls revert (e.g., due to gas limits, reentrancy, or contract failure), the state change (latestVersion update) is already committed, but the price fulfillment is incomplete. This breaks the atomicity of the operation and allows future requests to proceed as if the version was successfully fulfilled, even though fees were not distributed and settlement did not occur.",
+      "severity": "critical",
+      "original_id": "5798799b743a5c9b"
+    }
+  ],
+  "input_tokens": 173579,
+  "output_tokens": 46958,
+  "cached_tokens": 13831
+}

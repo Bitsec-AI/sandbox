@@ -1,0 +1,315 @@
+{
+  "project": "code4rena_initia-move_2025_04",
+  "agent": "agent317",
+  "status": "success",
+  "timestamp": "2026-04-09T11:30:05.939213",
+  "elapsed_seconds": 62.9,
+  "total_expected": 4,
+  "total_found": 38,
+  "true_positives": 2,
+  "false_negatives": 2,
+  "false_positives": 36,
+  "detection_rate": 0.5,
+  "precision": 0.05263157894736842,
+  "f1_score": 0.09523809523809525,
+  "matched_findings": [
+    {
+      "id": "code4rena_initia-move_2025_04_expected_000",
+      "expected": "Domain pricing relies on pool price, which can be manipulated",
+      "matched": "Incorrect Price Calculation in get_cost_amount Function",
+      "confidence": 0.9,
+      "justification": "Finding 3 correctly identifies the get_cost_amount function and describes an incorrect price calculation related to domain pricing. While the specific detail about relying on pool price manipulation isn't explicitly mentioned, the core issue of improper price calculation in domain registration is accurately identified, which is closely related to the expected vulnerability.",
+      "severity": "high",
+      "expected_description": "Submitted by\n0xluk3\n, also found by\n0xcb90f054\n,\nden-sosnowsky\n,\ngss1\n,\nHeavyweight_hunters\n, and\np4y4b13\n\nhttps://github.com/code-423n4/2025-01-initia-move/blob/main/usernames-module/sources/name_service.move#L603\n\nPayment for domains (registration, extensions) relies on direct spot price from the Dex module which is directly related to pool reserves. This can be manipulated with a flash loan or a large amount deposit, resulting in:\n\nbuying a domain in a lower price\nmaking other users overpay for their domains\n\nCalculating the price based directly on a liquidity pool reserves is a well known insecure pattern.\n\nIn\nusernames\nmodule, in function\nget_cost_amount\n, it calls dex module in line 603:\n\nlet spot_price = dex::get_spot_price(object::address_to_object<PairConfig>(@pair), get_init_metadata());\n\nFunction\nget_spot_price\nin dex:\n\n#[view]\n/// Calculate spot price\n/// https://balancer.fi/whitepaper.pdf (2)\npublic fun\nget_spot_price\n(\npair: Object<Config>, base_coin: Object<Metadata>\n): BigDecimal acquires Config, Pool, FlashSwapLock {\nlet\n(coin_a_pool, coin_b_pool, coin_a_weight, coin_b_weight, _) =\npool_info\n(pair,\nfalse\n);\nlet\npair_key =\ngenerate_pair_key\n(pair);\nlet\nbase_addr = object::\nobject_address\n(&base_coin);\nassert!\n(\nbase_addr == pair_key.coin_a || base_addr == pair_key.coin_b,\nerror::\ninvalid_argument\n(ECOIN_TYPE)\n);\nlet\nis_base_a = base_addr == pair_key.coin_a;\nlet\n(base_pool, quote_pool, base_weight, quote_weight) =\nif\n(is_base_a) {\n(coin_a_pool, coin_b_pool, coin_a_weight, coin_b_weight)\n}\nelse\n{\n(coin_b_pool, coin_a_pool, coin_b_weight, coin_a_weight)\n};\nbigdecimal::\ndiv\n(\nbigdecimal::\nmul_by_u64\n(base_weight, quote_pool),\nbigdecimal::\nmul_by_u64\n(quote_weight, base_pool)\n)\n}\n\nThe function uses the pool reserves amounts to calculate the price. Please note, that even if that dex module would implement any lock during the loan, the funds used for manipulation might come from other source, e.g. direct deposit or another dex existing in the future, allowing flash loans.\n\nUse a TWAP price source instead, or use an oracle, e.g.\nSlinky\nto calculate the price.\n\nandrew (Initia) confirmed and commented\n:\n\nFlash loan price manipulation is prevented in\ndex.move\n, but attacks through swaps are still possible. While this makes attacks costly when there is sufficient liquidity, it can be an easy target in the early stages.\nTherefore, we plan to hardcode the price as 1 at launch and update it later when slinky adds an initial price. Accordingly, we will modify the current code to hardcode the price as 1 and update it later using the slinky oracle.",
+      "found_description": "The get_cost_amount function incorrectly calculates the cost for domain registration by using a ratio of (price_per_year * duration) / YEAR_TO_SECOND, but then divides this USD value by a spot price. The issue is that YEAR_TO_SECOND (31557600) represents seconds in a year, but the duration parameter is also expected to be in seconds. This creates a double-counting of the time unit conversion. The correct calculation should be (price_per_year * duration) / (YEAR_TO_SECOND) to get the USD value for the duration, but the current implementation effectively calculates cost for (duration^2 / YEAR_TO_SECOND) years instead of duration seconds.",
+      "found_id": "a515558084ba622e",
+      "tool_finding_index": 0
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_expected_002",
+      "expected": "User can bypassMAX_EXPIRATIONwhen extend expiration",
+      "matched": "Incorrect Duration Validation in extend_expiration",
+      "confidence": 0.9,
+      "justification": "Finding 3 correctly identifies the issue in the extend_expiration function where the duration validation is incorrect. It accurately describes the problem with the new_expiration_date - expiration_date <= MAX_EXPIRATION check and the potential for underflow when dealing with expired domains. The core security issue matches the expected vulnerability where users can bypass MAX_EXPIRATION limits when extending expiration.",
+      "severity": "high",
+      "expected_description": "Submitted by\nlaksmana\n, also found by\np4y4b13\n\nhttps://github.com/code-423n4/2025-01-initia-move/blob/a96f5136c4808f6968564a4592fe2d6ac243a233/usernames-module/sources/name_service.move#L483\n\nIn the\nextend_expiration\nfunction, the validation for the duration is incorrect, allowing the user to bypass\nMAX_EXPIRATION\n:\n\nlet expiration_date = metadata::get_expiration_date(token);\nlet new_expiration_date = if (expiration_date > timestamp) {\nexpiration_date + duration\n} else {\ntimestamp + duration\n};\nassert!(\n=>            new_expiration_date - expiration_date <= MAX_EXPIRATION,\nerror::invalid_argument(EMIN_DURATION),\n);\nmetadata::update_expiration_date(token, new_expiration_date);\n\nThe issue arises because the code subtracts\nnew_expiration_date - expiration_date\nfor validation.\n\nAssume a user registers a domain and the\nexpiration_date\nis equal to\nMAX_EXPIRATION\n+\ntimestamp. Then, the user performs\nextend_expiration\nwith a\nduration\nvalue equal to the\nMAX_EXPIRATION\n, the\nnew_expiration_date\nbecomes\nexpiration_date + duration\n.\n\nThis leads to the following verification check passing:\n\nassert!(\nnew_expiration_date - expiration_date <= MAX_EXPIRATION,\nerror::invalid_argument(EMIN_DURATION),\n);\n\nSince the\nnew_expiration_date\nis calculated using\nexpiration_date\n+\nduration\n, the subtraction\n(new_expiration_date - expiration_date)\nwill always be less than to\nMAX_EXPIRATION\n.\n\nAs a result, the\nupdate_expiration_date\nfunction updates the expiration duration to a value far greater than\nMAX_EXPIRATION\n, effectively doubling it to\nMAX_EXPIRATION * 2\n.\n\nmetadata::update_expiration_date(token, new_expiration_date);\n\nAdd the code below into\nname_service.move\nand run the test:\n\n#[test(chain = @0x1, source = @usernames, user = @0x2, lp_publisher = @0x3)]\nfun test_bypass_max_expiration(\nchain: signer,\nsource: signer,\nuser: signer,\nlp_publisher: signer,\n) acquires CoinCapsInit, ModuleStore {\ndeploy_dex(&chain, &lp_publisher);\nlet addr = signer::address_of(&user);\ninit_mint_to(signer::address_of(&chain), &user, 1000000000);\ninitialize(\n&source,\n100,\n50,\n10,\n1000,\n1000,\nstring::utf8(b\"https://test.com/\"),\nstring::utf8(b\"https://test.com/\"),\n);\nstd::block::set_block_info(100, 100);\n// before register\nassert!(get_name_from_address(addr) == option::none(), 0);\nassert!(get_address_from_name(string::utf8(b\"abcd\")) == option::none(), 1);\nassert!(get_valid_token(string::utf8(b\"abcd\")) == option::none(), 2);\nregister_domain(&user, string::utf8(b\"abcd\"), MAX_EXPIRATION);\nlet token = *option::borrow(&get_valid_token(string::utf8(b\"abcd\")));\nlet token_object = object::address_to_object<Metadata>(token);\nassert!(initia_std::nft::token_id(token_object) == string::utf8(b\"abcd.init.100\"), 3);\nset_name(&user, string::utf8(b\"abcd\"));\nassert!(get_name_from_address(addr) == option::some(string::utf8(b\"abcd\")), 4);\nassert!(get_address_from_name(string::utf8(b\"abcd\")) == option::some(addr), 5);\n// extend duration bypass a MAX_EXPIRATION\nextend_expiration(&user, string::utf8(b\"abcd\"), MAX_EXPIRATION);\nlet token = *option::borrow(&get_valid_token(string::utf8(b\"abcd\")));\nlet expiration_date = metadata::get_expiration_date(token);\nassert!( expiration_date >= MAX_EXPIRATION * 2, 6);\n}\n\nUpdate the validation logic to ensure the\nnew_expiration_date\nitself does not exceed\nMAX_EXPIRATION\n. The code would look like this:\n\nassert!(\nnew_expiration_date <= MAX_EXPIRATION,\nerror::invalid_argument(EMIN_DURATION),\n);\n\nandrew (Initia) confirmed and commented\n:\n\nActually,\nMAX_EXPIRATION\nmeans that you can register/extend to\ncurrent time + MAX_EXPIRATION\n. And yes, current logic is not correct. So I updated those in\nthis commit\n.\nassert!(\nnew_expiration_date - timestamp <= MAX_EXPIRATION,\nerror::invalid_argument(EMAX_EXPIRATION),\n);",
+      "found_description": "The extend_expiration function validates that (new_expiration_date - expiration_date) <= MAX_EXPIRATION, but this calculation can underflow if expiration_date is greater than new_expiration_date. While the logic ensures new_expiration_date is always >= expiration_date when extending from a valid state, if the domain is already expired (expiration_date < timestamp), the function sets new_expiration_date = timestamp + duration. In this case, if duration is very small, new_expiration_date could be less than the original expiration_date, causing the subtraction to underflow.",
+      "found_id": "fe919ca62e767729",
+      "tool_finding_index": 3
+    }
+  ],
+  "missed_findings": [
+    {
+      "id": "code4rena_initia-move_2025_04_expected_001",
+      "title": "NFT Token ID contains forbidden character by design which prevents any domain from being issued at all",
+      "description": "Submitted by\n0xluk3\n\nThe\nusernames\nmodule allows for registering a domain. This happens in function\nregister_domain\n. On registration, a NFT is minted to the buyer, with field\nToken ID\nin format\ndomain:timestamp\n. However the\n:\ncharacter is forbidden by underlying\nnft.move\nmodule which is also the reason why original unit tests fail.\n\nDue to this, the protocol cannot be used in its current state, because no NFTs can be currently minted, thus, no domains can be claimed. Hence, this is equivalent to a permanent DoS.\n\nIn\nregister_domain\n, the\nname\nstring is being appended\n.init:timestamp\nin line\n358-360\n.\n\nRunning original unit tests, e.g.,\ninitiad move test --log_level trace --path ./usernames-module -f end_to_end\n. a debug print was added in line 362:\nstd::debug::print(&name);\n\nBUILDING Usernames\nRunning Move unit tests\n[debug] \"abc.init:100\"\n[ FAIL    ] 0x42cd8467b1c86e59bf319e5664a09b6b5840bb3fac64f5ce690b5041c530565a::usernames::end_to_end\nTest failures:\nFailures in 0x42cd8467b1c86e59bf319e5664a09b6b5840bb3fac64f5ce690b5041c530565a::usernames:\n\u250c\u2500\u2500 end_to_end \u2500\u2500\u2500\u2500\u2500\u2500\n\u2502 error[E11001]: test failure\n\u2502    \u250c\u2500 /home/move/.move/https___github_com_initia-labs_movevm_git_b6320db6def0aa9438abdb0e7f3f5bda711c8081/precompile/modules/initia_stdlib/sources/token/nft.move:94:37\n\u2502    \u2502\n\u2502 86 \u2502     fun assert_token_id(token_id: &String) {\n\u2502    \u2502         --------------- In this function in 0x1::nft\n\u2502    \u00b7\n\u2502 94 \u2502             error::invalid_argument(EINVALID_TOKEN_ID)\n\u2502    \u2502                                     ^^^^^^^^^^^^^^^^^ Test was not expected to error, but it aborted with code 65545 originating in the module 0000000000000000000000000000000000000000000000000000000000000001::nft rooted here\n\u2502\n\u2502\n\u2502 stack trace\n\u2502 \tnft::create(/home/move/.move/https___github_com_initia-labs_movevm_git_b6320db6def0aa9438abdb0e7f3f5bda711c8081/precompile/modules/initia_stdlib/sources/token/nft.move:112)\n\u2502 \tinitia_nft::mint_internal(/home/move/.move/https___github_com_initia-labs_movevm_git_b6320db6def0aa9438abdb0e7f3f5bda711c8081/precompile/modules/initia_stdlib/sources/token/initia_nft.move:212-219)\n\u2502 \tinitia_nft::mint_nft_object(/home/move/.move/https___github_com_initia-labs_movevm_git_b6320db6def0aa9438abdb0e7f3f5bda711c8081/precompile/modules/initia_stdlib/sources/token/initia_nft.move:189-196)\n\u2502 \tusernames::register_domain(./sources/name_service.move:365-372)\n\u2502 \tusernames::end_to_end(./sources/name_service.move:753)\n\u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\nTracking back the error call stack:\n\nIt fails in\nmint_nft_object\nThen in\ninitia_nft.move#L189-L196\nThen in the same file\n212-219\nThen in\nnft.move#112\non call to\nassert_token_id(&token_id);\n.\n\nThis\nfunction\nis provided below:\n\nfun\nassert_token_id\n(token_id: &\nString\n) {\nlet\nlen = string::\nlength\n(token_id);\nassert!\n(\nlen <= MAX_NFT_TOKEN_ID_LENGTH,\nerror::\nout_of_range\n(ENFT_TOKEN_ID_TOO_LONG)\n);\nassert!\n(\nstring::\nindex_of\n(token_id, &string::\nutf8\n(\nb\":\"\n)) == len,\nerror::\ninvalid_argument\n(EINVALID_TOKEN_ID)\n);\n}\n\nIn the second assertion it requires\n:\nto be NOT present in the\ntoken_id\n.\nindex_of\nwill be equal to\nlen\nonly if the searched character will not be present in the string.\n\nSince the name is passed as 4th argument to\nmint_nft_object\n, which is\ndefined\nas:\n\npublic fun mint_nft_object(\ncreator: &signer,\ncollection: String,\ndescription: String,\ntoken_id: String,\nuri: String,\ncan_burn: bool\n)\n\nThen, using a\n:\nby default causes the NFT to be not issued and function reverts.\n\nUsing a simple PoC:\n\n#[test(chain = @0x1, source = @usernames, user1 = @0x2, user2 = @0x3, lp_publisher = @0x3)]\nfun\nmy_poc_just_register\n(\nchain: signer,\nsource: signer,\nuser1: signer,\nuser2: signer,\nlp_publisher: signer,\n) acquires CoinCapsInit, ModuleStore {\n// Setup environment\ndeploy_dex\n(&chain, &lp_publisher);\nlet\nchain_addr = signer::\naddress_of\n(&chain);\nlet\naddr1 = signer::\naddress_of\n(&user1);\n// Give tokens to users for registration\ninit_mint_to\n(chain_addr, &user1,\n100\n);\ninit_mint_to\n(chain_addr, &user2,\n100\n);\n// Initialize the name service with short durations for testing\ninitialize\n(\n&source,\n100\n,\n// price for 3 char\n50\n,\n// price for 4 char\n10\n,\n// default price\n1000\n,\n// min duration\n1000\n,\n// grace period\nstring::\nutf8\n(\nb\"https://test.com/\"\n),\nstring::\nutf8\n(\nb\"https://test.com/\"\n),\n);\n// Set initial block time\nstd::block::\nset_block_info\n(\n100\n,\n1000\n);\n// Step 1: Register all domains\nlet\ndomain_name1 = string::\nutf8\n(\nb\"abc\"\n);\nlet\ndomain_name2 = string::\nutf8\n(\nb\"def\"\n);\nlet\ndomain_name3 = string::\nutf8\n(\nb\"ghi\"\n);\nstd::debug::\nprint\n(&string::\nutf8\n(\nb\"\n\\n\n=== Registering all domains ===\"\n));\nregister_domain\n(&user1, domain_name1,\n1000\n);\nregister_domain\n(&user1, domain_name2,\n1000\n);\nregister_domain\n(&user1, domain_name3,\n1000\n);\n}\n\ninitiad move test --log_level trace --path ./usernames-module -f my_poc_just_register\n\nLine 359 is changed:\n\nstring::\nappend_utf8\n(&\nmut\nname,\nb\"-\"\n);\n//@audit was \":\"\n\nResult:\n\nRunning Move unit tests\n[debug] \"\n=== Registering all domains ===\"\n[debug] \"abc.init-1000\"\n[debug] \"def.init-1000\"\n[debug] \"ghi.init-1000\"\n[ PASS    ] 0x42cd8467b1c86e59bf319e5664a09b6b5840bb3fac64f5ce690b5041c530565a::usernames::my_poc_just_register\n\nChange the colon\n:\nto other separator.\n\nandrew (Initia) confirmed and commented\n:\n\nFixed this in\nthis commit\n.",
+      "severity": "high",
+      "reason": "Not found"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_expected_003",
+      "title": "Extending a domain\u2019s expiration even after the grace period impacts domain buyers",
+      "description": "Submitted by\np4y4b13\n\nhttps://github.com/code-423n4/2025-01-initia-move/blob/a96f5136c4808f6968564a4592fe2d6ac243a233/usernames-module/sources/name_service.move#L458\n\nThe\nname_service.move\nmodule allows users to register domain names. If anyone wants to register an already purchased domain, they can only do so once the\nexpiration_date + grace_period\nfor that domain has passed. The\nname_service.move\nmodule allows anyone to call\nextend_expiration\nfor any domain, which is a feature (according to sponsors).\n\nThe main issue is that the\nextend_expiration()\nfunction allows users to extend the expiration of a domain even after the grace period has ended, which is unintended behavior.\n\nAs a result, users, multi-sig owners of the actual domain name, or attackers can frontrun and attempt to call\nextend_expiration()\nafter the grace period has ended, even if other users are trying to buy the same domain name using\nregister_domain()\n.\n\nThis breaks a key invariant of the protocol, leading to genuine users being negatively impacted and experiencing a poor user experience.\n\nConsider the following attack scenario:\n\nAlice\nbuys the domain name\nvitalik\nfor a specific duration.\nThe expiration date and grace period for\nAlice\n\u2019s domain are completed.\nBob\nobserves that\nAlice\n\u2019s domain\nvitalik\nhas passed its\nexpiration_date + grace_period\n. So,\nBob\ncalls\nregister_domain\nto acquire the\nvitalik\ndomain name.\nAt the same time,\nAlice\ncalls\nextend_expiration\nfor the domain name\nvitalik\n.\nSince\nAlice\npays a higher gas fee, her transaction is picked and executed first.\nAs a result,\nAlice\nsuccessfully extends the expiration for her domain, and\nBob\n\u2019s transaction reverts.\nHowever,\nAlice\n\u2019s transaction should have been reverted since the grace period had already ended.\n\nTo mitigate this issue, prevent the\nextend_expiration()\nfunction from being called for domains after the completion of\nexpiration_date + grace_period\n.\n\npublic entry fun\nextend_expiration\n(\naccount: &signer,\ndomain_name:\nString\n,\nduration:\nu64\n,\n) acquires ModuleStore {\n....\nassert!\n(\nduration >= module_store.config.min_duration,\nerror::\ninvalid_argument\n(EMIN_DURATION),\n);\nlet\n(_height, timestamp) = block::\nget_block_info\n();\nlet\nexpiration_date = metadata::\nget_expiration_date\n(token);\n// @audit Only allow extend_expiration before the grace period\n+\nassert!\n(\n+           timestamp <= expiration_date + module_store.config.grace_period ,\n+           error::\ninvalid_argument\n(ECANT_EXTEND_EXPIRATION),\n+       );\n....\n}\n\nandrew (Initia) confirmed and commented\n:\n\nThank you for reporting. It is fixed on\nthis commit\n.",
+      "severity": "high",
+      "reason": "Not found"
+    }
+  ],
+  "undecided_findings": [],
+  "extra_findings": [
+    {
+      "id": "code4rena_initia-move_2025_04_tool_001",
+      "title": "Missing Access Control on update_config Function",
+      "description": "The update_config function only checks that the caller is @usernames, but this address is the module address itself, not an administrator address. In Move, modules cannot sign transactions, so this function can never be called by any signer. This makes the configuration permanently immutable after initialization, which could be a critical issue if parameter adjustments are needed. However, if the intent is that only chain-level operations can update config, the current implementation prevents any updates entirely.",
+      "severity": "high",
+      "original_id": "059a71ed982b79b8"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_tool_002",
+      "title": "Expired Domain Registration Race Condition",
+      "description": "In register_domain, when a domain name has expired but is still within the grace period, the function removes the old token from name_to_token table but does not remove the corresponding entries from name_to_addr and addr_to_name tables. This creates a state desynchronization where the expired domain may still be mapped to an address even though a new registration is allowed. An attacker could exploit this by registering an expired domain that still appears to be assigned to another user.",
+      "severity": "high",
+      "original_id": "36df5ca809c858e0"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_tool_004",
+      "title": "Missing Access Control on Operator Address Update Function",
+      "description": "The `update_operator_addr` function allows changing the operator address for a bridge/version combination, but it only verifies that the caller is the current operator. This creates a vulnerability where a compromised operator can permanently transfer control to an attacker's address without any additional safeguards. Once transferred, the original operator loses all control, and the attacker gains full operator privileges including commission updates. This is particularly dangerous because operators typically control significant funds or have privileged roles in bridge operations.",
+      "severity": "high",
+      "original_id": "0539f42a9d83c629"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_tool_005",
+      "title": "Stage-Based Commission Update Race Condition",
+      "description": "The commission update mechanism uses a simple stage number comparison (`stage > operator_info.last_changed_stage`) to prevent multiple updates per stage. However, this creates a race condition where an operator could potentially submit multiple commission updates for the same stage if they can get transactions included in the same block or in rapid succession before state updates are visible. An attacker could exploit this to bypass the commission change rate limits by submitting multiple small changes that collectively exceed the maximum allowed change when applied sequentially within the same stage window.",
+      "severity": "high",
+      "original_id": "a7a35517a3eaa8ae"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_tool_006",
+      "title": "Insufficient Validation in Commission Rate Change Calculation",
+      "description": "The commission change calculation uses absolute value difference but doesn't properly handle edge cases where the change rate limit equals zero. If `commission_max_change_rate` is set to zero during registration, the operator would be permanently locked at their initial commission rate, as any change (even to the same rate) would fail the change rate validation. Additionally, the calculation doesn't account for precision issues in BigDecimal comparisons that could allow microscopic changes to bypass validation when they should be rejected.",
+      "severity": "medium",
+      "original_id": "ffb1c270e75abe61"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_tool_007",
+      "title": "Incorrect Share Calculation in Slashing Scenarios",
+      "description": "The `share_to_locked_share` and `locked_share_to_share` functions use incorrect mathematical formulas when calculating share conversions during slashing events. The formulas assume a linear relationship between locked shares and actual shares, but this relationship breaks when slashing occurs because the total share amount decreases while locked shares remain constant. This creates a mathematical inconsistency where the conversion ratios become incorrect, leading to inaccurate accounting of user balances.\n\n**Mathematical Proof:**\n- Normal case: Total shares = 1000, Total locked shares = 1000, User locked shares = 100\n- After 10% slash: Total shares = 900, Total locked shares = 1000 (unchanged)\n- Using current formula: locked_share_to_share = (100 * 900) / 1000 = 90 shares\n- But actual user should have: 100 * (900/1000) = 90 shares (correct)\n- However, the reverse calculation breaks: share_to_locked_share = (90 * 1000) / 900 = 100 locked shares\n- This creates a circular dependency that doesn't account for the slash properly\n\n**Exploitation:** Attackers can exploit this by performing operations during or after slashing events when the ratio between total shares and total locked shares is distorted. The incorrect calculations can lead to either over-counting or under-counting of user balances.\n\n**Financial Impact:** Users may receive incorrect amounts during undelegation or redelegation operations, leading to either loss of funds (if under-counted) or protocol insolvency (if over-counted).",
+      "severity": "high",
+      "original_id": "fedb0a76efd41b9e"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_tool_008",
+      "title": "State Desynchronization in Redelegation Hook",
+      "description": "The `redelegate_hook` function contains a critical state desynchronization vulnerability where the calculation of share differences doesn't properly account for the actual state changes that occurred during the redelegation. The function calculates share differences based on before/after comparisons but doesn't properly handle cases where multiple state changes occur simultaneously or where the underlying staking module's state changes unexpectedly.\n\n**Mathematical Proof:**\n- User has 1000 shares with validator A at time T1\n- Redelegates 500 shares to validator B at time T2\n- Between T1 and T2, a slash occurs reducing total shares by 10%\n- Current code: share_diff = share_before (1000) - share_after (450) = 550\n- But actual redelegated amount should be 500 * 0.9 = 450\n- This creates a 100 share discrepancy\n\n**Exploitation:** Attackers can front-run redelegation operations with slashing proposals or other state-changing operations to create timing attacks that exploit the desynchronization between the expected and actual state changes.\n\n**Financial Impact:** Users may lose funds due to incorrect accounting during redelegation operations, or the protocol may become insolvent if the desynchronization leads to over-issuance of shares.",
+      "severity": "high",
+      "original_id": "751436c02fb911f0"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_tool_009",
+      "title": "Missing Validation in Batch Extend Function",
+      "description": "The `batch_extend` function lacks proper validation of input vector lengths and doesn't properly handle edge cases where the vectors have different lengths or contain invalid data. The validation check uses incorrect logical operators that don't properly enforce the required constraints.\n\n**Mathematical Proof:**\n- Current validation: len == length1 || len == length2 || len == length3 || len == length4\n- This means if ANY one vector matches the metadata length, the check passes\n- But it should require ALL vectors to have the same length: len == length1 && len == length2 && len == length3 && len == length4\n- Example: metadata length = 3, amounts length = 5, others length = 3\n- Current check: 3 == 3 (true) so validation passes incorrectly\n\n**Exploitation:** Attackers can provide malformed batch extend requests with mismatched vector lengths, potentially causing the function to process incorrect data pairs or skip validation for certain parameters.\n\n**Financial Impact:** Users may have their delegations extended with incorrect parameters, leading to loss of funds or locking assets for incorrect time periods.",
+      "severity": "high",
+      "original_id": "b64c9ab856a438cf"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_tool_010",
+      "title": "Integer Overflow in Voting Power Calculation",
+      "description": "The get_voting_power and get_customized_voting_power functions accumulate voting power in a u64 variable without overflow protection. When processing large delegations or multiple delegations, the total_voting_power can overflow, resulting in incorrect voting power calculations that could be exploited for governance manipulation.\n\nMathematical Proof:\n- Maximum u64 value: 18,446,744,073,709,551,615\n- Example: If a delegator has 10 delegations each with 2,000,000,000,000,000,000 voting power\n- Calculation: 10 * 2,000,000,000,000,000,000 = 20,000,000,000,000,000,000\n- This exceeds u64 max, causing overflow to 20,000,000,000,000,000,000 - 18,446,744,073,709,551,615 = 1,553,255,926,290,448,385\n- Actual voting power would be incorrectly reported as 1.55 quintillion instead of 20 quintillion\n\nExploitation Scenario: An attacker with large delegations could have their voting power significantly undercounted due to overflow, or could manipulate delegation amounts to cause specific overflow patterns that give them disproportionate voting power.\n\nFinancial Impact: Governance manipulation where attackers can control protocol decisions despite having less actual stake, or legitimate large stakeholders losing their voting power representation.",
+      "severity": "high",
+      "original_id": "b133a591300dc9fd"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_tool_011",
+      "title": "Missing Input Validation in Voting Power Calculation",
+      "description": "The get_voting_power and get_customized_voting_power functions do not validate that denoms exist in the weight_map before calling simple_map::borrow. If a delegation contains a denom not present in the voting_power_weights, the borrow will abort, causing the entire voting power calculation to fail.\n\nMathematical Proof:\n- Weight map contains: {\"uatom\": 1.0, \"uosmo\": 0.5}\n- Delegation contains: [{\"denom\": \"uatom\", \"amount\": 1000}, {\"denom\": \"ujuno\", \"amount\": 2000}]\n- When processing \"ujuno\", simple_map::borrow(&weight_map, \"ujuno\") will abort since \"ujuno\" is not in the map\n- Entire voting power calculation fails for that delegator\n\nExploitation Scenario: An attacker could create a delegation with an unknown denom to cause voting power calculations to fail for specific addresses, potentially disrupting governance processes or causing denial of service for voting functionality.\n\nFinancial Impact: Governance disruption where legitimate stakeholders cannot vote, potentially allowing attackers to manipulate protocol decisions through denial of service attacks.",
+      "severity": "high",
+      "original_id": "f7c477da74c29b46"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_tool_012",
+      "title": "Division by Zero in mul_div Functions",
+      "description": "The mul_div_u64 and mul_div_u128 functions perform division without checking if the denominator (c) is zero. If c = 0, the division will cause a runtime abort.\n\nMathematical Proof:\n- mul_div_u64(a, b, 0) attempts: (a * b) / 0\n- Division by zero is mathematically undefined and will cause program abort\n- Example: mul_div_u64(100, 50, 0) \u2192 (5000 / 0) \u2192 abort\n\nExploitation Scenario: An attacker could call these utility functions with c = 0 to cause transaction failures in any contract that uses these functions without proper input validation. This could be used to disrupt protocol operations that rely on these mathematical utilities.\n\nFinancial Impact: Denial of service attacks on contracts using these utility functions, potentially disrupting critical protocol operations like reward calculations, fee distributions, or voting power computations.",
+      "severity": "high",
+      "original_id": "d6c4e6e7f672281c"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_tool_013",
+      "title": "Infinite Loop Risk in Pagination Logic",
+      "description": "The get_delegations function has a pagination loop that relies on external API responses. If the stargate query returns inconsistent pagination data (e.g., next_key always present but no new data), the function could enter an infinite loop, consuming all gas and causing transaction failure.\n\nMathematical Proof:\n- Loop condition: if (option::is_none(&pagination_res.next_key)) { break }\n- If external API returns same next_key repeatedly, loop continues indefinitely\n- Gas consumption grows linearly with each iteration until maximum gas limit\n\nExploitation Scenario: An attacker could manipulate the external stargate query response (if they control the node) to return inconsistent pagination data, causing transactions that call get_delegations to fail due to gas exhaustion.\n\nFinancial Impact: Denial of service for voting power calculations and governance functionality, potentially allowing attackers to disrupt protocol operations during critical governance periods.",
+      "severity": "high",
+      "original_id": "7879fdc60ca7386c"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_tool_014",
+      "title": "Integer Overflow in TVL Average Calculation",
+      "description": "The TVL average calculation uses u128 for intermediate calculations but stores the result in u64. When the intermediate calculation exceeds u64::MAX (18,446,744,073,709,551,615), the cast to u64 will truncate the value, leading to incorrect average TVL calculations. This can be exploited by attackers to manipulate the average TVL value.\n\nMathematical Proof:\n- Let snapshot_count = 1,000,000,000\n- Let average_tvl = 18,000,000,000,000,000 (close to u64::MAX)\n- Let new_tvl = 1,000,000,000,000\n- Intermediate calculation: (1,000,000,000 * 18,000,000,000,000,000 + 1,000,000,000,000) = 18,000,000,000,000,000,000,000,000,000\n- This value exceeds u64::MAX and when cast to u64 will be truncated to a much smaller value\n\nExploitation: An attacker can repeatedly add snapshots with large TVL values to cause overflow, then add a normal TVL snapshot to trigger the truncation, resulting in an artificially low average TVL that doesn't reflect the actual protocol state.",
+      "severity": "high",
+      "original_id": "8a4b4959a51af479"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_tool_015",
+      "title": "Missing Validation of Bridge IDs and TVLs Vector Lengths",
+      "description": "The add_snapshot function accepts two vectors (bridge_ids and tvls) but does not validate that they have the same length. If the vectors have different lengths, vector::enumerate_ref will panic when trying to access an index that doesn't exist in the tvls vector.\n\nMathematical Proof:\n- bridge_ids length = 3, tvls length = 2\n- When i=2, vector::borrow(&tvls, 2) will panic since tvls only has 2 elements\n\nExploitation: An attacker calling add_snapshot (if they gain access) or a bug in the calling code can provide mismatched vector lengths, causing the transaction to fail and potentially disrupting TVL snapshot functionality. This could prevent proper TVL tracking and affect protocol operations that rely on accurate TVL data.",
+      "severity": "medium",
+      "original_id": "f537347d52dbba2c"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_tool_016",
+      "title": "Precision Loss in TVL Average Calculation",
+      "description": "The TVL average calculation uses integer division which truncates fractional parts. This can lead to cumulative precision loss over multiple snapshots, especially when TVL values are small relative to the snapshot count.\n\nMathematical Proof:\n- Snapshot 1: TVL = 1000, count = 1, average = 1000\n- Snapshot 2: TVL = 1001, count = 2, average = (1*1000 + 1001)/2 = 2001/2 = 1000 (truncated from 1000.5)\n- Snapshot 3: TVL = 1002, count = 3, average = (2*1000 + 1002)/3 = 3002/3 = 1000 (truncated from 1000.666)\n- After 1000 snapshots with gradually increasing TVL, the average will be significantly lower than the true mathematical average\n\nExploitation: While not directly exploitable for fund theft, this precision loss can lead to inaccurate TVL reporting which could affect protocol decisions, reward calculations, or risk assessments that depend on precise TVL measurements.",
+      "severity": "medium",
+      "original_id": "a3b428634e14f97b"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_tool_017",
+      "title": "Time-Based Snapshot Bypass When Stage Doesn't Increase",
+      "description": "The is_snapshot_addable function allows snapshots if either the stage has increased OR enough time has passed. An attacker could exploit this by ensuring the stage doesn't increase while repeatedly adding snapshots after the time interval, potentially manipulating the average TVL calculation.\n\nMathematical Proof:\n- Current state: last_snapshot_stage = 10, last_snapshot_time = T\n- Attacker waits until T + snapshot_interval\n- Attacker calls add_snapshot with stage = 10 (same as last_snapshot_stage)\n- is_addable_stage = false (10 > 10 is false)\n- is_addable_time = true (current_time >= T + snapshot_interval)\n- Snapshot is added even though stage hasn't increased\n\nExploitation: An attacker could repeatedly add snapshots at the same stage by waiting for the time interval, artificially inflating the snapshot count and manipulating the weighted average calculation. This could be used to dilute the impact of legitimate TVL changes or create misleading average TVL values.",
+      "severity": "medium",
+      "original_id": "7868d158a2031ea9"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_tool_018",
+      "title": "Record Vector Desynchronization in update_records Function",
+      "description": "The update_records function contains a critical flaw where the record_keys and record_values vectors can become desynchronized when updating existing records. The function iterates through input keys and updates corresponding values, but when a key already exists, it updates the value at the found index. However, if multiple updates occur in the same transaction and keys are removed/added during iteration, the indices can shift, causing the wrong value to be updated for subsequent keys.\n\nMathematical Proof:\n- Initial state: record_keys = [\"key1\", \"key2\", \"key3\"], record_values = [\"val1\", \"val2\", \"val3\"]\n- Input: record_keys = [\"key2\", \"key1\"], record_values = [\"new_val2\", \"new_val1\"]\n- First iteration (index=0): Finds \"key2\" at index=1, updates record_values[1] to \"new_val2\"\n- Second iteration (index=1): Finds \"key1\" at index=0, updates record_values[0] to \"new_val1\"\n- Result: record_keys = [\"key1\", \"key2\", \"key3\"], record_values = [\"new_val1\", \"new_val2\", \"val3\"] - CORRECT\n\nNow with deletion during iteration:\n- Input: record_keys = [\"key2\", \"key3\"], record_values = [\"new_val2\", \"new_val3\"]\n- First iteration: Finds \"key2\" at index=1, updates record_values[1] to \"new_val2\"\n- Second iteration: Finds \"key3\" at index=2, but if \"key2\" was removed, indices shift: \"key3\" is now at index=1\n- Function would incorrectly update record_values[2] (out of bounds or wrong value) instead of record_values[1]\n\nExploitation: An attacker can craft a sequence of record updates that exploit the shifting indices to corrupt the metadata storage, potentially overwriting critical records or causing out-of-bounds access.\nFinancial Impact: Metadata corruption could lead to incorrect token information, broken integrations, or loss of important record data that users rely on for protocol functionality.",
+      "severity": "high",
+      "original_id": "18bdb740001f41b2"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_tool_019",
+      "title": "Missing Input Validation in update_records Function",
+      "description": "The update_records function fails to validate that the input record_keys vector does not contain duplicate keys. When duplicate keys are provided, the function will process them sequentially, but the behavior is undefined and can lead to inconsistent state.\n\nMathematical Proof:\n- Input: record_keys = [\"key1\", \"key1\"], record_values = [\"val1\", \"val2\"]\n- First iteration: Finds \"key1\" at index=0, updates record_values[0] to \"val1\"\n- Second iteration: Finds \"key1\" at index=0 again, updates record_values[0] to \"val2\"\n- Result: The final value for \"key1\" will be \"val2\", but the intended behavior is unclear\n- If the first update was meant to be temporary or conditional, the second update overwrites it unexpectedly\n\nExploitation: An attacker can submit duplicate keys to cause unpredictable behavior in the metadata storage. This could be used to bypass intended update logic or create inconsistent state that other functions rely on.\nFinancial Impact: Inconsistent metadata state could lead to incorrect token information being returned to users or integrated systems, potentially causing financial losses if the metadata is used for critical protocol operations.",
+      "severity": "medium",
+      "original_id": "4ae5279430d5c8c5"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_tool_020",
+      "title": "Potential Integer Overflow in Loop Counters",
+      "description": "The update_records and delete_records functions use integer counters in while loops without overflow protection. If an attacker can provide extremely large vectors (close to u64::MAX), the index counter could overflow, causing the loop to terminate early or behave unexpectedly.\n\nMathematical Proof:\n- MAX_RECORD = 10, so normal usage is safe\n- However, the functions don't validate that input vector lengths are reasonable\n- If an attacker somehow bypasses the MAX_RECORD check or the check is removed in future versions:\n- index = u64::MAX - 1, then index + 1 = u64::MAX, then index + 1 = 0 (overflow)\n- Loop would terminate unexpectedly or continue indefinitely depending on comparison\n\nExploitation: While currently protected by MAX_RECORD=10, this represents a maintenance hazard. If MAX_RECORD is increased in the future without adding overflow checks, an attacker could exploit this.\nFinancial Impact: Potential denial of service or incomplete processing of records if overflow occurs, leading to corrupted metadata state.",
+      "severity": "medium",
+      "original_id": "4e29a51e9f632c8f"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_tool_021",
+      "title": "Unauthorized Withdrawal via Missing Access Control",
+      "description": "The `withdraw` function is marked as `public(friend)` but is only accessible to the `vip::vesting` module. However, there is no validation that the caller is authorized to withdraw funds beyond the `reward_per_stage > 0` check. If the `vip::vesting` module has a vulnerability or if another module is added as a friend in the future, it could allow unauthorized withdrawals. The function directly transfers funds from the vault without verifying the withdrawal request corresponds to legitimate vesting claims.",
+      "severity": "high",
+      "original_id": "dfb0c3aa42e2bbd5"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_tool_022",
+      "title": "Incorrect Parameter Usage in Withdraw Function",
+      "description": "The `withdraw` function calls `primary_fungible_store::withdraw` with the parameter `reward_metadata()` which returns the metadata for \"uinit\". However, the function parameter is named `amount`, but the assertion checks `module_store.reward_per_stage > 0`. This suggests that the intended behavior might be to withdraw based on `reward_per_stage` rather than a direct `amount` parameter. An attacker could call this function (if accessible) with any amount up to the vault's balance, potentially draining funds not tied to actual rewards.",
+      "severity": "high",
+      "original_id": "9f6ce56809eca9e0"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_tool_023",
+      "title": "Missing Balance Check in Withdraw Function",
+      "description": "The `withdraw` function does not check if the vault has sufficient balance before attempting to withdraw the specified `amount`. If `amount` exceeds the vault's balance, the `primary_fungible_store::withdraw` call will fail, but this could be exploited in a reentrancy-like attack if the vault interacts with other contracts or if the failure leads to an inconsistent state. While Move's asset semantics may prevent direct reentrancy, the lack of a balance check is a logical flaw.",
+      "severity": "medium",
+      "original_id": "e31d8e65e6443113"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_tool_024",
+      "title": "Potential Integer Overflow in Reward Calculation",
+      "description": "The `reward_per_stage` is stored as a `u64` and used in calculations. While the code does not explicitly perform arithmetic that could overflow (e.g., multiplication or addition with large values), if the `vip::vesting` module uses this value in calculations (e.g., multiplying by a large number of stages), an overflow could occur. This is a potential issue if the vesting logic is not carefully implemented.",
+      "severity": "medium",
+      "original_id": "8103125f6e1ff325"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_tool_025",
+      "title": "Integer Division Rounding Error in User Vesting Calculation",
+      "description": "The `create_user_vesting` function calculates `vest_max_amount` using integer division: `vesting_reward_amount / (claim_info.end_stage - claim_info.start_stage)`. This division can round down to zero when the vesting period is longer than the reward amount, causing users to receive zero vested rewards per stage despite having a valid vesting position. Attackers can exploit this by creating vesting schedules with small rewards over long periods, effectively locking rewards permanently.",
+      "severity": "high",
+      "original_id": "f2be4652dc009e20"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_tool_026",
+      "title": "Incorrect Vesting Calculation in Operator Reward Claim",
+      "description": "In `batch_claim_operator_reward`, the calculation `utils::mul_div_u64(operator_vesting.initial_reward, stage_diff, vesting_period) - vested_amount` can produce incorrect results when `vested_amount` exceeds the calculated vested amount. This happens because `vested_amount` tracks cumulative withdrawals, but the formula subtracts it from the current stage's proportional amount without ensuring the subtraction is valid. This can lead to underflow or incorrect reward distribution.",
+      "severity": "high",
+      "original_id": "0ea96ab821ba70ec"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_tool_027",
+      "title": "Missing Access Control on Critical Functions",
+      "description": "Multiple functions like `withdraw_vesting`, `batch_claim_user_reward`, and `batch_claim_operator_reward` are marked as `public(friend)` but lack explicit access control checks beyond friend module restrictions. If the friend module `vip::vip` has vulnerabilities or improperly authorized callers, attackers could directly call these functions to manipulate vesting positions and withdraw funds.",
+      "severity": "high",
+      "original_id": "9c097a2a661b661e"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_tool_028",
+      "title": "State Desynchronization in User Vesting Finalization",
+      "description": "In `batch_claim_previous_user_vestings`, when a vesting is finalized (remaining_reward == 0), it's removed from both the local vector and the table. However, if multiple conditions trigger finalization simultaneously (e.g., stage end and zero balance), the state might not be properly synchronized, potentially leaving orphaned entries or double-removal issues.",
+      "severity": "medium",
+      "original_id": "e8503fd16a87c0bc"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_tool_029",
+      "title": "Incorrect Reward Distribution Due to Bridge Version Mismatch",
+      "description": "The `fund_reward` function uses `get_whitelisted_bridge_ids_internal` to get bridge IDs and versions, but then passes these to `split_reward` which calls `calc_operator_and_user_reward_amount` using the version from the bridge_ids/versions vectors. However, when calculating balance shares in `calculate_balance_share`, it iterates over bridge_ids without corresponding versions, and when calculating weight shares in `calculate_weight_share`, it iterates over registered bridges which may have different versions than those in the bridge_ids vector. This can lead to using incorrect versions when calculating operator commissions, resulting in incorrect reward distribution.\n\nMathematical Proof:\n- Suppose Bridge ID 1 has version 1 with commission rate 10% and version 2 with commission rate 20%\n- If the current active version is 2, but the system incorrectly uses version 1 for commission calculation\n- For a reward amount of 1000 units:\n  - Correct calculation (version 2): operator gets 200, user gets 800\n  - Incorrect calculation (version 1): operator gets 100, user gets 900\n- This results in a 100 unit discrepancy per reward distribution\n\nExploitation: An attacker could manipulate bridge registration/deregistration timing to cause version mismatches during reward distribution.\n\nFinancial Impact: Operators receive incorrect commission amounts, and users receive incorrect reward amounts, leading to financial losses for one party.",
+      "severity": "high",
+      "original_id": "871a1d3c814ee7e0"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_tool_030",
+      "title": "Incorrect Stage Data Key Encoding Leading to Data Corruption",
+      "description": "Multiple functions use `table_key::encode_u64(stage)` to create keys for the stage_data table, but the `get_last_submitted_stage` function iterates through the stage_data table using vector<u8> keys directly without proper decoding. This can lead to incorrect stage identification when there are multiple stages with similar encoded values.\n\nMathematical Proof:\n- Stage numbers are encoded as 8-byte vectors\n- If stages 1 and 257 are both present:\n  - encode_u64(1) = [1, 0, 0, 0, 0, 0, 0, 0]\n  - encode_u64(257) = [1, 1, 0, 0, 0, 0, 0, 0]\n- The iteration logic in `get_last_submitted_stage` may incorrectly match stages due to partial key matching\n\nExploitation: An attacker could exploit this by creating scenarios where stage keys are misinterpreted, leading to incorrect reward calculations or claims.\n\nFinancial Impact: Users may be able to claim rewards from incorrect stages, or legitimate claims may be denied due to stage identification errors.",
+      "severity": "high",
+      "original_id": "5eebf80b3c38dece"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_tool_031",
+      "title": "Insufficient Validation in Batch Claim Functions",
+      "description": "The `batch_claim_user_reward_script` function accepts vectors of stages, merkle proofs, and L2 scores without sufficient validation that these correspond to the same logical context. The function assumes the vectors are properly aligned, but an attacker could provide mismatched data.\n\nMathematical Proof:\n- Function receives: stages = [1, 2], merkle_proofs = [proof1, proof2], l2_scores = [score1, score2]\n- Attacker could provide: stages = [1, 2], merkle_proofs = [proof2, proof1], l2_scores = [score1, score2]\n- This would cause stage 1 to be validated with proof2 and score1, which may pass validation incorrectly\n- Result: User claims rewards for incorrect stages or amounts\n\nExploitation: An attacker could manipulate the batch claim to receive more rewards than entitled or claim rewards from stages they shouldn't have access to.\n\nFinancial Impact: Protocol loses funds through incorrect reward distribution to users who receive more than their entitled share.",
+      "severity": "high",
+      "original_id": "df8d7236e69ad9b7"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_tool_032",
+      "title": "Division Rounding Error in Reward Calculation",
+      "description": "The `split_reward_with_share_internal` function uses `bigdecimal::mul_by_u64_truncate` which can lead to rounding errors when distributing rewards. When rewards are small relative to the number of bridges, this can result in lost funds due to rounding down to zero.\n\nMathematical Proof:\n- Suppose total reward amount = 100, share_ratio = 0.001 (0.1%)\n- Calculation: 100 * 0.001 = 0.1, which truncates to 0\n- For a bridge with small share, it receives 0 reward instead of its fair share\n- If multiple bridges have small shares, the total undistributed reward accumulates\n\nExploitation: An attacker could register many small bridges to fragment the reward pool, causing rounding errors that leave rewards undistributed.\n\nFinancial Impact: Rewards that should be distributed remain locked in the contract, representing permanent loss of value for eligible participants.",
+      "severity": "medium",
+      "original_id": "f69c21a957488955"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_tool_033",
+      "title": "Voting Power Calculation Error Due to Variable Shadowing",
+      "description": "In the `get_voting_power` function, the `voting_power` variable is shadowed within the `vector::for_each_ref` loop for lock staking calculations. This causes the lock staking voting power to be incorrectly calculated because the inner `voting_power` variable shadows the outer one, leading to incorrect accumulation of voting power from lock staking delegations.",
+      "severity": "high",
+      "original_id": "c0be5b5da3a37cc1"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_tool_034",
+      "title": "Incorrect Weight Sum Validation in Vote Function",
+      "description": "The `vote` function incorrectly validates the sum of weights by using `bigdecimal::le(weight_sum, bigdecimal::one())` instead of checking for equality to 1. This allows users to vote with less than 100% of their voting power, potentially leaving voting power unused or enabling manipulation of vote distribution.",
+      "severity": "high",
+      "original_id": "5351f040c3c4b2be"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_tool_035",
+      "title": "Division by Zero in Execute Proposal",
+      "description": "The `execute_proposal_internal` function divides by `proposal.total_tally` without ensuring it is non-zero. If no votes are cast, `proposal.total_tally` is zero, causing a division by zero error when calculating weights for bridges, which would halt proposal execution.",
+      "severity": "high",
+      "original_id": "73672b5f1700f93b"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_tool_036",
+      "title": "Incorrect Cycle Start Time Calculation",
+      "description": "The `calculate_cycle_start_time` function calculates `skiped_cycle` as `(time - module_store.cycle_end_time) / module_store.cycle_interval`, which can lead to incorrect cycle start times if the division truncates, causing cycles to start later than intended and disrupting the voting schedule.",
+      "severity": "medium",
+      "original_id": "5182ad7ff07b0c51"
+    },
+    {
+      "id": "code4rena_initia-move_2025_04_tool_037",
+      "title": "Missing Access Control on Execute Proposal Function",
+      "description": "The `execute_proposal` function lacks access control, allowing any user to trigger proposal execution. While the function checks timing conditions, unauthorized execution could lead to premature or delayed proposal execution, affecting vote outcomes.",
+      "severity": "medium",
+      "original_id": "f90efc01a3bec512"
+    }
+  ],
+  "input_tokens": 22993,
+  "output_tokens": 725,
+  "cached_tokens": 282
+}

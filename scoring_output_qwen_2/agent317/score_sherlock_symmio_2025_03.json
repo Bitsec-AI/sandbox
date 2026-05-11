@@ -1,0 +1,148 @@
+{
+  "project": "sherlock_symmio_2025_03",
+  "agent": "agent317",
+  "status": "success",
+  "timestamp": "2026-04-09T12:56:34.308464",
+  "elapsed_seconds": 3.7,
+  "total_expected": 1,
+  "total_found": 17,
+  "true_positives": 1,
+  "false_negatives": 0,
+  "false_positives": 16,
+  "detection_rate": 1.0,
+  "precision": 0.058823529411764705,
+  "f1_score": 0.1111111111111111,
+  "matched_findings": [
+    {
+      "id": "sherlock_symmio_2025_03_expected_000",
+      "expected": "USDC rewards will not be distributed if _-",
+      "matched": "Reward Calculation Precision Loss Leading to Permanent Fund Loss",
+      "confidence": 0.9,
+      "justification": "Finding 0 describes a precision loss vulnerability in reward calculations for tokens with low decimals, which aligns with the expected vulnerability about USDC rewards not being distributed due to decimal mismatch. Both involve incorrect handling of token decimals leading to reward loss.",
+      "severity": "high",
+      "expected_description": "Source: https://github.com/sherlock-audit/2025-03-symm-io-stacking-judging/issues/575\n\n**Summary:**\nhttps://github.com/sherlock-audit/2025-03-symm-io-stacking/blob/main/token/contr acts/staking/Symm Staking.sol#L 402-L 423 _update Rewards Statescanbetriggeredasoftenaseachblock (2 seconds) via deposit/withdraw/claim/notify Reward Amount e.g. ifthere's 1209.6 e 6 USDCrewardsforoneweek (604800 seconds) https://github.com/sherlock-audit/2025-03-symm-io-stacking/blob/main/token/contr acts/staking/Symm Staking.sol#L 374 rate=1209_600000/604800=2000\u201dusdcunits\u201dpersecond https://github.com/sherlock-audit/2025-03-symm-io-stacking/blob/main/token/contr acts/staking/Symm Staking.sol#L 194-L 202 if SYMMtotalstakedsupplyis 1_000_000 e 18 (~26560 usd), andwecall depositeach block, then per Token Storedwillbeincreasedby: 2*2000*1 e 18/1_000_000 e 18=4_000/1_000_000=0 Therefore, per Token Stored willnotincrease, but last Updatedwillbeincreased, therefore userswillnotreceiveany USDCrewardsforstaking. Inthisparticularexample, triggering _update Rewards States oncein 249 blockswouldbe sufficient, asitwouldstillresultinrewardsroundingdowntozero. Root Cause Lackofupscalingfortokenswithlessthan 18 decimalsforrewardcalculations. 5 Attack Path 1. Attackercallsdeposit/withdraw/notify Reward Amountwithanynon-zeroamount everyblock (orlessoftenaslongasthecalculationwillstillrounddowntozero)\n\n**Impact:**\nHigh: stakersdonotreceiverewardsintokenswithlowdecimals (e.g. USDC, USDT). Po C 1. SYMMtotalstakedsupply=1_000_000 e 18 2. notify Reward Amount iscalledwith 1209.6 USDC 3.griefercalls deposit/withdraw 1 weiof SYMMeach 249 blocksfor 1 week 4. USDCrewardsarestuckinthecontract, insteadofbeingdistributedtostakers (but canberescuedbyadmin) Mitigation Introduce 1 e 12 multiplierforrewardcalculation, anddividetheaccumulatedrewardsby 1 e 12 whentheyarebeingclaimed.",
+      "found_description": "The reward calculation system has a critical precision loss vulnerability where rewards for tokens with less than 18 decimals can be permanently lost due to improper scaling factor application. The issue occurs because rewards are stored with 18-decimal precision but when claimed, they're divided by the scaling factor. This division can round down to zero for small reward amounts, causing permanent loss of user rewards.\n\nMathematical Proof:\n- Token with 6 decimals (USDC): scaling factor = 10^(18-6) = 10^12\n- User earns 500 rewards (in 18-decimal precision, representing 0.0000000005 tokens)\n- When claiming: reward = 500 / 10^12 = 0 (due to integer division rounding down)\n- The 500 reward units are set to zero but the user receives nothing\n\nExploitation Scenario:\n1. Attacker stakes a small amount to earn minimal rewards\n2. For tokens with low decimals (6-12), even normal users can accumulate rewards that round to zero\n3. When claiming, rewards are permanently lost due to rounding to zero\n\nFinancial Impact: Users permanently lose their earned rewards for tokens with less than 18 decimals. The funds remain locked in the contract.",
+      "found_id": "9b76c8afc6bb7da0",
+      "tool_finding_index": 9
+    }
+  ],
+  "missed_findings": [],
+  "undecided_findings": [],
+  "extra_findings": [
+    {
+      "id": "sherlock_symmio_2025_03_tool_000",
+      "title": "State Desynchronization in Allocation Updates",
+      "description": "The setBatchAllocations function updates totalAllocation by subtracting old user allocations and adding new ones, but this can lead to state desynchronization when users have already claimed their allocations. The function doesn't account for claimed amounts, allowing the totalAllocation to become inconsistent with actual claimable amounts. This enables attackers to manipulate the allocation system by repeatedly setting allocations for addresses that have already claimed, effectively increasing the totalAllocation beyond legitimate limits.\n\nMathematical Proof:\n1. Initial state: userAllocations[attacker] = 100e18, totalAllocation = 100e18\n2. Attacker claims: userAllocations[attacker] becomes 0, totalAllocation remains 100e18\n3. Admin calls setBatchAllocations with attacker's address and 100e18 again:\n   - totalAllocation = 100e18 - 0 (current allocation) + 100e18 = 200e18\n4. Attacker claims again: receives another 100e18 * mintFactor tokens\n5. Repeat to inflate totalAllocation and extract unlimited tokens\n\nExploitation: An attacker can work with a compromised SETTER_ROLE to repeatedly set allocations for addresses that have already claimed, bypassing the MAX_ISSUABLE_TOKEN limit and minting unlimited tokens.\n\nFinancial Impact: Protocol insolvency through unlimited token minting, devaluing the token and stealing value from all holders.",
+      "severity": "critical",
+      "original_id": "4bbb3c1634588e03"
+    },
+    {
+      "id": "sherlock_symmio_2025_03_tool_001",
+      "title": "Mathematical Precision Loss in Claim Calculation",
+      "description": "The claim function uses integer division (userAllocations[msg.sender] * mintFactor) / 1e18 which can result in precision loss and rounding down to zero for small allocations. When mintFactor is less than 1e18, users with small allocations may receive zero tokens while still having their allocation reset to zero and contributing to adminClaimableAmount.\n\nMathematical Proof:\n1. Let mintFactor = 0.5e18 (50% of allocation)\n2. User allocation = 1 (1 wei, the smallest unit)\n3. amountToClaim = (1 * 0.5e18) / 1e18 = 0.5 \u2192 rounds down to 0\n4. User receives 0 tokens but:\n   - adminClaimableAmount increases by 1 (full allocation minus 0)\n   - userAllocations resets to 0\n   - User permanently loses their allocation\n\nExploitation: Users with small allocations (common in airdrop scenarios) will lose their entire allocation due to rounding errors. The protocol effectively steals from small allocation holders.\n\nFinancial Impact: Permanent loss of user funds for holders of small allocations. The lost value is transferred to the adminClaimableAmount pool.",
+      "severity": "high",
+      "original_id": "3432668542a6cabc"
+    },
+    {
+      "id": "sherlock_symmio_2025_03_tool_002",
+      "title": "Incorrect Admin Claimable Amount Calculation",
+      "description": "The claim function calculates adminClaimableAmount as (userAllocations[msg.sender] - amountToClaim), but this formula doesn't account for the mathematical relationship between the values. Since amountToClaim = (allocation * mintFactor)/1e18, the admin portion should be allocation * (1e18 - mintFactor)/1e18. The current calculation can lead to incorrect accounting when there are rounding issues.\n\nMathematical Proof:\n1. Let allocation = 3, mintFactor = 0.5e18\n2. amountToClaim = (3 * 0.5e18) / 1e18 = 1.5 \u2192 rounds down to 1\n3. Current calculation: adminClaimableAmount += 3 - 1 = 2\n4. Correct calculation should be: 3 * (1e18 - 0.5e18)/1e18 = 1.5 \u2192 rounds down to 1\n5. Difference: Protocol over-allocates 1 extra token to admin pool\n\nExploitation: Systematic over-allocation to the admin pool at the expense of user claims, especially noticeable with small allocations and specific mintFactor values.\n\nFinancial Impact: Users receive less than their entitled share while the admin pool receives more than intended, effectively stealing from users.",
+      "severity": "high",
+      "original_id": "33917cefb9a5f009"
+    },
+    {
+      "id": "sherlock_symmio_2025_03_tool_003",
+      "title": "Airdrop State Desynchronization Allows Permanent Fund Loss",
+      "description": "The contract tracks airdrop progress using three state variables: totalConfiguredAirdrop, totalProcessedAirdrop, and nextAirdropIndex. However, these variables can become desynchronized when clearAirdropConfig() is called during an active airdrop, leading to permanent loss of funds. When clearAirdropConfig() is called, it resets all state variables to zero, but the contract may still hold SYMM tokens that were intended for the airdrop. If the owner then configures a new airdrop and calls transferAirdrops(), the contract will transfer tokens from the new configuration, but the totalProcessedAirdrop will start counting from zero, ignoring the previously processed amounts. This creates a discrepancy between the actual token balance and the accounting.\n\nMathematical Proof:\n1. Initial state: Contract holds 1000 SYMM tokens\n2. Configure airdrop: 500 SYMM to 5 recipients (100 each)\n3. Process 2 batches: 200 SYMM transferred, totalProcessedAirdrop = 200\n4. Owner calls clearAirdropConfig(): totalConfiguredAirdrop = 0, totalProcessedAirdrop = 0, nextAirdropIndex = 0\n5. Contract still holds 800 SYMM tokens (1000 - 200)\n6. Configure new airdrop: 300 SYMM to 3 recipients (100 each)\n7. Process new airdrop: 300 SYMM transferred, totalProcessedAirdrop = 300\n8. Contract balance: 500 SYMM (800 - 300) but accounting shows all airdrops completed\n9. The 500 SYMM difference is permanently locked in the contract\n\nExploitation: An owner could accidentally call clearAirdropConfig() during an active airdrop, then configure a smaller airdrop. The difference between the actual token balance and the accounted amount becomes permanently inaccessible.\n\nFinancial Impact: Permanent loss of SYMM tokens locked in the contract. The amount lost equals the difference between the actual token balance and the sum of totalProcessedAirdrop across all configurations.",
+      "severity": "high",
+      "original_id": "c1af6be62abb7052"
+    },
+    {
+      "id": "sherlock_symmio_2025_03_tool_004",
+      "title": "Insufficient SYMM Token Balance Validation Allows Overdraft",
+      "description": "The transferAirdrops() function does not validate that the contract has sufficient SYMM token balance before executing transfers. While the function checks if there's an active airdrop configuration, it doesn't verify that the contract holds enough SYMM tokens to cover the batch amount. This can lead to failed transfers or inconsistent state if the contract's token balance is less than the configured airdrop amount.\n\nMathematical Proof:\n1. Contract holds 100 SYMM tokens\n2. Configure airdrop: 200 SYMM to 2 recipients (100 each)\n3. Call transferAirdrops(2): The function will attempt to transfer 200 SYMM\n4. First transfer of 100 SYMM succeeds, reducing balance to 0\n5. Second transfer fails due to insufficient balance\n6. totalProcessedAirdrop is incremented by 200 (batchAmount), but only 100 was actually transferred\n7. State becomes inconsistent: totalProcessedAirdrop (200) > actual transferred amount (100)\n\nExploitation: If the contract doesn't have sufficient tokens, the airdrop execution will fail partially, leaving the accounting in an inconsistent state. The owner might not realize that some transfers failed and the accounting overstates the actual amount distributed.\n\nFinancial Impact: Inconsistent accounting where totalProcessedAirdrop doesn't reflect actual transfers. Users may not receive their airdrop tokens while the contract thinks they were distributed. The contract state becomes corrupted and requires manual intervention to fix.",
+      "severity": "high",
+      "original_id": "6b8a9c66509a34b2"
+    },
+    {
+      "id": "sherlock_symmio_2025_03_tool_005",
+      "title": "Batch Size Manipulation Allows Single-Recipient Drainage",
+      "description": "The transferAirdrops() function allows the owner to specify any batchSize, including values larger than the remaining recipients. The function caps the endIndex to the array length, but this enables a manipulation where an owner can process the entire remaining airdrop in one transaction by specifying an excessively large batchSize. While this doesn't directly enable theft, it bypasses the intended batch processing mechanism and could be used to quickly drain funds if the owner's account is compromised.\n\nMathematical Proof:\n1. Configure airdrop: 1000 SYMM to 1000 recipients (1 SYMM each)\n2. Process 500 recipients normally over multiple batches\n3. Attacker compromises owner account\n4. Call transferAirdrops(1000000) - excessively large batch size\n5. endIndex = min(500 + 1000000, 1000) = 1000\n6. Entire remaining 500 SYMM transferred in single transaction\n7. No opportunity to detect suspicious activity through multiple transactions\n\nExploitation: If the owner's private key is compromised, an attacker can drain the entire remaining airdrop in one transaction instead of being limited by the intended batch processing. This reduces the window for detection and intervention.\n\nFinancial Impact: Rapid drainage of airdrop funds if owner account is compromised. The batch processing safety mechanism is effectively bypassed.",
+      "severity": "medium",
+      "original_id": "dae80afd2df23408"
+    },
+    {
+      "id": "sherlock_symmio_2025_03_tool_006",
+      "title": "Incorrect USDC Amount Calculation in Liquidity Quote",
+      "description": "The getLiquidityQuote function incorrectly calculates the required USDC amount by applying a division by 1e30 to the initial calculation, which will always result in zero for typical token amounts due to precision loss. This allows attackers to add liquidity with minimal USDC while receiving full LP tokens, effectively stealing value from the pool.",
+      "severity": "critical",
+      "original_id": "fcbe3c629b40da15"
+    },
+    {
+      "id": "sherlock_symmio_2025_03_tool_007",
+      "title": "Incorrect Token Approvals in _addLiquidity Function",
+      "description": "The _addLiquidity function approves the PERMIT2 contract for SYMM and USDC tokens using the SYMM and USDC state variable addresses, but then uses local symm and usdc variables from poolTokens array for transfers. This mismatch means the actual tokens transferred are not approved for the ROUTER, causing the liquidity addition to fail and potentially leaving user funds stuck.",
+      "severity": "high",
+      "original_id": "da82cef87e58f341"
+    },
+    {
+      "id": "sherlock_symmio_2025_03_tool_008",
+      "title": "Incorrect LP Token Vesting Plan Setup",
+      "description": "When setting up a new vesting plan for LP tokens, the function uses symmVestingPlan.endTime instead of calculating a proper vesting schedule based on the LP token allocation. This incorrectly applies the SYMM vesting end time to LP tokens, potentially locking LP tokens for longer than intended or creating vesting schedule inconsistencies.",
+      "severity": "high",
+      "original_id": "acbdbb1fe2beb430"
+    },
+    {
+      "id": "sherlock_symmio_2025_03_tool_010",
+      "title": "Incorrect Reward Rate Calculation Leading to Fund Miscalculation",
+      "description": "The _addRewardsForToken function has a mathematical error in reward rate calculation that can lead to incorrect reward distribution. When adding new rewards during an active reward period, the function incorrectly calculates the new rate by dividing the total (new rewards + leftover) by the full duration instead of the remaining duration.\n\nMathematical Proof:\n- Current state: rate = 100 tokens/week, 3 days remaining (3/7 of week)\n- Leftover = 100 * 3/7 = ~42.857 tokens\n- Admin adds 200 new tokens\n- Incorrect calculation: new rate = (200 + 42.857) / 7 days = ~34.694 tokens/day\n- Correct calculation should be: new rate = (200 + 42.857) / (3 days remaining) = ~80.952 tokens/day\n- Over 3 days, users receive 80.952 * 3 = ~242.857 tokens instead of the intended 242.857\n- The remaining 4 days at 34.694 tokens/day = 138.776 tokens are unaccounted for\n\nExploitation Scenario:\n1. Reward manager adds rewards during an active period\n2. The rate calculation error causes incorrect distribution\n3. Either users get fewer rewards than intended or excess rewards remain locked\n\nFinancial Impact: Reward distribution is mathematically incorrect, leading to either underpayment to stakers or locked rewards in the contract.",
+      "severity": "high",
+      "original_id": "0b5b458361c88e76"
+    },
+    {
+      "id": "sherlock_symmio_2025_03_tool_011",
+      "title": "Unprotected rescueTokens Function Allows Admin to Drain Contract Funds",
+      "description": "The rescueTokens function allows the admin to withdraw ANY token from the contract without restrictions. This includes the staking token and reward tokens, enabling the admin to drain all funds from the contract regardless of user balances or owed rewards.\n\nAttack Vector:\n- Admin can call rescueTokens(stakingToken, totalSupply, attackerAddress) to drain all staked tokens\n- Admin can call rescueTokens(rewardToken, contractBalance, attackerAddress) to drain all reward tokens\n- No checks prevent withdrawal of tokens that belong to users\n\nExploitation Scenario:\n1. Malicious admin or compromised admin key calls rescueTokens\n2. All staked user funds and reward tokens are transferred to attacker's address\n3. Users lose their staked assets and unclaimed rewards\n\nFinancial Impact: Complete loss of all user funds (staking tokens and reward tokens) in the contract. The admin can steal everything.",
+      "severity": "critical",
+      "original_id": "5677d6faec4fec47"
+    },
+    {
+      "id": "sherlock_symmio_2025_03_tool_012",
+      "title": "Reward State Update Inconsistency During Zero Address Update",
+      "description": "The _updateRewardsStates function behaves differently when account is address(0) vs a real user address. When account is address(0), it only updates the global reward state but doesn't update user-specific reward tracking. This can lead to state desynchronization when notifyRewardAmount is called with address(0).\n\nMathematical Proof:\n1. User A has pending rewards calculated at time T1\n2. Admin calls notifyRewardAmount -> _updateRewardsStates(address(0))\n3. Global state updates but User A's userRewardPerTokenPaid remains at T1 value\n4. When User A next interacts, _earned calculation uses outdated userRewardPerTokenPaid\n5. User A may receive incorrect reward amount due to the state mismatch\n\nExploitation Scenario:\n1. Attacker monitors for notifyRewardAmount calls\n2. Immediately after notification, attacker performs deposit/withdraw/claim\n3. The state inconsistency causes incorrect reward calculation\n4. Attacker may receive more or fewer rewards than entitled\n\nFinancial Impact: Users receive incorrect reward amounts due to state tracking inconsistency, leading to either loss of rewards or receiving unearned rewards.",
+      "severity": "high",
+      "original_id": "9937d07253a7888c"
+    },
+    {
+      "id": "sherlock_symmio_2025_03_tool_013",
+      "title": "Incorrect Total Vested Accounting During Vesting Plan Reset",
+      "description": "The _resetVestingPlans function incorrectly updates the totalVested mapping by subtracting the oldTotal and adding the new amount. However, the oldTotal includes both locked and claimed amounts, but the function only adjusts for the locked portion. This causes totalVested to become desynchronized from actual vested amounts when claimed tokens are present.\n\nMathematical Proof:\n- Initial state: User has vesting plan with total amount = 1000 tokens, claimed = 300 tokens, locked = 700 tokens\n- totalVested[token] = 1000\n- Reset called with new amount = 800 tokens\n- oldTotal = vestingPlan.lockedAmount() = 700 (incorrectly uses only locked amount)\n- totalVested[token] = 1000 - 700 + 800 = 1100 tokens\n- But actual total should be: 800 tokens (new vested amount)\n- Accounting error: +300 tokens permanently added to totalVested\n\nExploitation Scenario:\n1. SETTER_ROLE calls resetVestingPlans for multiple users\n2. For each user with claimed tokens, totalVested becomes inflated\n3. Repeated resets compound the accounting error\n4. Eventually totalVested exceeds actual token balance\n5. Future claims fail due to insufficient balance checks\n\nFinancial Impact:\n- Protocol becomes insolvent - cannot fulfill legitimate claims\n- Users lose access to their vested tokens\n- Permanent loss of user funds due to accounting corruption",
+      "severity": "high",
+      "original_id": "1a0f4ab564254c0c"
+    },
+    {
+      "id": "sherlock_symmio_2025_03_tool_014",
+      "title": "Insufficient Balance Check Allows Over-Withdrawal of Tokens",
+      "description": "The _ensureSufficientBalance function checks if the contract has enough tokens, but if it doesn't, it calls _mintTokenIfPossible which by default does nothing. This creates a critical vulnerability where the contract can transfer more tokens than it actually holds.\n\nMathematical Proof:\n- Contract balance: 500 tokens\n- User tries to claim 1000 tokens\n- _ensureSufficientBalance checks: 500 < 1000 \u2192 deficit = 500\n- _mintTokenIfPossible does nothing (default implementation)\n- IERC20(token).transfer(user, 1000) is called anyway\n- Transfer will fail if token reverts on insufficient balance, but if token doesn't revert, user gets 1000 tokens from only 500 available\n\nExploitation Scenario:\n1. Attacker identifies token that doesn't revert on transfer failure\n2. Attacker claims more tokens than contract holds\n3. Contract transfers tokens it doesn't have, potentially draining other users' funds\n4. Protocol becomes insolvent\n\nFinancial Impact:\n- Direct theft of other users' tokens\n- Protocol insolvency\n- Permanent loss of funds for legitimate users",
+      "severity": "high",
+      "original_id": "97865761afe46ecc"
+    },
+    {
+      "id": "sherlock_symmio_2025_03_tool_015",
+      "title": "Division Rounding Error in Percentage-Based Locked Token Claims",
+      "description": "The claimLockedTokenByPercentage and claimLockedTokenForByPercentage functions use division that can round down to zero when the locked amount is small, allowing attackers to claim tokens without paying penalties.\n\nMathematical Proof:\n- User has 999 wei locked (small amount due to precision)\n- Attacker calls claimLockedTokenByPercentage with percentage = 1e18 (100%)\n- Calculation: (999 * 1e18) / 1e18 = 999 wei (correct)\n- But if user has 1 wei locked: (1 * 1e18) / 1e18 = 1 wei (correct)\n- However, if percentage is small: percentage = 1e15 (0.1%)\n- For 999 wei: (999 * 1e15) / 1e18 = 0 wei (rounded down)\n- Attacker can claim 0 tokens but still execute the function\n\nExploitation Scenario:\n1. Attacker has small locked amount due to previous partial claims\n2. Attacker calls percentage-based claim with small percentage\n3. Calculation rounds to zero, but function executes\n4. No tokens transferred, but function call succeeds\n5. Could be used to probe contract state or trigger side effects\n\nFinancial Impact:\n- While no direct fund loss, it breaks expected behavior\n- Could be combined with other vulnerabilities\n- Wastes gas and could be used in denial-of-service attacks",
+      "severity": "medium",
+      "original_id": "d5467a049a3d08a1"
+    },
+    {
+      "id": "sherlock_symmio_2025_03_tool_016",
+      "title": "Missing Validation in Locked Token Claim Amount",
+      "description": "The _claimLockedToken function checks if the requested amount exceeds the locked amount, but doesn't validate that the amount is greater than zero. This allows users to claim zero tokens, wasting gas and potentially causing unexpected behavior.\n\nMathematical Proof:\n- User calls claimLockedToken(token, 0)\n- vestingPlan.lockedAmount() >= 0 \u2192 condition passes\n- Function executes full logic including penalty calculation\n- penalty = (0 * lockedClaimPenalty) / 1e18 = 0\n- Zero tokens transferred to user and penalty receiver\n\nExploitation Scenario:\n1. Attacker repeatedly calls claimLockedToken with amount = 0\n2. Wastes gas and could potentially be used in denial-of-service\n3. If there are side effects or events that trigger external actions, could be exploited\n\nFinancial Impact:\n- Gas waste\n- Potential denial-of-service if combined with other factors\n- Breaks expected function behavior",
+      "severity": "low",
+      "original_id": "02ae1742f601e6c0"
+    }
+  ],
+  "input_tokens": 3104,
+  "output_tokens": 74,
+  "cached_tokens": 45
+}

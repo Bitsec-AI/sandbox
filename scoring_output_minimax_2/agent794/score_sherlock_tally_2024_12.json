@@ -1,0 +1,524 @@
+{
+  "project": "sherlock_tally_2024_12",
+  "agent": "agent794",
+  "status": "success",
+  "timestamp": "2026-04-06T15:37:01.369339",
+  "elapsed_seconds": 144.5,
+  "total_expected": 2,
+  "total_found": 70,
+  "true_positives": 2,
+  "false_negatives": 0,
+  "false_positives": 68,
+  "detection_rate": 1.0,
+  "precision": 0.02857142857142857,
+  "f1_score": 0.05555555555555556,
+  "matched_findings": [
+    {
+      "id": "sherlock_tally_2024_12_expected_000",
+      "expected": "_requested Tip is not deduced",
+      "matched": "State Inconsistency in BumpEarningPower When Earning Power Decreases",
+      "confidence": 0.85,
+      "justification": "FINDING 0 directly matches the expected vulnerability. It correctly identifies the issue in bumpEarningPower function in Staker.sol where the tip is subtracted from scaledUnclaimedRewardCheckpoint even when the earning power condition fails, leading to state inconsistency and permanent loss of rewards for stakers. This aligns with the expected vulnerability description about '_requested Tip is not deduced' and the recommendation to properly subtract the tip from depositor rewards.",
+      "severity": "high",
+      "expected_description": "Source: https://github.com/sherlock-audit/2024-11-tally/issues/33\n\n**Impact:**\nRewards are denied to legitimate participants (rewards insolvency) 4\n\n**Recommendation:**\nConsider subtracting the tip from the depositor rewards: Governance Staker.sol#L 508: // Send tip to the receiver Safe ERC 20.safe Transfer (REWARD_TOKEN, _tip Receiver, _requested Tip); + deposit.scaled Unclaimed Reward Checkpoint = +deposit.scaled Unclaimed Reward Checkpoint - (_requested Tip * SCALE_FACTOR);",
+      "found_description": "In the bumpEarningPower function, when a deposit's earning power decreases, the code checks if (_unclaimedRewards - _requestedTip) < maxBumpTip and reverts if true. However, the tip is still subtracted from scaledUnclaimedRewardCheckpoint regardless of whether the earning power increase or decrease condition is met. This means that if a user attempts to reduce earning power and the condition fails, the tip is still taken from the deposit's unclaimed rewards, but the earning power is not updated. This creates a state inconsistency: the deposit's unclaimed rewards are reduced without a corresponding change in earning power, leading to future reward miscalculations and permanent loss of rewards for the staker.",
+      "found_id": "80d3df37ccf6b05f",
+      "tool_finding_index": 10
+    },
+    {
+      "id": "sherlock_tally_2024_12_expected_001",
+      "expected": "Updating earning power for de-",
+      "matched": "State Synchronization Failure in alterClaimer Causes Incorrect Earning Power Recalculation and Reward Dilution",
+      "confidence": 0.9,
+      "justification": "FINDING 0 directly matches the expected vulnerability. It describes the exact issue from GitHub issue #31: the alterClaimer function (and by extension alterDelegatee) does not update reward checkpoints after changing earning power, causing a state synchronization failure where rewards continue accruing at the old rate while the system accounts for the new rate. This creates an accounting discrepancy that can be exploited to drain rewards, exactly as described in the expected vulnerability. The finding correctly identifies the function (alterClaimer/alterDelegatee) and the core security issue (missing reward checkpointing).",
+      "severity": "high",
+      "expected_description": "Source: https://github.com/sherlock-audit/2024-11-tally/issues/31\n\n**Impact:**\nAll of the rewards available at a given time can be drained by a malicious depositor\n\n**Recommendation:**\nPlease consider adding checkpointing of rewards to _alter Delegatee and _alter Claimer : Governance Staker.sol#L 619-L 624: function _alter Delegatee ( Deposit storage deposit, Deposit Identifier _deposit Id, address _new Delegatee ) internal virtual { _revert If Address Zero (_new Delegatee); + _checkpoint Global Reward (); + _checkpoint Reward (deposit); Governance Staker.sol#L 645-L 650: function _alter Claimer ( Deposit storage deposit, Deposit Identifier _deposit Id, address _new Claimer ) internal virtual { _revert If Address Zero (_new Claimer); + _checkpoint Global Reward (); + _checkpoint Reward (deposit);",
+      "found_description": "The alterClaimer function recalculates earning power based on the current delegatee and balance, but does not update the deposit's rewardPerTokenCheckpoint or scaledUnclaimedRewardCheckpoint after this change. This means the deposit's earning power is updated in totalEarningPower and depositorTotalEarningPower, but the reward accrual checkpoint remains tied to the old earning power. As a result, the deposit continues to accrue rewards at the old rate, while the global system accounts for the new rate. This creates a permanent accounting discrepancy that dilutes rewards for all other stakers over time.",
+      "found_id": "f9009a9acf37ad30",
+      "tool_finding_index": 5
+    }
+  ],
+  "missed_findings": [],
+  "undecided_findings": [],
+  "extra_findings": [
+    {
+      "id": "sherlock_tally_2024_12_tool_000",
+      "title": "Reward Claiming Resets Earning Power Without Recalculating Unclaimed Rewards, Leading to Permanent Reward Loss",
+      "description": "In the _claimReward function, after claiming rewards, the deposit's earning power is updated using getEarningPower(), but the scaledUnclaimedRewardCheckpoint is reset to zero without accounting for the new earning power's impact on future reward accrual. This creates a permanent accounting mismatch: the deposit's rewardPerTokenCheckpoint is set to the global checkpoint at the time of claim, but the earning power has changed since the last checkpoint. Subsequent reward accruals will be calculated using the new earning power against an outdated checkpoint, causing the deposit to permanently lose rewards proportional to the difference in earning power. This is a critical state inconsistency that results in irreversible loss of user rewards.",
+      "severity": "critical",
+      "original_id": "10ce3af585de3a97"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_001",
+      "title": "Automatic Processing of Withdrawal Funds via Earning Power Calculator Callbacks",
+      "description": "The GovernanceStaker contract allows external earning power calculators to be set by the admin. When a user withdraws stake, the contract calls the earningPowerCalculator.getEarningPower() function to recalculate the new earning power. If the earningPowerCalculator is malicious or compromised, it can trigger arbitrary external calls during this calculation. Since the withdrawal flow involves transferring staked tokens from the delegation surrogate back to the user, a malicious earningPowerCalculator can intercept this transfer by calling back into the GovernanceStaker contract (e.g., via reentrancy or nested calls) to trigger another withdrawal or reward claim before the original withdrawal completes. This leads to double-spending of staked tokens and potential draining of the contract's staked balance.",
+      "severity": "critical",
+      "original_id": "336acb86b3a82c78"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_002",
+      "title": "Reward Claiming Allows Front-Running of Earning Power Update, Leading to Theft of Unclaimed Rewards",
+      "description": "The _claimReward function updates a deposit's earning power after claiming rewards but before transferring the claimer's payout. This creates a critical timing vulnerability: an attacker can call bumpEarningPower immediately after a legitimate claimer calls claimReward, reducing the deposit's earning power and causing the claimer to receive less reward than they are entitled to. The attacker captures the difference as a tip, effectively stealing from the claimer. This occurs because the earning power update is applied after the reward calculation but before the payout, and the claimer has no control over this sequence.",
+      "severity": "critical",
+      "original_id": "02c78e4389dacea7"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_003",
+      "title": "BumpEarningPower Allows Theft of Unclaimed Rewards via Invalid Tip Calculation for Earning Power Decreases",
+      "description": "In bumpEarningPower, when a deposit's earning power decreases, the contract requires that (unclaimedRewards - requestedTip) >= maxBumpTip. However, this check is mathematically flawed: it allows an attacker to request a tip equal to unclaimedRewards - maxBumpTip + 1, which is less than unclaimedRewards but still drains nearly all unclaimed rewards. The attacker then triggers a decrease in earning power, receives the tip, and the deposit's unclaimed rewards are reduced by the tip amount, leaving the owner with minimal or zero rewards. This is a direct theft of user assets.",
+      "severity": "high",
+      "original_id": "c4c5502d70972545"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_004",
+      "title": "Insufficient Reward Balance Check in notifyRewardAmount Can Be Exploited to Create Permanent Reward Shortfall",
+      "description": "The notifyRewardAmount function checks if (scaledRewardRate * REWARD_DURATION) > (REWARD_TOKEN.balanceOf(address(this)) * SCALE_FACTOR), but this check is insufficient because it does not subtract the unclaimed rewards already owed to stakers. An attacker can notify a small reward amount while the contract holds a large balance of unclaimed rewards, causing the check to pass even though the new reward rate cannot cover the existing obligations. This leads to a permanent shortfall where future claimers receive less than they are entitled to, effectively diluting all stakers' rewards.",
+      "severity": "high",
+      "original_id": "b84811224b2ca59a"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_006",
+      "title": "Claim Fee Can Be Set to Zero with Non-Zero Fee Collector, Enabling Permanent Fund Drain",
+      "description": "The _setClaimFeeParameters function allows setting feeAmount to 0 while setting feeCollector to a non-zero address. Since the fee is only transferred if feeAmount > 0, this appears harmless. However, if a future update changes the fee logic to always transfer to feeCollector regardless of feeAmount, or if an external system assumes feeCollector is always receiving fees, this creates a hidden backdoor. An attacker can set feeCollector to their own address and wait for a future upgrade or external integration to drain funds. This is a critical design flaw in access control and state consistency.",
+      "severity": "high",
+      "original_id": "84797ff349a15f14"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_007",
+      "title": "Surrogate Deployment Allows Arbitrary Delegatee Assignment Without Authorization",
+      "description": "The _fetchOrDeploySurrogate function allows any caller to deploy a DelegationSurrogateVotes contract for any arbitrary delegatee address without verifying that the caller has the right to delegate to that address. This enables an attacker to deploy surrogate contracts for delegates they do not control, potentially causing governance vote manipulation, incorrect voting weight allocation, or denial-of-service by exhausting deployment gas or creating invalid delegate mappings. The contract assumes that only legitimate stakers will trigger surrogate deployment, but since the function is internal and called by GovernanceStaker (which is public), any user can indirectly trigger deployment for any delegatee via a maliciously crafted staking transaction. This breaks the fundamental assumption that voting power is tied to legitimate delegation relationships.",
+      "severity": "high",
+      "original_id": "52ae8bb8a37c2f6d"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_008",
+      "title": "Surrogate Deployment Allows Front-Running and Resource Exhaustion via Predictable Addresses",
+      "description": "The _fetchOrDeploySurrogate function creates a new DelegationSurrogateVotes contract using the CREATE opcode with a deterministic address derived from the sender and nonce. An attacker can front-run legitimate deployments by deploying a malicious contract at the same address first, causing subsequent legitimate calls to revert or redirect governance voting power to the attacker's contract. This enables permanent theft of voting rights and potential denial-of-service for legitimate delegations.",
+      "severity": "critical",
+      "original_id": "c8d493f3e4af0e3e"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_009",
+      "title": "Precision Loss in Reward Calculation Due to Integer Truncation in _scaledUnclaimedReward",
+      "description": "The _scaledUnclaimedReward function computes unclaimed rewards using the formula: deposit.scaledUnclaimedRewardCheckpoint + (deposit.earningPower * (rewardPerTokenAccumulated() - deposit.rewardPerTokenCheckpoint)). However, the multiplication (deposit.earningPower * deltaRewardPerToken) is performed as a uint256 multiplication without any intermediate scaling or rounding, and the result is stored as a uint256. Since deposit.earningPower is stored as a uint96 and rewardPerTokenAccumulated is scaled by SCALE_FACTOR (1e36), the product can exceed 2^256 - 1, causing silent overflow and truncation. This leads to undercounting of rewards over time, especially for high-earning-power deposits. The truncation is irreversible and accumulates across multiple checkpoint operations, resulting in permanent loss of rewards for stakers.",
+      "severity": "critical",
+      "original_id": "be25914ff76a9b3d"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_011",
+      "title": "Reward Claiming Resets Earning Power Without Recalculating Reward Per Token Checkpoint",
+      "description": "In the _claimReward function, after claiming rewards, the deposit's earning power is recalculated using earningPowerCalculator.getEarningPower, and totalEarningPower is updated. However, the deposit's rewardPerTokenCheckpoint is NOT updated to the current rewardPerTokenAccumulatedCheckpoint. This means that after claiming, the deposit's next unclaimed reward calculation will use an outdated checkpoint, causing it to double-count rewards earned between the last checkpoint and the claim. This results in stakers receiving more rewards than they are entitled to, effectively creating an inflationary bug where the protocol distributes more tokens than exist in the reward pool.",
+      "severity": "high",
+      "original_id": "0444aa2402cec0da"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_012",
+      "title": "Insufficient Input Validation in notifyRewardAmount Leading to Invalid Reward Rate",
+      "description": "The notifyRewardAmount function calculates scaledRewardRate using division: (_remainingReward + _amount * SCALE_FACTOR) / REWARD_DURATION. However, if _amount is extremely large (e.g., approaching 2^256), the multiplication _amount * SCALE_FACTOR can overflow silently, producing a truncated value. This leads to an incorrect scaledRewardRate being set, which then propagates to all future reward calculations. Since the overflow is silent and the function does not validate that _amount * SCALE_FACTOR does not exceed type limits, an attacker can supply a large _amount to corrupt the global reward rate, causing all future stakers to receive incorrect (and potentially zero) rewards.",
+      "severity": "high",
+      "original_id": "72026ebdb73de738"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_013",
+      "title": "Authorization Context Not Bound in BumpEarningPower Leading to Front-Running",
+      "description": "The bumpEarningPower function allows any third party to call it with a _tipReceiver and _requestedTip. The function does not verify that the caller is authorized to act on behalf of the deposit owner. This means an attacker can front-run a legitimate bump by calling bumpEarningPower with the same _depositId, a malicious _tipReceiver, and a small _requestedTip. The attacker's call will succeed, take the tip, and update the earning power. The legitimate owner's subsequent call will fail due to insufficient unclaimed rewards (since the tip was already taken), leaving the owner unable to update their earning power and losing potential future rewards. The authorization context (who is entitled to bump) is not bound to the deposit owner, enabling theft of unclaimed rewards.",
+      "severity": "high",
+      "original_id": "404ef8a98cf641b1"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_014",
+      "title": "Missing Access Control on Surrogate Deployment Allows Fee Manipulation and Vote Dilution",
+      "description": "The _fetchOrDeploySurrogate function is marked as internal and virtual, but it is called by the base GovernanceStaker contract during deposit and withdrawal operations. Since it is not protected by any access control, an attacker can trigger surrogate deployment at will by calling functions that indirectly invoke it (e.g., deposit or withdraw). This enables timing attacks where an attacker deploys a surrogate just before a snapshot or fee calculation, manipulating the distribution of staked tokens and diluting the voting power of legitimate stakers. The deployed surrogate holds staked tokens and is used to calculate voting weight, so deploying it at a strategic time allows an attacker to claim voting power without proportional staking, effectively stealing governance influence. This is a critical boundary violation because surrogate deployment directly affects economic state (voting weight distribution) and is read by governance voting logic without any authorization.",
+      "severity": "critical",
+      "original_id": "ea123072a440cc69"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_015",
+      "title": "Automatic Processing of Withdrawal Funds via DelegationSurrogateVotes Fallback",
+      "description": "The DelegationSurrogateVotes contract (used as a surrogate) has a default receive/fallback function that automatically accepts and holds ETH. When a user initiates a withdrawal from GovernanceStaker, the protocol transfers staked tokens back to the user's address. However, if the user's address has previously been used as a delegatee and a DelegationSurrogateVotes contract was deployed for it, any ETH sent to that surrogate contract (including ETH accidentally or maliciously sent during withdrawal processing) will be automatically accepted and held. Since the surrogate contract is designed to hold staked tokens, not ETH, and has no withdrawal mechanism for ETH, these funds become permanently locked. This creates a critical vulnerability where ETH sent to any previously used delegatee's surrogate contract is irrecoverably lost.",
+      "severity": "critical",
+      "original_id": "340f03919aa1fac7"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_016",
+      "title": "Permit Execution Failure Ignored Leads to Unstaked Funds and Protocol Inconsistency",
+      "description": "The permitAndStake and permitAndStakeMore functions use a try-catch block that silently ignores failures in the IERC20Permit.permit call. If the permit fails (e.g., due to expired deadline, invalid signature, or insufficient allowance after signature validation), the function proceeds to call _stake or _stakeMore anyway, resulting in staking tokens that were never actually transferred from the user. This creates a critical accounting mismatch: the protocol records a new stake (increasing user balance and governance weight), but the user's token balance is unchanged. The protocol effectively creates synthetic staked tokens out of thin air, enabling infinite staking without token backing. This breaks the fundamental invariant that staked tokens must be transferred from the user's balance. The financial impact is protocol insolvency: users can stake unlimited amounts without owning the underlying tokens, diluting governance power and reward distribution for legitimate stakers.",
+      "severity": "critical",
+      "original_id": "6506f29350bc926d"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_017",
+      "title": "Surrogate Deployment Does Not Validate Delegatee Address",
+      "description": "The _fetchOrDeploySurrogate function deploys a new DelegationSurrogateVotes contract for any address passed as _delegatee, including zero address or maliciously crafted addresses. The DelegationSurrogateVotes contract may have internal logic that assumes valid delegatee addresses, but this contract does not validate the input. This allows an attacker to deploy surrogate contracts for invalid or non-existent delegates, potentially leading to funds being locked in unmanageable surrogates or interfering with legitimate delegation workflows.",
+      "severity": "high",
+      "original_id": "eb81cafad6ab043b"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_018",
+      "title": "Delegatee Address Equality Relies on Raw Bit Comparison Without Semantic Validation",
+      "description": "The contract uses a mapping from address to DelegationSurrogate, and relies on address equality for lookup and deployment. However, the DelegationSurrogateVotes contract may internally represent delegatee logic using packed or encoded values (e.g., via proxy or factory patterns). If the delegatee address is passed through a proxy or wrapper that returns the same semantic delegate but a different raw address (e.g., a deterministic proxy), the mapping will treat them as distinct, leading to duplicate surrogate deployments. This is a type system integrity issue: semantic equivalence (same voting delegate) is not preserved under raw bit comparison.",
+      "severity": "high",
+      "original_id": "ac541ed2eb7c46b8"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_019",
+      "title": "Surrogate Deployment Commits State Before External Call Completes",
+      "description": "The contract updates storedSurrogates[_delegatee] and emits an event before the DelegationSurrogateVotes constructor completes. If the constructor reverts (e.g., due to internal validation, insufficient gas, or external call failure), the state change (mapping update) is already committed, but the surrogate contract is not deployed. This leaves the mapping pointing to a zero address, but the event was emitted and the state is inconsistent. This violates operation lifecycle integrity: state commitment occurs before external operation success is guaranteed.",
+      "severity": "high",
+      "original_id": "9c277a49c850a10a"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_020",
+      "title": "DelegationSurrogateVotes Interface Compatibility Not Verified",
+      "description": "The contract assumes DelegationSurrogateVotes implements the same interface as expected by GovernanceStaker, but does not verify compatibility with the actual DelegationSurrogateVotes contract from the imported source. If the DelegationSurrogateVotes contract has been modified (e.g., in a fork) to change constructor parameters, function signatures, or storage layout, the deployment will succeed but the surrogate will be non-functional. For example, if the actual DelegationSurrogateVotes requires 3 parameters but this contract passes only 2, the contract will deploy with incorrect storage initialization, leading to silent corruption of voting weight tracking. This is an external integration integrity issue.",
+      "severity": "high",
+      "original_id": "f0ffd796be6a0877"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_021",
+      "title": "No Protection Against Reentrancy During Surrogate Deployment",
+      "description": "The _fetchOrDeploySurrogate function calls new DelegationSurrogateVotes(...) before completing its logic. The constructor of DelegationSurrogateVotes may call back into the GovernanceStakerDelegateSurrogateVotes contract (e.g., via a token transfer hook or event listener). This creates a reentrancy vector where an attacker can manipulate state (e.g., change delegatee mappings or trigger multiple deployments) during the constructor execution. Since state is updated after the external call, the reentrancy can cause duplicate deployments or incorrect state mutations.",
+      "severity": "high",
+      "original_id": "a841830baabc6078"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_022",
+      "title": "Unchecked Reward Rate Calculation Allows Reward Dilution via Timed Reward Notifications",
+      "description": "The notifyRewardAmount function updates the scaledRewardRate without validating that the new rate is consistent with the actual reward balance in the contract. An attacker can repeatedly call notifyRewardAmount with small, non-actual reward amounts (i.e., without transferring the corresponding tokens) to artificially inflate the reward rate. This causes the system to distribute more rewards than actually exist, leading to insolvency when legitimate claimers attempt to claim. The attack exploits the fact that the contract only checks if (scaledRewardRate * REWARD_DURATION) > (REWARD_TOKEN.balanceOf(address(this)) * SCALE_FACTOR), but this check is insufficient because it includes unclaimed rewards that are already owed to stakers. The attacker can drain the contract by creating a reward rate that exceeds the actual available balance, causing future claims to fail or be underpaid.",
+      "severity": "critical",
+      "original_id": "16e85039cd278715"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_023",
+      "title": "Unclaimed Reward Calculation Uses Outdated Global Checkpoint in _checkpointReward",
+      "description": "The _checkpointReward function uses rewardPerTokenAccumulatedCheckpoint, which is set by _checkpointGlobalReward, but does not ensure that the global checkpoint has been updated since the last deposit-specific checkpoint. If a deposit is checkpointed multiple times between global checkpoints (e.g., due to multiple stakeMore or alterDelegatee calls), the deposit's scaledUnclaimedRewardCheckpoint will be calculated using an outdated global rewardPerTokenAccumulatedCheckpoint, leading to undercounting of earned rewards. This results in stakers receiving less than their fair share of rewards over time. The issue is systemic: every time a deposit is modified, its reward checkpoint is updated using a global state that may be stale, causing cumulative reward loss across all deposits.",
+      "severity": "high",
+      "original_id": "5857a96790924138"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_024",
+      "title": "BumpEarningPower Tip Calculation Ignores Scale Factor in Unclaimed Rewards Check",
+      "description": "In bumpEarningPower, the unclaimed rewards are retrieved as _unclaimedRewards = deposit.scaledUnclaimedRewardCheckpoint / SCALE_FACTOR, but then the tip is subtracted as _requestedTip * SCALE_FACTOR from scaledUnclaimedRewardCheckpoint. This is correct. However, the subsequent check for insufficient unclaimed rewards when reducing earning power uses: (_unclaimedRewards - _requestedTip) < maxBumpTip. This comparison is between raw token units and maxBumpTip (which is in raw units), but the subtraction is done in raw units while the underlying value is scaled. The issue is that _unclaimedRewards is already scaled down, so subtracting _requestedTip (raw) is mathematically correct. However, the condition (_unclaimedRewards - _requestedTip) < maxBumpTip is flawed because it allows a tip up to maxBumpTip even if the unclaimed rewards are less than maxBumpTip. This means an attacker can request a tip of maxBumpTip even if the deposit has only 1 wei of unclaimed rewards, as long as maxBumpTip is set to 1000, and the condition will pass if 1 - 1000 < 1000 (which is true). This allows draining deposits with tiny unclaimed rewards.",
+      "severity": "high",
+      "original_id": "0c2c17cbca02aea1"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_025",
+      "title": "ClaimReward Resets Earning Power After Claim, Enabling Reward Theft via Repeated Claims",
+      "description": "The _claimReward function recalculates earningPower after claiming rewards, but does not reset scaledUnclaimedRewardCheckpoint to zero before doing so. This means that if a claimer calls claimReward twice in quick succession (before any global checkpoint occurs), the second claim will recalculate earningPower using the same deposit.earningPower (which hasn't changed) but the rewardPerTokenAccumulated() has not advanced, so the _scaledUnclaimedReward calculation will be identical to the first claim. Since scaledUnclaimedRewardCheckpoint is only zeroed after the first claim, the second claim will again claim the same amount of rewards. This allows a claimer to claim the same reward amount multiple times, effectively double-spending rewards. The vulnerability exists because the checkpoint reset (deposit.scaledUnclaimedRewardCheckpoint = 0) occurs after the earning power update, not before the reward calculation.",
+      "severity": "critical",
+      "original_id": "b92751d4e862e052"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_026",
+      "title": "RewardPerTokenAccumulated Uses Block.Timestamp Without Considering Block Time Variability",
+      "description": "The rewardPerTokenAccumulated function calculates the live reward accumulation using (lastTimeRewardDistributed() - lastCheckpointTime). However, lastTimeRewardDistributed() returns block.timestamp if rewardEndTime > block.timestamp, meaning it uses the current block's timestamp. This is problematic because if a user calls claimReward or bumpEarningPower multiple times within the same block, the block.timestamp remains constant, but the global checkpoint is updated each time. This causes the rewardPerTokenAccumulated to be recalculated using the same time delta, leading to duplicate reward accrual within a single block. An attacker can call claimReward 100 times in one transaction (via a loop), and each time, the system will calculate the same reward amount, allowing the attacker to claim 100x the actual earned rewards.",
+      "severity": "critical",
+      "original_id": "393b323598e5b841"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_027",
+      "title": "PermitAndStake Allows Reentrancy via Token Return to Contract",
+      "description": "The permitAndStake and permitAndStakeMore functions use a try-catch block around IERC20Permit.permit(), which silently ignores failures. If the staking token contract returns funds to itself (e.g., via a reentrant or malicious token implementation), those funds are received by the GovernanceStakerPermitAndStake contract and treated as new deposits because the contract has no mechanism to distinguish between user-initiated deposits and system-returned funds. This allows an attacker to reenter the staking logic and mint unlimited governance weight without additional token approval.",
+      "severity": "critical",
+      "original_id": "c2025ca0468e045f"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_028",
+      "title": "PermitAndStake and PermitAndStakeMore Fail to Validate Permit Success Before State Change",
+      "description": "The permitAndStake and permitAndStakeMore functions execute the permit() call on the staking token with a try-catch block that silently ignores failures. If the permit fails (e.g., due to insufficient allowance, expired deadline, or invalid signature), the function still proceeds to call _stake() or _stakeMore(), which increases the user's staked balance. This results in users gaining governance weight and rewards without transferring any tokens, effectively minting free staked tokens. This is a critical logic flaw where state changes occur before validation of the token transfer authorization, violating Pattern 2 (Validation Timing) and Pattern 3 (Execution Boundaries).",
+      "severity": "critical",
+      "original_id": "87b0b234a3e3e703"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_029",
+      "title": "Missing User Protection Against Partial Execution in PermitAndStake Functions",
+      "description": "The permitAndStake and permitAndStakeMore functions perform two critical operations: (1) token approval via permit(), and (2) state update via _stake()/_stakeMore(). If the permit() call fails (e.g., due to low balance or signature rejection), the function still executes the staking logic, granting the user governance power and reward rights without any token transfer. Users have no mechanism to specify a minimum acceptable outcome (Pattern 1), and the function allows partial execution where the state change succeeds while the token transfer fails. This enables users to fraudulently gain governance rights without locking any capital, undermining the economic security of the protocol.",
+      "severity": "critical",
+      "original_id": "b3ca6b98bb3a5da7"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_030",
+      "title": "Permit Signature Not Bound to Deposit Context, Enabling Replay and Front-Running",
+      "description": "The permit() function is called with msg.sender as the spender and address(this) as the recipient, but the signature does not include any context about the deposit ID, amount, or deadline uniqueness. This means a valid permit signature for one staking operation can be replayed for another operation with the same or lower amount. An attacker can capture a legitimate user's permit signature (e.g., from a public mempool or RPC endpoint) and replay it to stake additional tokens without the user's consent. This violates Pattern 9 (Signature Execution Context Binding) because the signature is not bound to the specific transaction context (e.g., deposit ID or nonce), allowing unlimited reuse.",
+      "severity": "high",
+      "original_id": "73e1a86c0870a3fa"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_031",
+      "title": "PermitAndStakeMore Allows Staking More Than User's Remaining Balance Due to Lack of Pre-Validation",
+      "description": "The permitAndStakeMore function does not validate that the user has sufficient token balance before calling permit(). The permit() call may fail silently, but even if it succeeds, the user may have already spent the tokens in another transaction between signature generation and execution. The function assumes the permit will succeed and proceeds to increase the deposit balance. This creates a race condition where a user can be tricked into staking more than they own if their balance changes between signature creation and execution. The lack of pre-validation and reliance on a potentially stale signature violates Pattern 3 (Execution Boundaries) and Pattern 2 (Validation Timing).",
+      "severity": "high",
+      "original_id": "916cca173f88d6a5"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_032",
+      "title": "No Reentrancy Guard on PermitAndStake Functions",
+      "description": "The permitAndStake and permitAndStakeMore functions call an external contract (the staking token's permit() method) before making state changes. If the staking token contract is malicious or has reentrant logic (e.g., a wrapped token that calls back into this contract during transfer), an attacker could reenter permitAndStake and create multiple deposits from a single signature. This violates the standard security practice of 'checks-effects-interactions' and could allow an attacker to mint unlimited staked tokens with one signature. The absence of a reentrancy guard (e.g., ReentrancyGuard or non-reentrant modifier) on these functions creates a critical vulnerability.",
+      "severity": "critical",
+      "original_id": "9111439dbbcb3050"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_033",
+      "title": "Nonce Consumption Before Signature Validation in claimRewardOnBehalf",
+      "description": "In claimRewardOnBehalf, the nonce for the deposit owner is consumed via _useNonce(deposit.owner) before the signature is validated. If the signature is invalid, the nonce is permanently incremented, rendering future legitimate signatures from the owner invalid, while the operation fails. This allows an attacker to exhaust the owner's nonce via crafted invalid signatures, effectively locking the owner out of claiming rewards.",
+      "severity": "critical",
+      "original_id": "4ab513af9fdd788d"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_034",
+      "title": "Silent Permit Failure Allows Staking Without Token Transfer",
+      "description": "The permitAndStake and permitAndStakeMore functions use a try-catch block that silently ignores failures in the IERC20Permit.permit call. This allows users to stake tokens without actually transferring them, leading to inflated staked balances and misallocated governance weight. The contract assumes the permit succeeded, but no validation occurs, enabling attackers to create fake stakes.",
+      "severity": "critical",
+      "original_id": "ef8744b77ebcf585"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_035",
+      "title": "Authorization Context Not Bound to Staking Parameters",
+      "description": "The permit signature is generated for a specific amount, deadline, and recipient, but the contract does not verify that the signed amount matches the staked amount. An attacker can front-run by submitting a permit signed for a smaller amount than intended, then staking a larger amount. The permit signature is consumed, but the staking operation proceeds with a higher value, effectively stealing the difference from the user's intended stake.",
+      "severity": "high",
+      "original_id": "5472a62f3b1db9e8"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_036",
+      "title": "State Commitment Before Permit Validation",
+      "description": "The contract commits state by calling _stake or _stakeMore after the permit call, but the permit call may fail silently due to invalid signature, expired deadline, or insufficient allowance. Since the state change (deposit creation or update) occurs after the permit, but the permit failure is ignored, the deposit is created even when no tokens were transferred. This results in a non-backable deposit \u2014 the user holds governance weight without locking real tokens.",
+      "severity": "high",
+      "original_id": "5de920c288c981d4"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_037",
+      "title": "Permit Signature Reusability Across Different Amounts",
+      "description": "The permit signature is valid for a specific amount, but the contract does not validate that the amount in the signature matches the _amount parameter passed to permitAndStake or permitAndStakeMore. An attacker can obtain a valid permit for 100 tokens, then use it to stake 1000 tokens. The permit is consumed, but the staking operation proceeds with a higher amount, effectively allowing unauthorized minting of governance power.",
+      "severity": "high",
+      "original_id": "efa389141c554ef9"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_038",
+      "title": "Missing Zero Address Validation for _claimer and _delegatee in permitAndStake",
+      "description": "The function permitAndStake claims in its docstring that _delegatee and _claimer must not be zero addresses, but no actual validation is performed. If a user passes zero addresses, the underlying _stake function may proceed, creating a deposit with no claimer or delegatee. This breaks governance delegation logic and may cause rewards to be unclaimable or governance weight to be unassignable.",
+      "severity": "medium",
+      "original_id": "0be48b2df1a58cf0"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_039",
+      "title": "Signature-Based Reward Claim Allows Owner to Bypass Claimer Authorization and Claim Rewards Twice",
+      "description": "The claimRewardOnBehalf function allows the deposit owner to claim rewards on behalf of the claimer by using the owner's signature, but does not prevent the claimer from also claiming the same rewards using their own signature. This creates a double-claim vulnerability where both the owner and claimer can independently claim the same reward amount, resulting in protocol loss. The signature validation checks both the claimer and owner independently, and both can call _claimReward with their own nonce, leading to double payout for the same reward pool.",
+      "severity": "critical",
+      "original_id": "d46d25af09e245d3"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_040",
+      "title": "Missing Access Control on permitAndStake and permitAndStakeMore Allows Front-Running of Fee Calculations",
+      "description": "The permitAndStake and permitAndStakeMore functions allow users to stake tokens via permit without validating that the staking operation occurs after the permit signature is processed. This creates a timing vulnerability where an attacker can manipulate the sequence of state updates relative to fee or reward calculations. The base contract GovernanceStaker likely updates internal accounting state (e.g., totalStaked, user stakes, lastUpdateTimestamp) during _stake and _stakeMore calls. If these state variables are used in fee or reward calculations (e.g., proportional rewards based on time-weighted stakes), an attacker can submit a permitAndStake transaction with a large amount just before a reward distribution or fee snapshot, causing the system to incorrectly include the staked amount in the calculation window. Since the permit is validated off-chain and the staking is atomic, the attacker can front-run the snapshot by timing their transaction to be included immediately before the snapshot block. This allows them to claim disproportionate rewards or avoid fees without legitimate economic commitment.",
+      "severity": "high",
+      "original_id": "c05055a75446e72f"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_041",
+      "title": "Unit Representation Mismatch in permitAndStake Causes Incorrect Reward Distribution Due to Unverified Token Decimals",
+      "description": "The permitAndStake and permitAndStakeMore functions pass _amount directly to IERC20Permit.permit() and then to _stake(), assuming the amount is in the token's native decimal representation. However, the base contract GovernanceStaker likely internally tracks stakes in a normalized unit (e.g., 18 decimals) for share calculations. If the STAKE_TOKEN has a different decimal precision (e.g., 6 decimals for USDC) than what GovernanceStaker expects (e.g., 18), the _amount passed to _stake() will be misinterpreted. For example, if a user stakes 100 USDC (10^6 units) but GovernanceStaker expects 18 decimals, the system interprets this as 100 * 10^12 = 100 trillion units, inflating the user's stake by 10^12x. This causes reward distributions to be massively skewed: the attacker receives 10^12x more rewards than they should, while other users' rewards are diluted proportionally. The error propagates because all share calculations (e.g., rewardPerToken, userShare = stake / totalStake) use the corrupted value. No conversion occurs at the boundary between the permit call and the staking logic, violating representation boundary integrity.",
+      "severity": "critical",
+      "original_id": "ea2c4677c2d2ad8a"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_042",
+      "title": "Data Access Integrity Violation: _stakeMore Uses DepositIdentifier Without Validating Deposit Existence",
+      "description": "The permitAndStakeMore function retrieves the deposit via deposits[_depositId] but does not verify that the deposit exists or is active. If _depositId refers to a non-existent or already-withdrawn deposit, the storage reference still points to a zero-initialized Deposit struct. The _stakeMore function then adds _amount to deposit.amount, which is 0, effectively creating a new deposit with the same ID but no prior history. This corrupts the deposit ledger: the system now has two logical deposits with the same ID \u2014 one inactive (zero balance) and one active (with new stake). If reward calculations iterate over deposits by ID (e.g., for distributing rewards), they may process the same ID twice: once for the zero-balance deposit (ignoring it) and once for the new one (correctly distributing). However, if the system uses a counter-based iteration (e.g., for i=0 to totalDeposits), the new deposit may be indexed beyond the original count, causing it to be missed entirely. This leads to reward leakage: legitimate stakers lose rewards because their deposits are not counted, while the attacker can repeatedly call permitAndStakeMore with invalid IDs to create phantom deposits that consume system state without contributing to staking, potentially exhausting deposit ID space or bloating storage.",
+      "severity": "high",
+      "original_id": "bb3936bb7de784fa"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_043",
+      "title": "Earning Power Update Delay Logic Allows Permanent Earning Power Loss",
+      "description": "The contract's eligibility delay mechanism incorrectly assumes that once a delegatee's score falls below the eligibility threshold, the staker's earning power becomes 0 until the delay expires. However, if the delegatee's score is restored above the threshold before the delay expires, the staker's earning power remains 0 indefinitely because the `timeOfIneligibility` timestamp is never reset. This creates a permanent accounting error where users lose earning power even after their delegatee regains eligibility. The bug stems from a one-way state transition: `timeOfIneligibility` is set when eligibility is lost, but never cleared when eligibility is regained. This breaks the protocol's economic invariant that earning power should reflect current delegatee score.",
+      "severity": "critical",
+      "original_id": "055f90d6eda17f62"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_044",
+      "title": "Access Control Bypass in claimRewardOnBehalf Allows Unauthorized Reward Claiming",
+      "description": "The claimRewardOnBehalf function allows either the deposit owner or claimer to claim rewards via signature, but it uses _useNonce(deposit.owner) only in the owner's signature path, while using _useNonce(deposit.claimer) in the claimer's path. This creates a critical access control boundary violation: an attacker who is the deposit owner but not the claimer can forge a signature using the claimer's nonce (which they can observe or predict) and claim rewards as the claimer, then immediately invalidate the claimer's nonce by calling _useNonce(deposit.owner) \u2014 effectively stealing the claimer's reward claim rights. The nonce is consumed in the owner's path but not in the claimer's path when the owner impersonates the claimer, leading to nonce desynchronization and unauthorized reward extraction.",
+      "severity": "critical",
+      "original_id": "d2eb53ce4a43913e"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_045",
+      "title": "Nonce Consumption Inconsistency in claimRewardOnBehalf Enables Replay Attacks",
+      "description": "In claimRewardOnBehalf, when the owner claims on behalf of the claimer, the function calls _useNonce(deposit.owner) after validating the claimer's signature \u2014 but the signature was constructed using nonces(deposit.claimer). This creates a representation boundary violation: the signature validation expects the claimer's nonce, but the state update consumes the owner's nonce. This desynchronizes the nonce state, allowing an attacker to replay the same claimer signature multiple times if the owner's nonce is not incremented elsewhere. Since the claimer's nonce remains unchanged, the same signature can be reused to claim rewards repeatedly, bypassing the nonce protection mechanism entirely. This is a critical representation boundary failure where the function consumes a nonce from one identity while validating against another.",
+      "severity": "critical",
+      "original_id": "0e7d04045e0e0941"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_046",
+      "title": "Signature Validation Uses Incorrect Nonce Source for Owner Claims",
+      "description": "In claimRewardOnBehalf, when validating an owner signature, the function uses _useNonce(deposit.owner) inside the hash construction, but then calls _useNonce(deposit.owner) again after validation. This double-consumption of the owner's nonce breaks the nonce invariant: the nonce is consumed during hash generation (via _useNonce) and then consumed again after validation. This means the signature is constructed using a nonce that has already been incremented, making it invalid. Any legitimate owner attempting to claim rewards will have their signature rejected, effectively locking them out of claiming rewards unless they know to use the next nonce. This is a representation boundary failure: the function expects the signature to be built with the current nonce, but internally increments it before validation, causing a mismatch.",
+      "severity": "high",
+      "original_id": "471d12cdbae8bc8c"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_047",
+      "title": "Nonce Premature Consumption in Signature Hash Construction",
+      "description": "All onBehalf functions (stakeOnBehalf, stakeMoreOnBehalf, etc.) call _useNonce(_depositor) inside the hash construction before signature validation. This is a representation boundary violation: the nonce used in the signature must be the current nonce at the time of signing, but _useNonce() increments it immediately. This means the signature is constructed with a nonce that is already outdated \u2014 the signer must use the next nonce, not the current one. This breaks the EIP-712 signature semantics entirely. A legitimate user signing a transaction will use the current nonce (n), but the contract expects the signature to be built with nonce (n+1), causing all valid signatures to be rejected. This renders the entire signature-based functionality unusable.",
+      "severity": "critical",
+      "original_id": "d9bc718ec4ec7f3c"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_048",
+      "title": "Earning Power Calculation Bypass via Stale Oracle Window Exploitation",
+      "description": "The contract allows stakers to claim 100% earning power when the oracle is stale (last update > STALE_ORACLE_WINDOW), but does not account for the fact that a delegatee may have been ineligible for a long time. This creates a scenario where a staker can receive full earning power even if their delegatee's score is zero or below threshold, as long as the oracle has been stale. This violates the core economic assumption that earning power is tied to delegatee eligibility, leading to unjustified rewards.",
+      "severity": "high",
+      "original_id": "fb1aa7842617e425"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_049",
+      "title": "No Fund Handling Logic - Misleading Interface Assumption",
+      "description": "The contract implements IEarningPowerCalculator but has no mechanism to hold, receive, or process any funds. However, the interface name and usage context (earning power calculator for staking) strongly imply it manages staked assets. This creates a dangerous assumption by external systems that this contract handles funds, when in reality it only calculates eligibility. If external protocols send funds to this contract (e.g., during withdrawal, reward distribution, or staking flows), those funds become permanently stuck because there is no withdrawal, refund, or claim mechanism. The contract has no fallback/receive function, no deposit logic, and no way to return funds \u2014 leading to irreversible fund loss.",
+      "severity": "critical",
+      "original_id": "6ea86c6d60552f43"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_050",
+      "title": "Economic Manipulation via Unprotected Threshold Update During Eligibility Window",
+      "description": "The function _setDelegateeScoreEligibilityThreshold allows the contract owner to change the eligibility threshold at any time without synchronization to the timeOfIneligibility mapping. This enables an attacker to manipulate the system by lowering the threshold just after a delegatee becomes ineligible, causing the system to incorrectly reset their earning power to 100% despite the delay requirement. This bypasses the intended 24-hour (or configured) cooldown period, allowing users to regain full earning power immediately after being penalized, effectively avoiding the penalty mechanism entirely. The attack exploits the lack of reset on timeOfIneligibility when the threshold is lowered, creating a state inconsistency that breaks the economic invariant of delayed eligibility recovery.",
+      "severity": "high",
+      "original_id": "d84b98c751cf6803"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_051",
+      "title": "Incorrect Unit Representation in getNewEarningPower Return Value",
+      "description": "The function getNewEarningPower returns a tuple (uint256 earningPower, bool shouldUpdate). The earningPower is returned as either 0 or _amountStaked (raw token amount). However, the caller (likely a staking or reward distribution contract) expects this value to be used in share-based calculations, where the earning power should represent a percentage or normalized factor (0.0 to 1.0), not the absolute staked amount. When this raw amount is used in a proportional distribution formula (e.g., userShare = (earningPower / totalEarningPower) * totalRewards), it causes catastrophic miscalculation: a user with 1000 tokens staked and earning power 1000 will be assigned 1000x more reward than a user with 1 token and earning power 1, even though both have 100% eligibility. This leads to total reward distribution being skewed by orders of magnitude, draining the reward pool and causing insolvency.",
+      "severity": "critical",
+      "original_id": "9976889f75d2cd19"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_052",
+      "title": "Data Structure Desynchronization in timeOfIneligibility Mapping",
+      "description": "The timeOfIneligibility mapping records when a delegatee's score drops below the eligibility threshold. However, if a delegatee's score is updated multiple times while below threshold (e.g., fluctuating between 49 and 51 when threshold is 50), the timeOfIneligibility is only set once \u2014 when first crossing below. If the score later rises above threshold, the system assumes eligibility is restored immediately, ignoring the updateEligibilityDelay. But if the score drops again, timeOfIneligibility is not updated because it was already set. This creates a desynchronization: the system believes the delay has already started, even if the delegatee was eligible in between. An attacker can exploit this by repeatedly pushing a delegatee's score just below and above threshold to 'reset' the cooldown timer without waiting, effectively bypassing the delay mechanism. This allows continuous eligibility without penalty, undermining the protocol's incentive structure.",
+      "severity": "high",
+      "original_id": "27d32e6078b51940"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_053",
+      "title": "Unrestricted Token Withdrawal via Constructor Approval Enables Permanent Fund Theft",
+      "description": "The DelegationSurrogate contract automatically approves the deployer to spend the entire token balance via the constructor, but provides no mechanism to revoke or limit this approval. Since the approval is set to type(uint256).max and never modified, any future transfers of the token from this contract can be executed by the deployer without restriction. This creates a critical access control flaw: the deployer can drain all tokens held by the contract at any time, even if the contract was intended to hold tokens for delegation purposes (e.g., for a governance or staking system). The vulnerability is not mitigated by any subsequent function, as the contract has no withdrawal, transfer, or revocation logic. This is a fundamental design flaw that violates the principle of least privilege and renders the contract unsafe for holding any non-trivial token balance.",
+      "severity": "critical",
+      "original_id": "24b45fd87b00cbd2"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_054",
+      "title": "Unrestricted Token Transfer via Constructor Approval",
+      "description": "The DelegationSurrogate contract automatically approves the deployer to transfer any amount of the ERC20 token via a call to approve() in the constructor. This grants the deployer unlimited, irreversible spending authority over the token held by the contract. Since the contract has no functions to withdraw, transfer, or restrict the approved spender, and no mechanism to revoke approval, the deployer can drain the token balance at any time without restriction or user consent. This constitutes a critical design flaw where the contract's sole purpose \u2014 holding tokens \u2014 is undermined by granting unrestricted access to a single entity with no accountability or user protection.",
+      "severity": "critical",
+      "original_id": "b2fcbc9f08b7a4b2"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_055",
+      "title": "Missing Access Control on Token Approval Allows Unauthorized Token Drain",
+      "description": "The constructor of DelegationSurrogate calls approve(msg.sender, type(uint256).max) on the provided ERC20 token, granting the deployer unlimited approval to spend the token. However, the contract does not store the token address or enforce any access control over subsequent transfers. Since the contract has no functions to withdraw or manage the token, and the approval is granted to msg.sender (the deployer) at deployment time, an attacker who deploys the contract can immediately drain all tokens from the contract by calling transferFrom on the ERC20 token. This is not a boundary violation in economic calculations but a critical access control failure: the contract is designed to hold tokens, yet provides no mechanism to restrict or audit token movement after deployment. The approval is granted unconditionally and permanently, and the contract has no state to track or restrict usage. This constitutes a critical failure in access control boundaries because the contract's entire purpose \u2014 holding tokens \u2014 is rendered meaningless by the lack of any subsequent control mechanism.",
+      "severity": "critical",
+      "original_id": "92de96bfdbb7418e"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_056",
+      "title": "Inconsistent Eligibility State Tracking Due to Missing Ineligibility Reset on Score Recovery",
+      "description": "When a delegatee's score drops below the eligibility threshold, the contract records the timestamp of ineligibility in `timeOfIneligibility`. However, if the delegatee's score later increases back above the threshold, the ineligibility timestamp is never reset. This causes `getNewEarningPower` to incorrectly require the update delay to elapse again even after the delegatee has regained eligibility, preventing immediate earning power restoration despite being eligible. This is a type system integrity issue because the semantic state (eligible/ineligible) is not properly normalized \u2014 the contract conflates historical state with current state without clearing the ineligibility marker upon recovery.",
+      "severity": "high",
+      "original_id": "8ce3b12392288669"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_057",
+      "title": "getNewEarningPower Returns False Positive Update Eligibility When Oracle Is Stale or Paused",
+      "description": "The `getNewEarningPower` function returns `(amountStaked, true)` when the oracle is stale or paused, implying that an update is eligible. However, `getEarningPower` returns `amountStaked` under the same conditions without requiring an update. This creates a logical inconsistency: `getNewEarningPower` suggests an update should occur (because it returns `true`), but no actual state change is needed or allowed. This misleads callers (e.g., staking UIs or automation) into attempting unnecessary updates, which may fail or waste gas. The issue stems from treating the stale/paused state as a 'default eligible' state for update eligibility, while the actual earning power is already at maximum. This is a lifecycle integrity flaw in state commitment logic.",
+      "severity": "high",
+      "original_id": "f07b3a92ba3c93b4"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_058",
+      "title": "Delegatee Score Lock Bypass via Owner Override Without Resetting Ineligibility Timestamp",
+      "description": "The `overrideDelegateeScore` function allows the owner to set a delegatee's score and lock it. However, it does not reset the `timeOfIneligibility` mapping even if the new score is above the eligibility threshold. If the delegatee was previously ineligible and the owner overrides the score to be eligible, the stale `timeOfIneligibility` timestamp remains. This causes `getNewEarningPower` to incorrectly require the update delay to elapse before the staker can regain full earning power, even though the score is now valid and locked. This is a lifecycle integrity flaw: the override operation does not fully reset the eligibility state machine, leaving inconsistent auxiliary state.",
+      "severity": "high",
+      "original_id": "0e20b4dd1607db20"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_059",
+      "title": "Mathematical Domain Violation in Time-Based Eligibility Delay Calculation",
+      "description": "The contract uses `block.timestamp + updateEligibilityDelay` to compute when a delegatee becomes eligible again after ineligibility. However, if `updateEligibilityDelay` is set to 0, the condition `(timeOfIneligibility[_delegatee] + updateEligibilityDelay) <= block.timestamp` becomes `timeOfIneligibility[_delegatee] <= block.timestamp`, which is always true. This causes `getNewEarningPower` to return `true` for update eligibility immediately, even if the delegatee just became ineligible. This is not a mathematical domain error per se, but a logical domain violation: the delay parameter is expected to be > 0 to have meaningful semantics. The contract does not validate that `updateEligibilityDelay > 0` during `_setUpdateEligibilityDelay`, allowing a zero delay to break the intended behavior. This results in incorrect earning power update triggers.",
+      "severity": "medium",
+      "original_id": "09d2d8f08f5b9726"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_060",
+      "title": "DelegationSurrogate Accepts Arbitrary ERC20 Deposits Without Authorization, Enabling Fund Theft",
+      "description": "The DelegationSurrogate contract has no receive() or fallback() function to reject native ETH, but more critically, it has no mechanism to prevent arbitrary ERC20 token deposits. Any user can send any ERC20 token to the contract at any time. The constructor only approves the deployer to spend the token specified during deployment, but does not restrict which tokens can be deposited. This allows an attacker to deposit malicious or unintended tokens, which the deployer can then withdraw at will, effectively stealing those funds. The contract cannot distinguish between legitimate tokens (intended for delegation) and malicious deposits, leading to mixed fund sources and complete loss of control over deposited assets.",
+      "severity": "critical",
+      "original_id": "f883c86f5d8018ee"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_061",
+      "title": "Insecure Token Approval Grants Unlimited Allowance to Deployer",
+      "description": "The constructor grants unlimited ERC20 approval (type(uint256).max) to the deployer (msg.sender) without any restriction or revocation mechanism. This allows the deployer to drain all tokens held by the surrogate at any time, even if the deployer is untrusted or compromised. The contract assumes the deployer is benign, but this is a dangerous trust assumption with no operational lifecycle controls.",
+      "severity": "critical",
+      "original_id": "f66fdd041e486b74"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_062",
+      "title": "Delegate Call Can Be Reverted by External Contract, Leading to Permanent Loss of Voting Power",
+      "description": "The constructor of DelegationSurrogateVotes calls _token.delegate(_delegatee) without any validation that the delegation was successful. If the governance token contract implements a delegate() function that reverts under certain conditions (e.g., if _delegatee is a contract without a proper fallback, or if the token contract is a fork that requires additional conditions like a minimum stake or whitelisting), the constructor will revert. However, if the token contract's delegate() function does not revert but instead returns false (as permitted by EIP-20/ERC-20 standards for delegate() if it's optional), the constructor will proceed, leaving the surrogate holding tokens with no delegated voting power. This breaks the core purpose of the contract: enabling governance participation. Since the surrogate has no mechanism to re-delegate or reclaim the delegation, the voting power is permanently lost. This is a critical failure of the protocol's primary function, leading to disenfranchisement of users whose tokens are held by the surrogate.",
+      "severity": "high",
+      "original_id": "948bbd654dcd1314"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_063",
+      "title": "Automatic Token Reception Triggers Unintended Delegation Without User Consent",
+      "description": "The DelegationSurrogateVotes contract inherits from DelegationSurrogate, which holds governance tokens on behalf of users. However, the contract has no mechanism to prevent or distinguish between intentional token deposits from users and accidental or malicious transfers of tokens directly to the contract. When tokens are sent directly to the contract (e.g., via a withdrawal refund, misdirected transfer, or external system return), the contract automatically delegates 100% of its total token balance to the pre-configured _delegatee. This means users who deposit tokens expecting to retain control over their voting rights may find their tokens automatically delegated without consent, and users attempting to withdraw may find their tokens immediately delegated again upon return, preventing collection.",
+      "severity": "high",
+      "original_id": "18a917285a693e0a"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_064",
+      "title": "DelegationSurrogateVotes Allows Delegatee to Drain Tokens via Reentrancy",
+      "description": "The constructor of DelegationSurrogateVotes immediately calls _token.delegate(_delegatee) without any access control or validation. This grants the _delegatee full voting power over all tokens held by the surrogate. Since the surrogate holds user tokens on behalf of depositors, and the delegatee is chosen by the deployer (not the users), an attacker who controls the deployer or can influence the delegatee address can permanently redirect all governance voting power to themselves. Furthermore, if the delegatee is a malicious contract, it can reentrantly call back into the surrogate to withdraw tokens before the constructor completes, draining all tokens.",
+      "severity": "critical",
+      "original_id": "4df4dfc1985d1f72"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_065",
+      "title": "Missing Access Control on Token Delegation Allows Vote Manipulation",
+      "description": "The constructor of DelegationSurrogateVotes directly calls _token.delegate(_delegatee) without any access control, allowing anyone to deploy a new surrogate and re-delegate all tokens to an arbitrary address. Since the surrogate holds governance tokens on behalf of users, this enables an attacker to permanently redirect the voting power of all deposited tokens to a malicious delegatee. The vulnerability exists because the contract assumes only the intended deployer will call the constructor, but Solidity allows any external actor to deploy the contract with any delegatee. This breaks the fundamental trust assumption that users' voting rights are delegated only to their chosen representative.",
+      "severity": "critical",
+      "original_id": "2fb27b8cfeab0551"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_066",
+      "title": "Delegate Call Without Validation Allows Invalid or Zero Delegatee",
+      "description": "The constructor of DelegationSurrogateVotes directly calls _token.delegate(_delegatee) without validating that _delegatee is not the zero address or that the token's delegation system expects non-zero delegatees. Many ERC-20 delegation implementations (e.g., Compound, Aave) explicitly revert on zero-address delegation, but even if they don't, delegating to zero address renders voting power inert and irrecoverable. This creates a permanent loss of governance rights for token holders whose tokens are held by this surrogate.",
+      "severity": "critical",
+      "original_id": "39f5000073d6649b"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_067",
+      "title": "Delegate Call May Fail Silently, Leaving Tokens Locked Without Governance Rights",
+      "description": "The delegate() call is made without checking its return value. If the underlying IERC20Delegates implementation reverts (e.g., due to internal restrictions, paused state, or invalid delegatee), the transaction will revert. However, if the delegate() function returns false instead of reverting (as permitted by some non-standard implementations), the surrogate will proceed to hold tokens with no delegation \u2014 effectively locking governance rights permanently. This is a lifecycle integrity failure: state (token ownership) is committed before operation (delegation) is verified.",
+      "severity": "high",
+      "original_id": "0a941922fed83ea2"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_068",
+      "title": "No Mechanism to Revoke or Update Delegation \u2014 Governance Rights Are Frozen",
+      "description": "Once deployed, the delegation is permanent and immutable. There is no function to update the delegatee or revoke delegation. If the delegatee becomes malicious, compromised, or inactive, the tokens held by the surrogate cannot be re-delegated. This violates the principle of dynamic governance and creates a lifecycle trap: the operation (delegation) is committed with no reversal path, even though governance rights are inherently revocable by design in most systems.",
+      "severity": "high",
+      "original_id": "a2f04be1d97bef32"
+    },
+    {
+      "id": "sherlock_tally_2024_12_tool_069",
+      "title": "Interface Compatibility Risk: IERC20Delegates May Not Match Actual Token Implementation",
+      "description": "The contract assumes IERC20Delegates has a delegate(address) function with no parameters other than the delegatee. However, some delegation implementations (e.g., Compound's COMP token) require a signature and nonce for delegateBySig, or have additional parameters like voting power snapshotting. If the underlying token uses a different interface (e.g., delegate(address, uint256) or requires a signature), the ABI encoding will mismatch, causing the delegate() call to revert. This is an external integration compatibility issue: declared interface does not match actual protocol behavior.",
+      "severity": "medium",
+      "original_id": "3c844093dcb97bf5"
+    }
+  ],
+  "input_tokens": 4749,
+  "output_tokens": 1466,
+  "cached_tokens": 94
+}

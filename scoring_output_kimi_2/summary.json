@@ -1,0 +1,90 @@
+{
+  "agent317": {
+    "projects_scored": 4,
+    "avg_detection_rate": 0.4431818181818182,
+    "avg_precision": 0.10654761904761906,
+    "avg_f1": 0.16400474456581707,
+    "total_true_positives": 12,
+    "total_expected": 29,
+    "total_found": 168,
+    "total_false_positives": 156,
+    "per_project": {
+      "code4rena_lambowin_2025_02": {
+        "detection_rate": 0.5,
+        "precision": 0.13333333333333333,
+        "f1_score": 0.2105263157894737,
+        "true_positives": 2,
+        "total_expected": 4,
+        "total_found": 15
+      },
+      "sherlock_oku_2024_12": {
+        "detection_rate": 0.5,
+        "precision": 0.14285714285714285,
+        "f1_score": 0.22222222222222224,
+        "true_positives": 4,
+        "total_expected": 8,
+        "total_found": 28
+      },
+      "sherlock_cork-protocol_2025_01": {
+        "detection_rate": 0.2727272727272727,
+        "precision": 0.12,
+        "f1_score": 0.16666666666666666,
+        "true_positives": 3,
+        "total_expected": 11,
+        "total_found": 25
+      },
+      "code4rena_virtuals-protocol_2025_08": {
+        "detection_rate": 0.5,
+        "precision": 0.03,
+        "f1_score": 0.056603773584905655,
+        "true_positives": 3,
+        "total_expected": 6,
+        "total_found": 100
+      }
+    }
+  },
+  "agent794": {
+    "projects_scored": 4,
+    "avg_detection_rate": 0.7064393939393939,
+    "avg_precision": 0.05574175824175825,
+    "avg_f1": 0.10258853689836808,
+    "total_true_positives": 22,
+    "total_expected": 29,
+    "total_found": 391,
+    "total_false_positives": 369,
+    "per_project": {
+      "sherlock_oku_2024_12": {
+        "detection_rate": 1.0,
+        "precision": 0.08,
+        "f1_score": 0.14814814814814814,
+        "true_positives": 8,
+        "total_expected": 8,
+        "total_found": 100
+      },
+      "code4rena_lambowin_2025_02": {
+        "detection_rate": 0.75,
+        "precision": 0.03296703296703297,
+        "f1_score": 0.06315789473684211,
+        "true_positives": 3,
+        "total_expected": 4,
+        "total_found": 91
+      },
+      "sherlock_cork-protocol_2025_01": {
+        "detection_rate": 0.9090909090909091,
+        "precision": 0.1,
+        "f1_score": 0.1801801801801802,
+        "true_positives": 10,
+        "total_expected": 11,
+        "total_found": 100
+      },
+      "code4rena_virtuals-protocol_2025_08": {
+        "detection_rate": 0.16666666666666666,
+        "precision": 0.01,
+        "f1_score": 0.018867924528301886,
+        "true_positives": 1,
+        "total_expected": 6,
+        "total_found": 100
+      }
+    }
+  }
+}

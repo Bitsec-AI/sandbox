@@ -1,0 +1,472 @@
+{
+  "project": "code4rena_cabal-liquid-staking-token_2025_05",
+  "agent": "agent317",
+  "status": "success",
+  "timestamp": "2026-04-09T12:53:46.681996",
+  "elapsed_seconds": 53.5,
+  "total_expected": 1,
+  "total_found": 63,
+  "true_positives": 0,
+  "false_negatives": 1,
+  "false_positives": 63,
+  "detection_rate": 0.0,
+  "precision": 0.0,
+  "f1_score": 0.0,
+  "matched_findings": [],
+  "missed_findings": [
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_expected_000",
+      "title": "LP unstaking only burns the shares but leaves the underlying tokens in the system, which distorts the shares-to-tokens ratio and leads to incorrect amounts being calculated during staking and unstaking",
+      "description": "Submitted by\nTheSchnilch\n, also found by\nret2basic\n\nhttps://github.com/code-423n4/2025-04-cabal/blob/5b5f92ab4f95e5f9f405bbfa252860472d164705/sources/cabal.move#L1051-L1054\n\nWhen a user unstakes LP tokens, the corresponding shares (Cabal tokens) are burned. However, the actual undelegation from the validator will occur only after a delay of up to 3 days. During this period, the shares are already burned, but the underlying tokens are still included in shares-to-token conversions.\nThis is a problem because, in\nprocess_lp_unstake\n, the amount of tokens to unbond is calculated as follows:\nhttps://github.com/code-423n4/2025-04-cabal/blob/5b5f92ab4f95e5f9f405bbfa252860472d164705/sources/cabal.move#L1051-L1054\n\nThe\nlp_amount\nis calculated based on the amount of tokens actually staked on the validator. This includes tokens that are pending to be undelegated (\nunstaked_pending_amounts\n), for which the Cabal tokens have already been burned.\n\nThis means that the\nunbonding_amount\nis also calculated incorrectly because the\nlp_amount\nis too high. As a result, the\nunbonding_amount\nwill also be too high, and the unstaker will receive too many tokens that are actually belonging to other users.\n\nSince the Cabal tokens a user receives are also calculated this way in\nprocess_lp_stake\n, users will receive too few shares when there are pending undelegations. As a result, they will have fewer tokens after the next\nbatch_undelegate_pending_lps\n:\nhttps://github.com/code-423n4/2025-04-cabal/blob/5b5f92ab4f95e5f9f405bbfa252860472d164705/sources/cabal.move#L946-L953\n\nBecause users receive too many tokens that actually belong to other users, and since this issue occurs during normal unstaking and staking, it is high severity.\n\nThe\nunstaked_pending_amounts\nshould be subtracted from the\nlp_amount\nto correctly account for the pending tokens to be undelegated, for which the Cabal tokens have already been burned.\n\n#[test(\nc = @staking_addr, user_a = @0xAAA, user_b = @0xBBB, user_c = @0xCCC\n)]\nfun test_poc(\nc: &signer,\nuser_a: &signer,\nuser_b: &signer,\nuser_c: &signer\n) {\ntest_setup(c, string::utf8(b\"initvaloper1test\"));\n//gets the metadata for all tokens\nlet ulp_metadata = coin::metadata(@initia_std, string::utf8(b\"ulp\"));\nlet init_metadata = coin::metadata(@initia_std, string::utf8(b\"uinit\"));\nlet cabal_lp_metadata = cabal::get_cabal_token_metadata(1);\nlet x_init_metadata = cabal::get_xinit_metadata();\nlet sx_init_metadata = cabal::get_sxinit_metadata();\nlet initia_signer = &account::create_signer_for_test(@initia_std);\nlet ulp_decimals = 1_000_000; //ulp has 6 decimals\nlet deposit_amount_a = 100 * ulp_decimals; //the amount user a deposits\nprimary_fungible_store::transfer( //user a must first be funded\ninitia_signer,\nulp_metadata,\nsigner::address_of(user_a),\ndeposit_amount_a\n);\nutils::increase_block(1, 1);\ncabal::mock_stake(user_a, 1, deposit_amount_a); //user a stakes 100 ulp\nutils::increase_block(1, 1);\nlet deposit_amount_b = 50 * ulp_decimals; //the amount user b stakes\nprimary_fungible_store::transfer(\ninitia_signer,\nulp_metadata,\nsigner::address_of(user_b),\ndeposit_amount_b\n);\nutils::increase_block(1, 1);\ncabal::mock_stake(user_b, 1, deposit_amount_b); //user b stakes 50 ulp\nutils::increase_block(1, 1000);\ncabal::mock_unstake(user_b, 1, deposit_amount_b); //user b unstakes 50 ulp this means the cabal tokens are now 100 and the underlying tokens 150\n//This mock unstaking uses the pool balances instead of querying the validator because Cosmos is not supported during testing.\n//However, this is not a problem, since the pools are only modified after the undelegation, not during the unstaking\nutils::increase_block(1, 1000);\ncabal::mock_unstake(user_a, 1, 50 * ulp_decimals); //user a unstakes half of his cabal lp tokens for which 50 ulp tokens should be unstaked but actually 75 are getting unstaked\n}\n\nYou can also add\ndebug::print(&unbonding_amount);\nto line 1334 in cabal.move to verify that 75 ULP tokens are being unstaked instead of 50.\n\nTo run the POC, paste it into the file\ntests/core_staking_test.move\nand run the command\ninitiad move test -f test_poc",
+      "severity": "high",
+      "reason": "Not found"
+    }
+  ],
+  "undecided_findings": [],
+  "extra_findings": [
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_000",
+      "title": "Mathematical Precision Error in xINIT Staking Reward Calculation",
+      "description": "The `compound_xinit_pool_rewards` function incorrectly calculates the reward distribution when processing xINIT staking. The function withdraws rewards from the pool router and distributes them, but the formula for calculating the fee and remaining rewards uses the original reward amount rather than the actual withdrawn amount. This can lead to incorrect fee calculations and reward distribution when the withdrawn amount differs from the expected reward amount.",
+      "severity": "high",
+      "original_id": "9c038869bbb76552"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_001",
+      "title": "State Desynchronization in LP Pool Reward Compounding",
+      "description": "The `compound_lp_pool_rewards` function updates the `staked_amounts` and `stake_reward_amounts` state variables when compounding LP rewards, but these updates are not synchronized with the actual LP token supply and stake amounts. This can lead to inconsistencies between the recorded staked amounts and the actual pool state, potentially allowing attackers to manipulate reward distributions.",
+      "severity": "high",
+      "original_id": "6268e5278222382c"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_002",
+      "title": "Incorrect Ratio Calculation in xINIT Unstaking",
+      "description": "The `process_xinit_unstake` function calculates the amount of xINIT to unbond using a ratio based on the total staked xINIT and the sxINIT supply. However, the calculation does not account for fees or other adjustments made during the staking process, leading to potential inaccuracies in the unbonding amount. This could result in users receiving incorrect amounts when unstaking.",
+      "severity": "medium",
+      "original_id": "44013b8bc1e94bbf"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_003",
+      "title": "Missing Access Control on Critical Functions",
+      "description": "Several critical functions, such as `batch_undelegate_pending_lps` and `vote_using_bribe_weights`, lack proper access control modifiers. While some functions check for manager authorization, others like `batch_undelegate_pending_lps` can be called by any user, potentially allowing unauthorized operations that could disrupt the protocol's normal functioning.",
+      "severity": "medium",
+      "original_id": "4ab0018498eff41e"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_004",
+      "title": "State Desynchronization in update_l2_data Function",
+      "description": "The update_l2_data function has a critical state desynchronization vulnerability where the l2_cabal_balance variable is borrowed twice with different mutable references, causing the second borrow to overwrite the first. This leads to incorrect snapshot updates and potential balance manipulation.\n\n**Mathematical Proof:**\n1. Function borrows l2_cabal_balance initially: `let l2_cabal_balance = table::borrow_mut(&mut holder_store.holder_balance_map, l2_address)`\n2. Inside the loop, it borrows again: `l2_cabal_balance = table::borrow_mut(&mut holder_store.holder_balance_map, l2_address)`\n3. The second borrow creates a new mutable reference that doesn't reflect the changes made to l2_snapshot_value during the loop\n4. Final update uses the stale reference: `table::upsert(&mut l2_cabal_balance.snapshot, key, l2_snapshot_value)`\n\n**Exploitation Scenario:**\nAn attacker calls update_l2_data with addresses and amounts that sum to less than the actual L2 balance. The loop correctly deducts amounts from l2_snapshot_value, but the final upsert uses a stale reference that doesn't reflect these deductions, leaving the L2 balance artificially inflated.\n\n**Financial Impact:**\nL2 address maintains higher balance than it should, allowing it to withdraw more tokens than it actually has. Users receive correct amounts but L2 balance isn't properly reduced, leading to protocol insolvency.",
+      "severity": "high",
+      "original_id": "4b1378ce688057ae"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_005",
+      "title": "Incorrect Snapshot Balance Calculation in get_snapshot_balance_internal",
+      "description": "The get_snapshot_balance_internal function has flawed logic for retrieving historical balances. It iterates through snapshots but only looks at the first result after the target block height, which may not be the closest snapshot.\n\n**Mathematical Proof:**\n1. Function uses table::iter with limit=2 and starts from target block height\n2. It only checks if iterator has at least one element and returns the first balance found\n3. If there are multiple snapshots after the target block, it returns an arbitrary one rather than the closest\n4. Example: Snapshots at blocks 1000, 1100, 1200. Query for block 1050 returns balance from block 1100 instead of 1000\n\n**Exploitation Scenario:**\nAn attacker can manipulate snapshot timing to create misleading historical balances. By performing actions right before and after snapshots, they can make it appear they had different balances than they actually did at specific block heights.\n\n**Financial Impact:**\nIncorrect reward calculations, voting power miscalculations, or improper distribution of funds based on historical balances. Users could receive more or less than they're entitled to based on flawed historical data.",
+      "severity": "high",
+      "original_id": "43334296dcc850dd"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_006",
+      "title": "Missing Access Control on snapshot Function",
+      "description": "The snapshot function is marked as public(friend) but lacks proper access control validation. While it's friend-restricted, the function doesn't verify that the caller is authorized to perform snapshot operations.\n\n**Mathematical Proof:**\n1. Function signature: `public (friend) fun snapshot()`\n2. No access control checks within the function body\n3. Friend modules can call this function without any additional validation\n4. If a friend module is compromised or has flawed logic, it can trigger snapshots at inappropriate times\n\n**Exploitation Scenario:**\nA compromised friend module (voting_reward or cabal) could call snapshot() repeatedly or at malicious times, disrupting the snapshot mechanism and causing incorrect balance calculations throughout the system.\n\n**Financial Impact:**\nMalicious snapshot timing could freeze balances at disadvantageous points for users, manipulate reward distributions, or cause protocol-wide accounting errors leading to fund misallocation.",
+      "severity": "high",
+      "original_id": "208d3c6437f776b1"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_007",
+      "title": "Unauthorized Emergency Module Initialization",
+      "description": "The init_module function contains an authorization check that verifies the signer's address equals @staking_addr. However, this check relies on the module being deployed at the expected address. If an attacker deploys a malicious version of this module at a different address, they could call init_module with their own signer and gain control over the pause functionality. The vulnerability exists because the check only verifies that the signer matches the module's address, not that the module is deployed at the correct protocol address. An attacker could deploy this module elsewhere, initialize it with their address, and then potentially interfere with protocol operations by manipulating pause states.",
+      "severity": "high",
+      "original_id": "a68f685b587e1211"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_008",
+      "title": "Missing Pause State Initialization Protection",
+      "description": "The init_module function starts with the protocol paused (paused: true) to allow admin setup. However, there's no protection against re-initialization if the PauseFlag resource is somehow removed or if the module is re-deployed. While Move's resource system provides some protection, if an attacker finds a way to remove the PauseFlag resource (through other vulnerabilities or module upgrades), they could potentially re-initialize the module with different pause states. This could allow an attacker to unpause the protocol prematurely or manipulate the initial state.",
+      "severity": "medium",
+      "original_id": "8254b98bb9d7a4fd"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_009",
+      "title": "Division by Zero in Bribe Weight Calculation",
+      "description": "The `calculate_bribe_weights_for_cycle` function calculates weights by dividing each bridge's bribe amount by the total bribe amount. When total_amount is zero (no bribes deposited for a cycle), this causes division by zero in `bigdecimal::from_ratio_u64(record.amount, total_amount)`. This will crash the function and prevent any voting weight calculations for that cycle, potentially disrupting the entire voting mechanism.\n\n**Mathematical Proof:**\n- If total_amount = 0 (no bribes deposited)\n- For any bridge with record.amount = X, calculation becomes: X / 0\n- Division by zero is mathematically undefined and will cause runtime failure\n\n**Exploitation Scenario:**\nAn attacker could intentionally avoid depositing bribes for a cycle, or front-run legitimate bribe deposits to ensure total_amount remains zero. This would prevent the protocol from calculating voting weights, potentially stalling governance decisions or causing protocol instability.\n\n**Financial Impact:**\nProtocol governance becomes non-functional for affected cycles, potentially preventing critical parameter updates, emergency responses, or reward distributions. The impact is systemic rather than direct fund loss.",
+      "severity": "high",
+      "original_id": "a8d9171ce2b3b6b6"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_010",
+      "title": "Incorrect USD Value Calculation in Bribe Aggregation",
+      "description": "The `calculate_bribe_value_in_usd` function incorrectly multiplies the USD value by 10^6 (USD_DECIMALS) when aggregating values, effectively inflating the total bribe value by a factor of 1,000,000. This causes voting weights to be calculated based on artificially inflated values.\n\n**Mathematical Proof:**\n- Function calls: `utils::get_token_value_in_usd(coin_metadata, amount)` which should return USD value\n- Then incorrectly multiplies: `bigdecimal::mul_by_u64(value, math64::pow(10, USD_DECIMALS))`\n- USD_DECIMALS = 6, so multiplication factor = 1,000,000\n- Example: $100 bribe becomes calculated as $100,000,000\n\n**Exploitation Scenario:**\nAttackers can deposit small bribes that get massively inflated in value calculation, allowing them to disproportionately influence voting weights. A $10 bribe would be calculated as $10,000,000, potentially giving them majority voting power with minimal investment.\n\n**Financial Impact:**\nVoting mechanism becomes manipulable with minimal capital expenditure. Legitimate participants' voting power is diluted, and attackers can control governance decisions with trivial bribes, potentially leading to malicious parameter changes or fund theft.",
+      "severity": "high",
+      "original_id": "593543818aaec1bd"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_011",
+      "title": "Missing Access Control on Critical Administrative Functions",
+      "description": "The administrative functions `set_deposit_voting_reward_fee_bps` and `set_allowed_bribe_tokens` only check that the caller is `@staking_addr`, but there's no mechanism to ensure this is actually the protocol admin. If the `@staking_addr` account is compromised or incorrectly configured, attackers can take full control of bribe parameters.\n\n**Exploitation Scenario:**\nIf the `@staking_addr` account private key is leaked or if the module is deployed with incorrect permissions, an attacker can:\n1. Set deposit fee to 100% (10,000 bps) to steal all bribe deposits\n2. Remove all allowed bribe tokens to disable the bribe system\n3. Add malicious tokens to manipulate price calculations\n\n**Financial Impact:**\nComplete compromise of the bribe system. Attackers can steal 100% of deposited bribes by setting maximum fees, or disable the system entirely. This represents total loss of control over the voting incentive mechanism.",
+      "severity": "high",
+      "original_id": "0df59f9f298f0747"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_012",
+      "title": "Integer Underflow in Fee Calculation",
+      "description": "The fee calculation in `deposit_bribe` subtracts `fee_amount` from `reward_amount` without checking if `fee_amount` is greater than `reward_amount`, which could cause integer underflow when the fee percentage is high and the reward amount is small.\n\n**Mathematical Proof:**\n- fee_amount = (deposit_voting_reward_fee_bps / 10000) * reward_amount\n- rewards_remaining = reward_amount - fee_amount\n- If deposit_voting_reward_fee_bps = 10000 (100% fee) and reward_amount = 1:\n  fee_amount = 1, rewards_remaining = 1 - 1 = 0 (valid)\n- But if reward_amount = 0 (though prevented by assert), or if rounding causes issues:\n  Underflow could occur\n\n**Exploitation Scenario:**\nWhile the `reward_amount > 0` check prevents the obvious underflow, edge cases with very small amounts and high fee percentages could lead to calculation errors. If the fee calculation rounds up instead of truncating, it could exceed the reward amount.\n\n**Financial Impact:**\nTransaction failure due to arithmetic errors, potentially locking funds or causing inconsistent state. While less severe than fund loss, it represents a denial-of-service vulnerability.",
+      "severity": "medium",
+      "original_id": "4f635fa8952e53eb"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_013",
+      "title": "State Desynchronization in unlock_lp Function Leads to Incorrect Unstaking",
+      "description": "The unlock_lp function uses a ratio-based approach to distribute unstaking amounts across pools, but the state tracking becomes desynchronized when the actual staked amounts differ from the tracked amounts. The function calculates a ratio based on the total tracked stakes, but then applies this ratio to individual pool amounts that may not reflect the actual staked amounts on-chain. This can lead to either over-unstaking (causing protocol insolvency) or under-unstaking (locking user funds).",
+      "severity": "high",
+      "original_id": "65c407daf7dbb48d"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_014",
+      "title": "Mathematical Precision Error in Ratio Calculation Causes Fund Locking",
+      "description": "The unlock_lp function uses bigdecimal::from_ratio_u64(amount, total_amount) to calculate a ratio for distributing unstaking amounts. When amount is small relative to total_amount, the ratio can round down to zero, causing the unstaking operation to fail silently. This permanently locks user funds as the protocol cannot process small unstaking requests.",
+      "severity": "high",
+      "original_id": "e15c8639ed878a0c"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_015",
+      "title": "Incorrect Final Pool Amount Assignment in unlock_lp Function",
+      "description": "The unlock_lp function uses a flawed algorithm where the last pool receives the remaining amount (remain_amount) rather than its proportional share. This can lead to significant accounting errors when the ratio calculation doesn't distribute the exact requested amount across pools. The last pool may receive substantially more or less than its proportional share, breaking the intended distribution logic.",
+      "severity": "high",
+      "original_id": "57f0dd302613fcfe"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_016",
+      "title": "Missing Initialization Access Control Allows Protocol Takeover",
+      "description": "The `init_module` function lacks proper access control, allowing any caller to initialize the module and set themselves as the commission fee store address. This enables an attacker to take control of the protocol's commission fees and potentially other critical functions.\n\n**Mathematical Proof:**\n- Attacker calls `init_module()` from their address (not @staking_addr)\n- Function executes without access control check (only checks signer address equals @staking_addr, but this can be bypassed)\n- Attacker becomes the `commission_fee_store_addr` in ModuleStore\n- All commission fees now route to attacker's address instead of legitimate protocol\n\n**Exploitation Scenario:**\n1. Attacker deploys a malicious contract that calls `init_module()`\n2. Protocol initialization succeeds, setting attacker as commission fee recipient\n3. All future commission fees are sent to attacker's address\n4. Attacker can also potentially manipulate other protocol functions through this unauthorized initialization\n\n**Financial Impact:**\n- All protocol commission fees are permanently diverted to attacker\n- Protocol loses revenue stream permanently\n- Users' commission fees are stolen instead of going to legitimate protocol treasury",
+      "severity": "critical",
+      "original_id": "f335ccff3497c666"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_017",
+      "title": "Missing Reinitialization Protection Allows State Corruption",
+      "description": "The `init_module` function lacks protection against multiple initializations, allowing attackers to reinitialize the module and overwrite critical state variables including the commission fee store address and resource account references.\n\n**Mathematical Proof:**\n- ModuleStore is stored at @staking_addr address\n- No check exists to prevent multiple calls to `init_module()`\n- Attacker calls `init_module()` after legitimate initialization\n- New ModuleStore overwrites existing one with attacker-controlled values\n- All resource account references and commission fee address are replaced\n\n**Exploitation Scenario:**\n1. Legitimate protocol initializes normally\n2. Attacker calls `init_module()` with their address\n3. ModuleStore at @staking_addr is overwritten\n4. Resource account signers and commission fee address now point to attacker-controlled addresses\n5. Protocol functionality is completely compromised\n\n**Financial Impact:**\n- Complete protocol takeover\n- All assets in resource accounts can be stolen\n- Commission fees diverted to attacker\n- Permanent loss of user funds",
+      "severity": "critical",
+      "original_id": "c00a8d9cdc99d721"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_018",
+      "title": "Unprotected Commission Fee Address Update Allows Fee Diversion",
+      "description": "The `set_commission_fee_store_addr` function allows changing the commission fee store address but lacks validation on the new address, enabling attackers to set invalid or malicious addresses that can lead to permanent loss of commission fees.\n\n**Mathematical Proof:**\n- Function only checks that caller is @staking_addr\n- No validation on `commission_fee_store_addr` parameter\n- Attacker (if they compromise @staking_addr) can set:\n  - Zero address (0x0) - fees permanently burned\n  - Invalid address - fees permanently lost\n  - Their own address - fees stolen\n- No way to recover from incorrect address setting\n\n**Exploitation Scenario:**\n1. Attacker gains control of @staking_addr (through social engineering or other vulnerability)\n2. Calls `set_commission_fee_store_addr` with malicious address\n3. All future commission fees are sent to invalid/malicious address\n4. Funds are permanently lost or stolen\n\n**Financial Impact:**\n- Permanent loss of all commission fees\n- Protocol revenue stream destroyed\n- Users' commission fees burned or stolen",
+      "severity": "high",
+      "original_id": "832074337fc34d8c"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_019",
+      "title": "Front-Running Attack on Role Creation",
+      "description": "The `create_role` function uses deterministic address generation via `object::create_object_address` without checking if a role already exists at that address. An attacker can front-run the role creation by pre-creating a resource at the predicted role object address, causing the role creation to fail permanently. This prevents the protocol from creating critical roles needed for access control.\n\n**Mathematical Proof:**\n- Role address = object::create_object_address(resource_account_address, role_name)\n- The address is deterministic based on resource account address and role name\n- Attacker can compute: role_address = hash(resource_account_address || role_name)\n- Before legitimate role creation, attacker calls: move_to(attacker_signer, MaliciousResource {}) at role_address\n- When protocol tries to create role: assert!(!exists<Role>(role_address)) fails because attacker's resource exists\n\n**Exploitation Scenario:**\n1. Attacker monitors mempool for role creation transactions\n2. Computes the deterministic role address for the target role name\n3. Front-runs by creating a malicious resource at that address\n4. Legitimate role creation transaction fails permanently\n\n**Financial Impact:** Protocol cannot create critical roles, potentially preventing core functionality and causing permanent denial of service for role-based access control systems.",
+      "severity": "high",
+      "original_id": "35c078f88587f795"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_020",
+      "title": "Missing Access Control on Role Member Removal",
+      "description": "The `remove_role_member` function allows both the role admin AND the protocol manager to remove members. However, the function only checks if the caller is a role admin, not if they are the protocol manager. This creates an access control bypass where the protocol manager cannot remove role members unless they are also the role admin.\n\n**Mathematical Proof:**\n- Function signature: remove_role_member(admin: &signer, role_name: vector<u8>, member: address)\n- Access check: assert!(is_role_admin(signer::address_of(admin), role_name), ERR_UNAUTHORIZED)\n- is_role_admin returns true for protocol manager OR role admin\n- But the function parameter is named 'admin' suggesting it expects only role admins\n- Protocol manager should be able to remove members but the function design suggests otherwise\n\n**Exploitation Scenario:**\n1. Protocol manager needs to remove a malicious role member\n2. Calls remove_role_member but function expects 'admin' parameter\n3. If protocol manager is not the role admin, they cannot remove the member\n4. Malicious member retains access despite protocol manager's authority\n\n**Financial Impact:** Protocol manager loses ability to manage role memberships, potentially allowing malicious actors to maintain unauthorized access to privileged functions.",
+      "severity": "high",
+      "original_id": "727bfb1caf8071b6"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_021",
+      "title": "State Desynchronization in Manager Change Process",
+      "description": "The manager change process uses a two-phase commit but has a critical flaw: when a new manager change proposal is created, it overwrites any existing proposal without proper state synchronization. The `change_manager_address` function drops the old proposal but doesn't ensure the new proposal is properly linked to the current manager state.\n\n**Mathematical Proof:**\n- Current manager: address A\n- Proposal 1: change to address B (stored in ManagerChangeProposal)\n- Before Proposal 1 is accepted, manager creates Proposal 2: change to address C\n- Function drops Proposal 1 and creates Proposal 2\n- But the ManagerChangeProposalCreated event emits: current_manager: A, new_manager: C\n- However, if address B had already started acting as pending manager, this creates confusion\n\n**Exploitation Scenario:**\n1. Manager A proposes change to B\n2. External systems see event and start treating B as pending manager\n3. Manager A changes mind, proposes change to C instead\n4. External systems are now desynchronized - some think B is pending, some think C is pending\n5. When C accepts, systems expecting B may malfunction\n\n**Financial Impact:** External integrations and dependent systems become desynchronized, potentially causing failed transactions, incorrect access control decisions, or protocol instability.",
+      "severity": "high",
+      "original_id": "dd054d0d57782c96"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_022",
+      "title": "Oracle Price Manipulation via Symbol Collision",
+      "description": "The get_token_price_in_usd function constructs an oracle pair symbol by appending '/usd' to the token symbol without proper validation. This allows attackers to create tokens with malicious symbols that could manipulate oracle price lookups. For example, if an attacker creates a token with symbol 'INIT/usd', the constructed pair would be 'INIT/usd/usd', which may resolve to an unexpected or manipulated price feed. This could lead to incorrect value calculations in get_token_value_in_usd, enabling manipulation of staking rewards, collateral values, or other financial calculations that depend on accurate price feeds.",
+      "severity": "high",
+      "original_id": "5b6d255a8004d6b7"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_023",
+      "title": "Precision Loss in USD Value Calculation",
+      "description": "The get_token_value_in_usd function performs division operations that can lead to significant precision loss, especially for tokens with low values or small amounts. The function converts amount to a BigDecimal using from_ratio_u64(amount, 10^decimals), which can round down to zero when amount is small relative to the token's decimals. For example, with a token having 18 decimals and amount = 1 (1 wei), the ratio becomes 1/10^18 = 0.000000000000000001, which may round to zero depending on BigDecimal implementation. When multiplied by price, this results in zero USD value, allowing attackers to exploit scenarios where small amounts should have non-zero value.",
+      "severity": "medium",
+      "original_id": "e68a93eb18094a06"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_024",
+      "title": "Missing Input Validation in Query Function",
+      "description": "The query function accepts arbitrary path and data parameters without validation, potentially allowing injection of malicious queries or paths that could lead to unexpected behavior when interacting with external systems. While the function uses type constraints (Request: drop, Response: drop), it doesn't validate the content of the path vector or the serialized data. An attacker could potentially provide a path that points to a malicious endpoint or data that causes unexpected deserialization behavior.",
+      "severity": "medium",
+      "original_id": "c86c8bbce55aa100"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_025",
+      "title": "Incorrect Reward Calculation Due to Index Variable Shadowing",
+      "description": "The `get_total_reward` function uses the same loop index variable `i` for both the outer loop (iterating over cycles) and the inner loop (iterating over bribe_metas). This causes the inner loop to use the wrong index when accessing the outer loop's data after the first iteration of the inner loop completes. Specifically, after the inner loop finishes, the outer loop index `i` becomes equal to `vector::length(&bribe_metas)`, which is out of bounds for the `cycles` vector. This leads to incorrect cycle data being used for reward calculations beyond the first cycle.",
+      "severity": "high",
+      "original_id": "75b89094386ed99d"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_026",
+      "title": "Precision Loss in Reward Distribution Due to Truncation",
+      "description": "The function `get_cycle_reward_share` calculates a user's reward share using ratio = balance/supply, which is a BigDecimal division. However, when this share is multiplied by the bribe amount in `get_total_reward` and `get_single_reward` using `bigdecimal::mul_by_u64_truncate`, the result is truncated to u64. This truncation can cause significant precision loss, especially when the reward share is small relative to the bribe amount. Attackers can exploit this by making many small deposits to receive rewards that should be fractional but get truncated to zero, or by manipulating the timing of their stakes to maximize truncation errors in their favor.",
+      "severity": "high",
+      "original_id": "d892c72d2b572dd9"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_027",
+      "title": "Inconsistent Reward Claiming Due to State Desynchronization",
+      "description": "The `claim_voting_reward` function calculates the reward amount using `get_single_reward` and then subtracts the already claimed amount. However, if the reward distribution parameters change between the time a user checks their reward and when they claim it (e.g., via admin actions or new cycles being finalized), the calculated `remain_amount` may be incorrect. This could lead to users receiving more or less than their entitled rewards. Specifically, the function does not ensure atomicity between reward calculation and claim execution, allowing state changes to interfere with the claim process.",
+      "severity": "high",
+      "original_id": "99e52edb6b64e3de"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_028",
+      "title": "Snapshot Overwrite Vulnerability in update_snapshot Function",
+      "description": "The update_snapshot function allows overwriting existing snapshots at the same block height, which can corrupt historical reward calculations. When update_snapshot is called multiple times at the same block height, it overwrites the snapshot data with potentially different voting power weights, making historical snapshots unreliable for reward distribution. This violates the fundamental invariant that snapshots should be immutable once taken.\n\nMathematical Proof:\n- Block height = 1000\n- Initial snapshot: Token A weight = 0.6, Token B weight = 0.4\n- Reward calculation starts based on these weights\n- update_snapshot called again at block 1000: Token A weight = 0.7, Token B weight = 0.3\n- Later reward calculations use the overwritten weights, causing incorrect distribution\n\nExploitation Scenario:\nAn attacker who can call update_snapshot (through authorized friend modules) can manipulate historical snapshots to favor certain tokens, potentially redirecting rewards to their own positions. Even without malicious intent, legitimate protocol operations calling update_snapshot multiple times at the same block height would corrupt the snapshot data.\n\nFinancial Impact:\nReward distributions become incorrect, with some users receiving more rewards than deserved and others receiving less. The impact depends on the magnitude of weight changes and the total reward pool size.",
+      "severity": "high",
+      "original_id": "a1da0335a207eaf8"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_029",
+      "title": "Missing Access Control on Critical Snapshot Functions",
+      "description": "The snapshot and update_snapshot functions are marked as 'friend' but lack additional access control checks beyond the friend module restriction. While only friend modules can call these functions, there's no validation that the calls are made at appropriate times or by authorized components within those modules. This allows any friend module to manipulate snapshots arbitrarily.\n\nExploitation Scenario:\nIf any of the friend modules (voting_reward or cabal_token) have vulnerabilities or if additional friend modules are added later without proper security review, attackers could exploit those modules to call snapshot and update_snapshot at malicious times. For example, calling snapshot during reward distribution could interfere with calculations.\n\nFinancial Impact:\nUnauthorized snapshot manipulation could lead to incorrect reward distributions, protocol insolvency, or freezing of funds. The impact is high because snapshots are fundamental to reward calculations.",
+      "severity": "high",
+      "original_id": "01ba0261586019e8"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_030",
+      "title": "Division by Zero Risk in Voting Power Weight Calculation",
+      "description": "The mock_voting_power_weight function contains a division operation that could divide by zero when total_mock_power is zero. While this is in test code, the pattern suggests similar logic might exist in production code. The function calculates weights as mock_power/total_mock_power, which would fail if total_mock_power is zero.\n\nMathematical Proof:\n- If all stake tokens have mock_power = 0, then total_mock_power = 0\n- Division operation: bigdecimal::from_ratio_u64(mock_power, total_mock_power) becomes from_ratio_u64(0, 0) or similar\n- This would cause a division by zero error\n\nExploitation Scenario:\nAn attacker could manipulate the system to create a scenario where total voting power is zero, causing reward calculations to fail. While the specific function is test-only, the vulnerability pattern indicates potential similar issues in production code paths.\n\nFinancial Impact:\nProtocol operations relying on snapshot data would fail, potentially freezing reward distributions or blocking other critical functionality.",
+      "severity": "medium",
+      "original_id": "10617d204d4c0968"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_031",
+      "title": "Merkle Proof Verification Bypass via Hash Collision",
+      "description": "The get_merkle_root_and_proof function creates a merkle tree with only two leaves (user_hash and dummy_hash) and uses a simple byte-by-byte comparison to determine leaf ordering. This creates a vulnerability where an attacker can craft specific hash values to manipulate the merkle root calculation. The bytes_cmp function returns 0 when hashes are equal, which would cause the merkle root to be computed incorrectly. Additionally, the dummy_hash is calculated using total_l2_score - l2_score, which could be manipulated if the attacker controls both scores.",
+      "severity": "high",
+      "original_id": "15787da69810c213"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_032",
+      "title": "Incorrect Reward Distribution Calculation in Partial Lock Staking",
+      "description": "The partial_lock_stake_scene1 and partial_lock_stake_scene2 tests demonstrate complex reward calculations that involve multiple vesting stages and partial lock staking. The mathematical formulas used to calculate vested rewards after partial lock staking appear to have precision issues and incorrect accounting. Specifically, the calculations involving vesting periods, lock staking amounts, and penalty rewards don't properly account for all state changes and could lead to incorrect reward distributions.",
+      "severity": "high",
+      "original_id": "cdd9e25164ccb565"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_033",
+      "title": "Missing Access Control on Operator Address Update Function",
+      "description": "The `update_operator_addr` function allows changing the operator address without proper validation of the new operator's authorization. While it checks that the caller is the current operator, it doesn't verify that the new operator address corresponds to a valid signer or has proper permissions. This could allow an operator to accidentally or maliciously transfer control to an invalid or unauthorized address, potentially locking the operator store permanently.\n\n**Mathematical Proof**: \n- Current operator at address A calls `update_operator_addr` with new address B (which could be zero address or invalid)\n- Operator store now points to address B\n- If B is invalid/unreachable, no future operations can be performed on this operator store\n- All funds and operations tied to this bridge_id/version become permanently inaccessible\n\n**Exploitation Scenario**: An operator accidentally provides an incorrect address, or a malicious operator intentionally transfers control to a dead address, making the operator store unusable.\n\n**Financial Impact**: Permanent loss of access to operator functionality for the specific bridge_id/version combination, potentially locking associated funds or preventing commission collection.",
+      "severity": "high",
+      "original_id": "560f87d5e9d84288"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_034",
+      "title": "Stage-Based Commission Update Race Condition",
+      "description": "The `update_operator_commission` function uses a simple stage number comparison (`stage > operator_info.last_changed_stage`) to prevent multiple updates per stage. However, this creates a race condition where an operator could submit multiple commission updates for the same stage if they are processed in the same block or if the stage number increments slowly. An attacker could exploit this by front-running their own transactions to make multiple commission changes in rapid succession.\n\n**Mathematical Proof**:\n- Stage 10: Commission rate = 0.1 (10%)\n- Operator submits tx1: stage=11, commission=0.2\n- Operator front-runs with tx2: stage=11, commission=0.3\n- If both transactions are included in same block/epoch, both pass the stage check\n- Final commission becomes 0.3 instead of the intended 0.2\n\n**Exploitation Scenario**: An operator can bypass the intended \"once per stage\" limitation by submitting multiple transactions for the same stage number before the stage increments, allowing them to make rapid commission changes that exceed the intended rate change limits.\n\n**Financial Impact**: Operators can change commissions more frequently than intended, potentially harming delegators who expect stable commission rates. This violates the protocol's intended commission change pacing.",
+      "severity": "high",
+      "original_id": "8d71475b10654614"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_035",
+      "title": "Insufficient Commission Change Rate Validation",
+      "description": "The commission change validation calculates the absolute difference between current and new commission rates but doesn't properly handle edge cases where the change rate limit equals zero or where rounding errors in BigDecimal operations could allow bypassing the intended limits.\n\n**Mathematical Proof**:\n- Current commission: 0.15, Max change rate: 0.01\n- Operator attempts to change to 0.1599999999 (just below 0.16)\n- Absolute difference: 0.0099999999\n- Due to BigDecimal precision limitations, this might be considered <= 0.01\n- Effectively allows changes larger than intended\n\n**Exploitation Scenario**: An operator can exploit precision limitations to make commission changes that slightly exceed the intended maximum change rate, accumulating larger changes over multiple updates than the protocol intended.\n\n**Financial Impact**: Gradual erosion of commission change rate protections, allowing operators to increase rates faster than delegators expect, potentially reducing delegator returns over time.",
+      "severity": "medium",
+      "original_id": "83d5baf1976123ed"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_036",
+      "title": "Integer Overflow in TVL Average Calculation",
+      "description": "The TVL average calculation uses u128 for intermediate calculations but the final result is cast to u64. When the intermediate product (count * tvl) exceeds u64::MAX but fits in u128, the division result may be truncated when cast back to u64, leading to incorrect average calculations. This can be exploited by attackers to manipulate TVL averages for financial gain.",
+      "severity": "high",
+      "original_id": "d442c9e7d61833eb"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_037",
+      "title": "Missing Validation of Bridge IDs and TVLs Vector Lengths",
+      "description": "The add_snapshot function accepts separate vectors for bridge_ids and tvls but does not validate they have the same length. If vectors have different lengths, vector::enumerate_ref will panic when trying to access tvls[i] beyond its bounds. This can be exploited to cause transaction failures and disrupt TVL snapshot functionality.",
+      "severity": "high",
+      "original_id": "ff33c56945be61e3"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_038",
+      "title": "Incorrect Average TVL Calculation Formula",
+      "description": "The average TVL calculation incorrectly uses the previous average instead of the cumulative sum. The formula (count * average_tvl + new_tvl) / (count + 1) is mathematically incorrect for calculating a running average. This leads to progressively inaccurate TVL averages that deviate from the true arithmetic mean.",
+      "severity": "high",
+      "original_id": "b318f84b30d2d854"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_039",
+      "title": "Reentrancy Protection Bypass in Stargate Operations",
+      "description": "The reentry_check function uses block height to prevent reentrancy, but stargate operations can execute arbitrary cross-chain messages that may call back into the contract. Since stargate operations are asynchronous and may complete in a future block, the reentry protection can be bypassed by an attacker who calls back into the contract after the stargate operation completes but before the original transaction finishes. This could allow double-spending or state manipulation attacks.\n\nMathematical Proof:\n- Block height at start: 1000\n- reentry_check sets staking_account.last_height = 1000\n- stargate operation executes (asynchronous, completes at block 1001)\n- Attacker callback occurs at block 1001\n- Since staking_account.last_height == 1000 != 1001, reentry_check passes\n- This allows nested execution that should be prevented\n\nExploitation Scenario:\n1. Attacker calls delegate() with malicious validator\n2. During stargate execution, validator calls back to withdraw assets\n3. Callback bypasses reentry protection due to block height difference\n4. Attacker can drain funds or manipulate state\n\nFinancial Impact: Potential loss of all staked funds through double-spending or unauthorized withdrawals.",
+      "severity": "high",
+      "original_id": "d8d6aeed367771d6"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_040",
+      "title": "Incorrect Share Calculation During Slashing Events",
+      "description": "The locked_share_to_amount and amount_to_locked_share functions use proportional calculations that don't properly account for slashing events. When a validator is slashed, the total_share decreases but the locked_share remains constant, leading to incorrect amount calculations. This can result in users being able to withdraw more funds than they should after slashing.\n\nMathematical Proof:\n- Initial: total_share = 1000, total_locked_share = 1000, locked_share = 100\n- After 10% slash: total_share = 900, total_locked_share = 1000 (unchanged)\n- locked_share_to_amount calculation: (100 * 900) / 1000 = 90\n- But actual amount should be: 100 * (900/1000) = 90 (correct)\n- However, the issue arises when multiple operations occur:\n  User A: locked_share = 100, User B: locked_share = 200\n  After slash: total_share = 900\n  User A amount: (100 * 900) / 1000 = 90\n  User B amount: (200 * 900) / 1000 = 180\n  Total = 270, but actual pool only has 900 * (300/1000) = 270 (correct)\n  \nThe vulnerability is more subtle: when new delegations are made after slashing, the calculations become incorrect because the locked_share values don't reflect the slashed state.\n\nExploitation Scenario:\n1. Attacker delegates before slashing event\n2. Validator gets slashed\n3. Attacker makes additional delegations\n4. The share calculations mix pre-slashed and post-slashed values incorrectly\n5. Attacker can withdraw more than their fair share\n\nFinancial Impact: Protocol insolvency where some users receive more funds than available, leading to loss of funds for other users.",
+      "severity": "high",
+      "original_id": "9c2ce29060718f10"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_041",
+      "title": "Front-Runnable Staking Account Creation",
+      "description": "The get_staking_account_signer function creates staking accounts using predictable addresses based on the user's address and a fixed seed. An attacker can front-run user transactions by pre-creating staking accounts at these predictable addresses, potentially causing operations to fail or allowing the attacker to control the staking account.\n\nMathematical Proof:\n- Staking address = create_object_address(user_addr, generate_staking_account_seed(user_addr))\n- generate_staking_account_seed is deterministic based on type name and user address\n- Attacker can compute this in advance for any user\n- Attacker front-runs by creating the account first with malicious code\n\nExploitation Scenario:\n1. User attempts to delegate funds\n2. Attacker detects pending transaction and computes staking address\n3. Attacker front-runs by creating staking account at that address\n4. User's transaction fails or attacker gains control of staking operations\n\nFinancial Impact: Complete loss of user funds through transaction failure or account takeover.",
+      "severity": "high",
+      "original_id": "6861dd11ed9119fc"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_042",
+      "title": "Unbounded Iteration in withdraw_delegator_reward",
+      "description": "The withdraw_delegator_reward function iterates through all validators for a staking account without any gas limits or pagination. If a user has many validator delegations, this function could run out of gas and fail, permanently locking reward withdrawal functionality.\n\nMathematical Proof:\n- Each validator iteration requires gas for stargate call and event emission\n- With N validators, gas cost = N * (base_gas + stargate_gas)\n- If N is large enough (e.g., 1000+), transaction will exceed block gas limit\n- Function becomes permanently unusable for accounts with many delegations\n\nExploitation Scenario:\n1. Attacker delegates to many validators (hundreds or thousands)\n2. Legitimate user's withdraw_delegator_reward function becomes unusable\n3. Rewards are permanently locked in the contract\n\nFinancial Impact: Permanent loss of staking rewards for users with many validator delegations.",
+      "severity": "high",
+      "original_id": "f2f74e04d3f74f87"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_043",
+      "title": "Integer Division Rounding Error in User Vesting Calculation",
+      "description": "The `create_user_vesting` function calculates `vest_max_amount` using integer division: `vesting_reward_amount / (claim_info.end_stage - claim_info.start_stage)`. This division rounds down, potentially causing permanent loss of rewards when the vesting period doesn't evenly divide the total reward amount. The rounding error accumulates across multiple vesting periods, resulting in unclaimable funds that remain locked in the contract.",
+      "severity": "high",
+      "original_id": "3f43077b8cebce28"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_044",
+      "title": "Incorrect Penalty Reward Calculation in User Vesting Claim",
+      "description": "In `batch_claim_previous_user_vestings`, when `value.remaining_reward > vest_amount`, the penalty calculation contains an error: `net_penalty_reward = net_penalty_reward + value.remaining_reward - vest_amount`. This incorrectly adds the entire remaining reward minus vest amount to penalty, but then sets `value.remaining_reward = 0`. The correct calculation should only add the difference between vest_max_amount and vest_amount as penalty. This error causes over-penalization of users when their L2 score is below the minimum threshold.",
+      "severity": "high",
+      "original_id": "613a99dc4665f647"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_045",
+      "title": "Missing Access Control on Critical Vesting Functions",
+      "description": "Multiple critical functions that modify vesting state and withdraw funds are marked as `public(friend)` but lack proper access control validation. Functions like `batch_claim_user_reward`, `batch_claim_operator_reward`, and `withdraw_vesting` can be called by any address in the friend module list without verifying that the caller is authorized to act on behalf of the specified account. This could allow unauthorized parties to claim or withdraw rewards belonging to other users.",
+      "severity": "high",
+      "original_id": "49f0b54bd9090746"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_046",
+      "title": "State Desynchronization in Operator Vesting Calculation",
+      "description": "In `batch_claim_operator_reward`, the function calculates vested amount using `vested_amount = operator_vesting.initial_reward - operator_vesting.remaining_reward`, then calculates new reward as `utils::mul_div_u64(operator_vesting.initial_reward, stage_diff, vesting_period) - vested_amount`. However, if the operator_vesting has been partially claimed in previous operations, this formula doesn't properly account for the cumulative vesting progress, potentially allowing double-counting or incorrect reward distribution when multiple claim operations occur.",
+      "severity": "high",
+      "original_id": "02eb8c2605eeaea2"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_047",
+      "title": "Integer Overflow in mul_div_u64 and mul_div_u128 Functions",
+      "description": "The mul_div_u64 and mul_div_u128 functions perform multiplication before division without checking for potential integer overflow. When multiplying large u64 or u128 values, the intermediate result can exceed the maximum value of u128 or u256 respectively, causing silent overflow and incorrect results. This can be exploited in financial calculations to manipulate voting power, rewards, or other critical protocol metrics.\n\nMathematical Proof:\n- For mul_div_u64: Maximum u64 is 18,446,744,073,709,551,615\n- If a = 18,446,744,073,709,551,615 and b = 2, then (a as u128) * (b as u128) = 36,893,488,147,419,103,230 which fits in u128\n- But if a = 18,446,744,073,709,551,615 and b = 1,000, then (a as u128) * (b as u128) = 18,446,744,073,709,551,615,000 which exceeds u128 max (340,282,366,920,938,463,463,374,607,431,768,211,455) and overflows\n\nExploitation Scenario:\nAn attacker could provide carefully crafted input values that cause overflow in voting power calculations or reward distributions, allowing them to manipulate their voting power or receive incorrect rewards.\n\nFinancial Impact:\nProtocol could incorrectly calculate voting power distributions, reward allocations, or other financial metrics, leading to unfair advantage for attackers and loss of funds for legitimate users.",
+      "severity": "high",
+      "original_id": "6b08e8f0a8bf0375"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_048",
+      "title": "Missing Input Validation in get_customized_voting_power Function",
+      "description": "The get_customized_voting_power function accepts a callback function 'f' that can manipulate voting power calculations without proper validation. This function is called for each denom's voting power calculation, allowing potential manipulation of the final voting power result.\n\nExploitation Scenario:\nA malicious contract could call get_customized_voting_power with a callback function that:\n- Always returns maximum voting power regardless of actual delegation\n- Manipulates voting power based on specific conditions\n- Returns inconsistent values for different denoms\n\nSince there's no validation of the callback function's behavior or authorization checks, any contract can call this function with arbitrary logic.\n\nFinancial Impact:\nAttackers could artificially inflate their voting power to gain disproportionate governance influence, manipulate protocol parameters, or receive unfair rewards based on manipulated voting power calculations.",
+      "severity": "high",
+      "original_id": "2ec4d78661cab2dc"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_049",
+      "title": "Incorrect Voting Power Calculation in get_customized_voting_power",
+      "description": "The voting power calculation in get_customized_voting_power contains a logical error where 'total_voting_power' is declared as 0 but then used in a loop without proper accumulation. The code shows 'total_voting_power = total_voting_power + f(metadata, voting_power)' but Move language requires mutable variables to be declared with 'mut'. This appears to be a syntax error that would prevent compilation or cause incorrect behavior.\n\nMathematical Proof:\nIf the variable is not properly mutable, the calculation:\ntotal_voting_power = 0\nFor each denom: total_voting_power = total_voting_power + voting_power\nWould always result in total_voting_power = voting_power (only the last denom's value)\n\nExploitation Scenario:\nThe function would return only the voting power from the last denom processed, ignoring all previous denoms. This could significantly undercount or overcount voting power depending on the order of processing.\n\nFinancial Impact:\nVoting power calculations would be completely inaccurate, potentially giving some users disproportionate governance power while denying others their legitimate voting rights. This could lead to protocol governance attacks and unfair reward distributions.",
+      "severity": "high",
+      "original_id": "cbbb52eb8a55675a"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_050",
+      "title": "Unbounded Loop in get_delegations Function",
+      "description": "The get_delegations function contains a loop that paginates through delegation responses without any limit on the number of iterations. While each pagination request has a limit, the loop continues until all delegations are retrieved, which could consume excessive gas or cause transaction timeouts for users with many delegations.\n\nExploitation Scenario:\nAn attacker with a large number of delegations (or who can create many small delegations) could cause the function to consume excessive resources when called. While this might not directly lead to fund loss, it could be used in denial-of-service attacks against the protocol.\n\nFinancial Impact:\nProtocol functionality relying on voting power calculations could become unavailable or excessively expensive to call, potentially disrupting governance processes or reward distributions.",
+      "severity": "medium",
+      "original_id": "516b2c77a765140c"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_051",
+      "title": "Missing Access Control on Critical Withdraw Function",
+      "description": "The `withdraw` function is marked as `public(friend)` but the friend module `vip::vesting` is not defined in the provided code. If no valid friend module exists or if the friend relationship is improperly configured, this function could be called by any caller. This allows unauthorized withdrawal of funds from the vault. The function checks that `reward_per_stage > 0` but does not verify the caller's authorization to withdraw funds. An attacker could call this function directly to drain the vault balance.\n\n**Mathematical Proof:**\n- Vault balance: 1000 uinit\n- Attacker calls `withdraw(1000)`\n- Function executes: `primary_fungible_store::withdraw(&vault_signer, reward_metadata(), 1000)`\n- Result: Attacker receives 1000 uinit, vault balance becomes 0\n\n**Exploitation Scenario:** Any address can call the withdraw function if friend module access is not properly enforced, allowing direct theft of vault funds.\n\n**Financial Impact:** Complete loss of all vault funds to unauthorized attackers.",
+      "severity": "critical",
+      "original_id": "fcca6eb422b7a100"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_052",
+      "title": "Incorrect Reward Metadata Hardcoded to uinit",
+      "description": "The `reward_metadata()` function always returns the metadata for 'uinit' coin, but the vault is designed to handle reward distributions. If the actual reward token is different from uinit, all deposit, withdrawal, and balance operations will use the wrong token metadata. This causes complete protocol failure as funds deposited will be in the wrong token type.\n\n**Mathematical Proof:**\n- Protocol expects to use RWD token for rewards\n- User deposits 1000 RWD tokens via `deposit()`\n- Function transfers to vault using `reward_metadata()` which returns uinit metadata\n- Result: 1000 uinit tokens transferred (if user has them), not RWD tokens\n- When vesting tries to withdraw RWD rewards, vault has uinit tokens instead\n\n**Exploitation Scenario:** Protocol becomes unusable as reward token operations target the wrong asset type. Users may accidentally transfer wrong tokens or the vault may hold worthless tokens.\n\n**Financial Impact:** Complete protocol failure - reward system becomes non-functional, users may lose funds by depositing wrong tokens.",
+      "severity": "high",
+      "original_id": "94c08de832e64494"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_053",
+      "title": "Missing Balance Check in Withdraw Function",
+      "description": "The `withdraw` function does not check if the vault has sufficient balance before attempting withdrawal. While `primary_fungible_store::withdraw` may have internal checks, the contract-level validation is missing. If the vault is underfunded, withdrawals could fail or behave unexpectedly. More critically, the function checks `reward_per_stage > 0` but this is unrelated to the actual vault balance.\n\n**Mathematical Proof:**\n- Vault balance: 100 uinit\n- Authorized caller attempts to withdraw 500 uinit\n- Function executes without balance check\n- Result: Withdrawal fails at lower level, but contract logic doesn't anticipate this failure mode\n\n**Exploitation Scenario:** While not directly exploitable for theft, this creates unreliable contract behavior. If combined with other vulnerabilities, it could enable more complex attacks.\n\n**Financial Impact:** Protocol instability and potential loss of funds through failed transactions or unexpected behavior.",
+      "severity": "medium",
+      "original_id": "10b0b116c7f11aef"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_054",
+      "title": "Uninitialized reward_per_stage Allows Protocol Lock",
+      "description": "The `init_module` function initializes `reward_per_stage` to 0 'for safety', but the `withdraw` function requires `reward_per_stage > 0`. If `update_reward_per_stage` is never called or fails to execute, the vault becomes permanently locked - funds can be deposited but never withdrawn.\n\n**Mathematical Proof:**\n- Protocol deployed with `reward_per_stage = 0`\n- Users deposit 10,000 uinit into vault\n- `update_reward_per_stage` fails or is never called\n- `withdraw` function: `assert!(module_store.reward_per_stage > 0, ...)` fails\n- Result: 10,000 uinit permanently locked in vault\n\n**Exploitation Scenario:** Protocol deployment error or administrative failure causes permanent fund lockup. While not directly exploitable by attackers, it represents a critical protocol failure mode.\n\n**Financial Impact:** Permanent loss of all deposited funds if reward_per_stage is never properly initialized.",
+      "severity": "high",
+      "original_id": "17899d4f9e8f8a46"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_055",
+      "title": "Voting Power Calculation Error in Weight Sum Validation",
+      "description": "The vote function validates that the sum of weights is <= 1 by accumulating weights using bigdecimal::add, but then uses a different variable (weight_sum) for the comparison than what was accumulated. The code shows 'weight_sum = bigdecimal::add(weight_sum, *weight);' but then compares 'weight_sum' instead of the accumulated value. This appears to be a typo where the variable name should be consistent. However, looking more carefully, the actual bug is that the weight_sum is initialized as bigdecimal::zero() but then the for_each_ref loop accumulates into a different variable that isn't declared. This would cause a compilation error, but if we assume the intended code is correct, there's a more subtle issue: the validation checks if weight_sum <= 1, but the voting power calculation uses bigdecimal::mul_by_u64_truncate(weight_sum, max_voting_power). If an attacker provides weights that sum to exactly 1 but with high precision decimals, the truncation could cause voting_power_used to be less than max_voting_power, allowing the attacker to vote with less than their full power while passing validation.",
+      "severity": "high",
+      "original_id": "VOTE-001"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_056",
+      "title": "Proposal Execution Race Condition",
+      "description": "The execute_proposal function can be called by anyone and executes based on current time, but there's no protection against multiple executions or front-running. An attacker could monitor the blockchain and call execute_proposal immediately after voting ends, potentially manipulating the timing or causing the function to execute with incomplete vote data. While the function checks if proposal.executed is true, there's a race condition window between when voting ends and when the first execution occurs.",
+      "severity": "medium",
+      "original_id": "EXEC-001"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_057",
+      "title": "Incorrect Voting Power Removal on Vote Update",
+      "description": "When a user updates their vote, the remove_vote function subtracts the previous voting power from the tallies, but the calculation uses the current max_voting_power with the old weights. If the user's voting power has changed between votes (due to staking changes), this could incorrectly remove voting power. For example, if a user had 100 voting power and voted with weights [0.5, 0.5], then their voting power increases to 200, and they vote again, the removal would subtract 50 from each bridge instead of the correct amount based on their previous voting power.",
+      "severity": "high",
+      "original_id": "VOTE-002"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_058",
+      "title": "Division by Zero in Weight Calculation",
+      "description": "In execute_proposal_internal, when proposal.total_tally == 0, the code uses bigdecimal::from_ratio_u64(1, len) where len is the number of bridges. However, if there are no whitelisted bridges (len == 0), this would cause a division by zero. While the protocol likely requires at least one bridge, this edge case could be exploited if all bridges are somehow removed from the whitelist.",
+      "severity": "medium",
+      "original_id": "EXEC-002"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_059",
+      "title": "Incorrect Bridge Share Calculation in Reward Distribution",
+      "description": "The `calculate_share` function incorrectly calculates bridge shares by adding balance share and voting weight share without proper normalization, potentially exceeding the maximum weight ratio and leading to incorrect reward distribution. The function first adds the voting weight portion (weight_vote_ratio * vip_weight) and then adds the balance portion (pool_split_ratio * bridge_balance/total_balance). If the sum exceeds maximum_weight_ratio, it's capped. However, this can lead to bridges with small balances receiving disproportionately high shares if they have high voting weights, while bridges with large balances might get reduced shares due to the cap.\n\nMathematical Proof:\n- Let bridge1 have vip_weight = 0.8 (80%) and bridge_balance = 100, total_balance = 1000\n- Let pool_split_ratio = 0.4, weight_vote_ratio = 0.6, maximum_weight_ratio = 0.5\n- Bridge1 share = (0.6 * 0.8) + (0.4 * 100/1000) = 0.48 + 0.04 = 0.52\n- This exceeds maximum_weight_ratio of 0.5, so it gets capped to 0.5\n- Bridge2 with vip_weight = 0.1 and bridge_balance = 900 would get: (0.6 * 0.1) + (0.4 * 900/1000) = 0.06 + 0.36 = 0.42\n- Total shares become 0.5 + 0.42 = 0.92 < 1.0, meaning rewards aren't fully distributed\n\nExploitation: An attacker could register a bridge with minimal TVL but high voting weight to capture a disproportionate share of rewards, while legitimate bridges with high TVL receive less than their fair share.\nFinancial Impact: Rewards are misallocated between bridges, with some bridges receiving up to the maximum_weight_ratio cap regardless of their actual contribution, while others receive less than deserved.",
+      "severity": "high",
+      "original_id": "eac87fb62f26d06a"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_060",
+      "title": "Incorrect Stage Data Lookup in Multiple Functions",
+      "description": "Several functions use `table_key::encode_u64(stage)` to lookup stage data, but the `get_last_submitted_stage` function returns stage numbers that are used directly without encoding. This creates a mismatch where stage numbers are sometimes encoded and sometimes used raw, potentially leading to incorrect data access.\n\nLocation Evidence:\n- `get_user_funded_reward_internal` uses: `table_key::encode_u64(stage)`\n- `get_operator_funded_reward_internal` uses: `table_key::encode_u64(stage)`\n- `load_stage_data_mut` uses: `table_key::encode_u64(stage)`\n- `get_last_submitted_stage` returns raw u64 stage number\n- `batch_claim_operator_reward_script` uses the raw stage number from `get_last_submitted_stage` without encoding\n\nExploitation: When `batch_claim_operator_reward_script` calls `get_operator_funded_reward_internal` with the raw stage number from `get_last_submitted_stage`, it will encode the stage number again, leading to incorrect table lookups and potentially accessing wrong stage data or failing assertions.\nFinancial Impact: Operators may claim incorrect reward amounts or the function may fail entirely, preventing legitimate reward claims.",
+      "severity": "high",
+      "original_id": "9863e8452ca70049"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_061",
+      "title": "Incorrect Bridge Version Handling in check_previous_stage_snapshot",
+      "description": "The `check_previous_stage_snapshot` function incorrectly handles bridge versions when checking for previous stage snapshots. It uses the current version parameter to construct the snapshot key, but should use the version from the bridge info to ensure consistency.\n\nMathematical Proof:\n- Function receives bridge_id, version, stage parameters\n- It constructs BridgeInfoKey with the provided version\n- But when checking the previous stage snapshot, it uses the same version\n- If a bridge was re-registered with a new version, the previous stage snapshot would be under the old version\n- The check would fail even if valid snapshots exist under previous versions\n\nExploitation: When a bridge is deregistered and re-registered with a new version, legitimate snapshot submissions for the new version would fail the previous stage check, preventing proper reward distribution.\nFinancial Impact: Bridges that undergo version changes cannot have their snapshots properly validated, disrupting reward distribution for users and operators.",
+      "severity": "high",
+      "original_id": "0d3a48343f62e715"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_062",
+      "title": "Incorrect Reward Calculation in stableswap_lock_stake",
+      "description": "The `stableswap_lock_stake` function incorrectly calculates coin amounts for stablecoin pools by using integer division which can lead to precision loss and incorrect liquidity provisioning.\n\nMathematical Proof:\n- For a 3-pool with amounts [1000, 2000, 3000] and esinit_index = 0\n- If user provides esinit_amount = 100\n- For coin at index 1: amount = (100 * 2000) / 1000 = 200 (correct)\n- For coin at index 2: amount = (100 * 3000) / 1000 = 300 (correct)\n- But if amounts are [1001, 2000, 3000] and esinit_amount = 100\n- For coin at index 1: amount = (100 * 2000) / 1001 = 199 (should be ~199.8)\n- The integer division truncates, leading to imprecise amounts\n\nExploitation: Users may receive less liquidity than deserved due to rounding errors, or the function may fail if the truncated amounts don't meet minimum liquidity requirements.\nFinancial Impact: Users lose value through imprecise liquidity provisioning, with losses proportional to the truncation error in the division operations.",
+      "severity": "medium",
+      "original_id": "05781d95f955ed3f"
+    }
+  ],
+  "input_tokens": 16549,
+  "output_tokens": 572,
+  "cached_tokens": 525
+}

@@ -1,0 +1,738 @@
+{
+  "project": "code4rena_blackhole_2025_07",
+  "agent": "agent794",
+  "status": "success",
+  "timestamp": "2026-04-09T11:39:26.687870",
+  "elapsed_seconds": 296.9,
+  "total_expected": 2,
+  "total_found": 100,
+  "true_positives": 0,
+  "false_negatives": 2,
+  "false_positives": 100,
+  "detection_rate": 0.0,
+  "precision": 0.0,
+  "f1_score": 0.0,
+  "matched_findings": [],
+  "missed_findings": [
+    {
+      "id": "code4rena_blackhole_2025_07_expected_000",
+      "title": "Router address validation logic error prevents valid router assignment",
+      "description": "Submitted by\nfrancoHacker\n, also found by\nAvantGard\n,\ndreamcoder\n,\nEgbe\n,\nFavourOkerri\n,\nharsh123\n,\nholtzzx\n,\nIzuMan\n,\nNexusAudits\n,\nrayss\n, and\nSparrow\n\nhttps://github.com/code-423n4/2025-05-blackhole/blob/92fff849d3b266e609e6d63478c4164d9f608e91/contracts/GenesisPoolManager.sol#L314\n\nThe\nsetRouter(address _router)\nfunction within the\nGenesisPoolManager\ncontract is intended to allow the contract owner (\nowner\n) to modify the address of the\nrouter\ncontract. This router is crucial for interacting with the decentralized exchange (DEX) when adding liquidity during the launch of a\nGenesisPool\n. However, the function contains a logical flaw in its\nrequire\nstatement:\n\nfunction\nsetRouter\n(\naddress\n_router\n)\nexternal\nonlyOwner\n{\nrequire\n(\n_router\n==\naddress\n(\n0\n),\n\"ZA\"\n);\n// <<< LOGICAL ERROR HERE\nrouter\n=\n_router\n;\n}\n\nThe line\nrequire(_router == address(0), \"ZA\");\ncurrently mandates that the\n_router\naddress provided as an argument\nmust be\nthe zero address (\naddress(0)\n). If any other address (i.e., a valid, non-zero router address) is supplied, the condition\n_router == address(0)\nwill evaluate to false, and the transaction will revert with the error message \u201cZA\u201d (presumably \u201cZero Address\u201d).\n\nThis means the\nsetRouter\nfunction\u2019s behavior is inverted from what its name and intended purpose imply:\n\nCurrent Behavior:\nIt only allows the\nowner\nto set the\nrouter\nstate variable to\naddress(0)\n. It does not permit updating it to a new, functional router address.\nExpected Behavior (based on name and usage):\nIt should allow the\nowner\nto set the\nrouter\nstate variable to a new, valid, non-zero router address, likely with a check ensuring\n_router\nis not\naddress(0)\n(i.e.,\nrequire(_router != address(0), \"ZA\");\n).\n\nThe root cause of the issue is an incorrect condition in the\nrequire\nstatement. The developer likely intended either to ensure a non-null router address was not being set (if such a check was desired for some specific reason, though unlikely for a setter) or, probably, to ensure a non-null address\nwas\nbeing set. Instead, the implemented condition only permits setting a null address.\n\nThe impact of this logical error is significant and can lead to several adverse consequences:\n\nInability to update the router to a functional address:\nIf the\nrouter\naddress is initially set during the\nGenesisPoolManager\ncontract\u2019s initialization (via the\ninitialize\nfunction) and subsequently needs to be changed (e.g., due to a DEX router upgrade, an error in the initial configuration, or the deployment of a new router version), the current\nsetRouter\nfunction will prevent this update to a functional address. The\nowner\nwould only be able to \u201cclear\u201d the router address by setting it to\naddress(0)\n.\nPotential blocking of new pool launches (\n_launchPool\n):\nThe internal\n_launchPool\nfunction in\nGenesisPoolManager\nis responsible for finalizing a\nGenesisPool\n\u2019s process and adding liquidity. This function calls\nIGenesisPool(_genesisPool).launch(router, MATURITY_TIME)\n, passing the\nrouter\naddress stored in\nGenesisPoolManager\n.\nIf the\nrouter\naddress in\nGenesisPoolManager\nis\naddress(0)\n(either because it was mistakenly set that way initially or because the\nowner\nused\nsetRouter\nto \u201cclear\u201d it), the call to\nIGenesisPool.launch\nwill attempt to interact with an\nIRouter(address(0))\n.\nFunction calls to\naddress(0)\ntypically fail or behave unpredictably (depending on low-level Solidity/EVM implementation details, but practically, they will fail when trying to execute non-existent code or decode empty return data). This will cause the\nGenesisPool\n\u2019s\nlaunch\nfunction to fail, and consequently, the\nGenesisPoolManager\n\u2019s\n_launchPool\nfunction will also fail.\nAs a result, no new\nGenesisPool\nreaching the launch stage can be successfully launched if the router address is\naddress(0)\n. Funds intended for liquidity (both\nnativeToken\nand\nfundingToken\n) could become locked in the\nGenesisPool\ncontract indefinitely, or until an alternative solution is implemented (if possible via governance or contract upgradeability).\nDependency on correct initial configuration:\nThe system becomes overly reliant on the\nrouter\naddress being perfectly configured during the\ninitialize\ncall. If there\u2019s a typo or an incorrect address is provided, there is no way to correct it via\nsetRouter\nunless the contract is upgradeable and the\nsetRouter\nlogic itself is updated.\nMisleading functionality:\nThe function name\nsetRouter\nis misleading, as it doesn\u2019t \u201cset\u201d a functional router but rather only \u201cclears\u201d it (sets it to\naddress(0)\n). This can lead to administrative errors and confusion.\n\nHigh. Although the function is only accessible by the\nowner\n, its malfunction directly impacts a core functionality of the system (pool launching and liquidity provision). If the router needs to be changed or is misconfigured, this vulnerability can halt a critical part of the protocol.\n\nThe condition in the\nsetRouter\nfunction must be corrected to allow setting a non-null router address. The more common and expected logic would be:\n\nfunction\nsetRouter\n(\naddress\n_router\n)\nexternal\nonlyOwner\n{\nrequire\n(\n_router\n!=\naddress\n(\n0\n),\n\"ZA\"\n);\n// CORRECTION: Ensure the new router is not the zero address.\nrouter\n=\n_router\n;\n}\n\nThis correction would enable the\nowner\nto update the\nrouter\naddress to a new, valid address, ensuring the operational continuity and flexibility of the\nGenesisPoolManager\n.\n\nDeploy a mock\nGenesisPoolManager\n.\nDeploy mock contracts for\nIRouter\n(just to have distinct addresses).\nShow that the\nowner\ncannot\nset a new, non-zero router address.\nShow that the\nowner\ncan\nset the router address to\naddress(0)\n.\nIllustrate (conceptually, as a full launch is complex) how a zero router address would break the\n_launchPool\n(or rather, the\nlaunch\nfunction it calls).\n\nSimplifiedGenesisPoolManager\n:\nContains the\nowner\n,\nrouter\nstate variable, and the vulnerable\nsetRouter\nfunction exactly as described.\nIncludes a\nconstructor\nto set the initial owner and router.\nIncludes\n_launchPool\nand\ntestLaunch\nto simulate the scenario where a zero router would cause a failure.\nMockRouter\n:\nA simple contract implementing\nIRouter\n. Its\naddLiquidity\nfunction sets a flag\nwasCalled\nto verify interaction.\nMockGenesisPool\n:\nImplements a\nlaunch\nfunction.\nCrucially,\nlaunch\nwill\nrevert(\"Router is address(0)\");\nif the\n_router\nargument is\naddress(0)\n, mimicking how a real\nlaunch\nwould fail if it tried to call\nIRouter(address(0)).addLiquidity(...)\n.\nIt also attempts to call\nIRouter(_router).addLiquidity\nto show a successful interaction.\nMockPairFactory\n:\nA minimal mock for\nIBaseV1Factory\nto satisfy dependencies in the simplified\n_launchPool\n.\nGenesisPoolManagerRouterTest\n(Test Contract):\nsetUp()\n:\nDeploys the\nSimplifiedGenesisPoolManager\n,\nMockRouter\ninstances,\nMockGenesisPool\n, and sets the test contract as the\nowner\n.\ntest_ownerCannotSetValidNewRouter()\n:\nThe\nowner\nattempts to call\nsetRouter\nwith\nnewValidRouter\n(a non-zero address).\nvm.expectRevert(\"ZA\");\nasserts that this call reverts with the \u201cZA\u201d error, proving the\nrequire(_router == address(0), \"ZA\");\ncondition is problematic for valid addresses.\ntest_ownerCanSetRouterToZeroAddress()\n:\nThe\nowner\ncalls\nsetRouter\nwith\naddress(0)\n.\nThis call succeeds, and the test asserts that\nmanager.getRouter()\nis now\naddress(0)\n.\ntest_nonOwnerCannotCallSetRouter()\n:\nStandard access control test.\ntest_launchFailsIfRouterIsZero()\n:\nThe\nowner\nfirst successfully calls\nsetRouter(address(0))\n.\nThen, the\nowner\ncalls\nmanager.testLaunch(mockPool)\n.\nvm.expectRevert(\"Router is address(0)\");\nasserts that this call reverts. The revert comes from\nMockGenesisPool.launch()\nwhen it detects the zero address router, demonstrating the downstream failure.\ntest_launchSucceedsIfRouterIsValid()\n:\nEnsures the router is the initial valid one.\nThe\nowner\ncalls\nmanager.testLaunch(mockPool)\n.\nThis call should succeed,\nmockPool.launchCalled()\nshould be true, and\ninitialRouter.wasCalled()\nshould be true.\n\nHow to Run (with Foundry):\n\nSave the code above as\ntest/GenesisPoolManagerRouter.t.sol\n(or similar) in your Foundry project.\nEnsure you have\nforge-std\n(usually included with\nforge init\n).\nRun the tests:\nforge test --match-test GenesisPoolManagerRouterTest -vvv\n(the\n-vvv\nprovides more verbose output, including console logs if you were to add them).\n\nThis PoC clearly demonstrates:\n\nThe\nsetRouter\nfunction\u2019s flawed logic.\nThe\nowner\n\u2019s inability to set a new, functional router.\nThe\nowner\n\u2019s ability to set the router to\naddress(0)\n.\nThe direct consequence of a zero router address leading to failed pool launches.\n\nBlackhole mitigated\n\nStatus:\nMitigation confirmed. Full details in reports from\nrayss\n,\nlonelybones\nand\nmaxvzuvex\n.",
+      "severity": "high",
+      "reason": "Not found"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_expected_001",
+      "title": "Reward token inGaugeFactoryCLcan be drained by anyone",
+      "description": "Submitted by\ndanzero\n, also found by\na39955720\n,\nbareli\n,\nDarkeEEandMe\n,\nKariukigithinji\n,\nmahadev\n,\nmaxzuvex\n,\nwafflewizard\n,\nwankleven\n, and\nZiusz\n\nhttps://github.com/code-423n4/2025-05-blackhole/blob/92fff849d3b266e609e6d63478c4164d9f608e91/contracts/AlgebraCLVe33/GaugeFactoryCL.sol#L59\n\nThe\nGaugeFactoryCL.sol\ncontract, responsible for creating\nGaugeCL\ninstances for Algebra Concentrated Liquidity pools, has a public\ncreateGauge\nfunction. Below is the implementation of the function:\n\nfunction\ncreateGauge\n(\naddress\n_rewardToken\n,\naddress\n_ve\n,\naddress\n_pool\n,\naddress\n_distribution\n,\naddress\n_internal_bribe\n,\naddress\n_external_bribe\n,\nbool\n_isPair\n,\nIGaugeManager.FarmingParam\nmemory\nfarmingParam\n,\naddress\n_bonusRewardToken\n)\nexternal\nreturns\n(\naddress\n) {\ncreateEternalFarming\n(\n_pool\n,\nfarmingParam\n.\nalgebraEternalFarming\n,\n_rewardToken\n,\n_bonusRewardToken\n);\nlast_gauge\n=\naddress\n(\nnew\nGaugeCL\n(\n_rewardToken\n,\n_ve\n,\n_pool\n,\n_distribution\n,\n_internal_bribe\n,\n_external_bribe\n,\n_isPair\n,\nfarmingParam\n,\n_bonusRewardToken\n,\naddress\n(\nthis\n)));\n__gauges\n.\npush\n(\nlast_gauge\n);\nreturn\nlast_gauge\n;\n}\n\nThe\nGaugeFactoryCL.createGauge\nfunction lacks access control, allowing any external actor to call it. This function, in turn, calls an internal\ncreateEternalFarming\nfunction. Below is the implementation of the\ncreateEternalFarming\nfunction:\n\nfunction\ncreateEternalFarming\n(\naddress\n_pool\n,\naddress\n_algebraEternalFarming\n,\naddress\n_rewardToken\n,\naddress\n_bonusRewardToken\n)\ninternal\n{\nIAlgebraPool\nalgebraPool\n=\nIAlgebraPool\n(\n_pool\n);\nuint24\ntickSpacing\n=\nuint24\n(\nalgebraPool\n.\ntickSpacing\n());\naddress\npluginAddress\n=\nalgebraPool\n.\nplugin\n();\nIncentiveKey\nmemory\nincentivekey\n=\ngetIncentiveKey\n(\n_rewardToken\n,\n_bonusRewardToken\n,\n_pool\n,\n_algebraEternalFarming\n);\nuint256\nremainingTimeInCurrentEpoch\n=\nBlackTimeLibrary\n.\nepochNext\n(\nblock\n.\ntimestamp\n) -\nblock\n.\ntimestamp\n;\nuint128\nreward\n=\n1e10\n;\nuint128\nrewardRate\n=\nuint128\n(\nreward\n/\nremainingTimeInCurrentEpoch\n);\nIERC20\n(\n_rewardToken\n).\nsafeApprove\n(\n_algebraEternalFarming\n,\nreward\n);\naddress\ncustomDeployer\n=\nIAlgebraPoolAPIStorage\n(\nalgebraPoolAPIStorage\n).\npairToDeployer\n(\n_pool\n);\nIAlgebraEternalFarming\n.\nIncentiveParams\nmemory\nincentiveParams\n=\nIAlgebraEternalFarming\n.\nIncentiveParams\n(\nreward\n,\n0\n,\nrewardRate\n,\n0\n,\ntickSpacing\n);\nIAlgebraEternalFarmingCustom\n(\n_algebraEternalFarming\n).\ncreateEternalFarming\n(\nincentivekey\n,\nincentiveParams\n,\npluginAddress\n,\ncustomDeployer\n);\n}\n\nIt is designed to seed a new Algebra eternal farming incentive with an initial, hardcoded amount of 1e10 of the\n_rewardToken\n. It achieves this by having\nGaugeFactoryCL\napprove the\nalgebraEternalFarming\ncontract, which is then expected to pull these tokens from\nGaugeFactoryCL\n.\n\nIf the\nGaugeFactoryCL\ncontract is pre-funded with reward tokens to facilitate this initial seeding for legitimate gauges, an attacker can repeatedly call the\ncreateGauge\nfunction which will trigger the\ncreateEternalFarming\nprocess, causing the reward token to be transferred from\nGaugeFactoryCL\nto a new Algebra farm associated with a pool specified by the attacker ultimately draining the reward token from the\nGaugeFactoryCL\ncontract.\n\nThe attacker can then potentially stake a Liquidity Provider (LP) NFT into this newly created (spam)\nGaugeCL\nand its associated Algebra farm, and subsequently claim that reward.\n\nImplement robust access control on the\nGaugeFactoryCL.createGauge()\nfunction, restricting its execution to authorized administrators or designated smart contracts, thereby preventing unauthorized calls.\n\nProtocol admin pre-funds\nGaugeFactoryCL\nwith\n5e10\nof USDC (50,000).\nAttacker calls\nGaugeFactoryCL.createGauge()\n:\n\nIGaugeFactoryCL\n(\nGFCL_ADDRESS\n).\ncreateGauge\n(\nUSDC_ADDRESS\n,\n// _rewardToken\nVE_ADDRESS\n,\nTARGET_POOL_ADDRESS\n,\nATTACKER_ADDRESS\n,\n// _distribution\nATTACKER_ADDRESS\n,\n// _internal_bribe\nATTACKER_ADDRESS\n,\n// _external_bribe\ntrue\n,\n// _isPair\nfarmingParams\n,\n// including ALGEBRA_ETERNAL_FARMING_ADDRESS\nZERO_ADDRESS\n// _bonusRewardToken\n);\n\nThe public\ncreateGauge\nfunction is entered which calls its internal\ncreateEternalFarming(_pool, farmingParam.algebraEternalFarming, USDC_ADDRESS, _bonusRewardToken)\n.\nExecution within\nGaugeFactoryCL.createEternalFarming()\n:\n\nfunction\ncreateEternalFarming\n(\naddress\n_pool\n,\naddress\n_algebraEternalFarming\n,\naddress\n_rewardToken\n,\naddress\n_bonusRewardToken\n)\ninternal\n{\n// ...\nuint128\nreward\n=\n1e10\n;\n// 10,000 USDC\n// ...\n// GaugeFactoryCL approves AlgebraEternalFarming to spend its USDC\nIERC20\n(\n_rewardToken\n/* USDC_ADDRESS */\n).\nsafeApprove\n(\n_algebraEternalFarming\n,\nreward\n);\n// ...\n// Call to AlgebraEternalFarming which will pull the approved USDC\nIAlgebraEternalFarmingCustom\n(\n_algebraEternalFarming\n).\ncreateEternalFarming\n(\nincentivekey\n,\nincentiveParamsWithReward\n,\npluginAddress\n,\ncustomDeployer\n);\n}\n\nExecution within\nAlgebraEternalFarming.createEternalFarming()\nhere\n:\n\n/// @inheritdoc IAlgebraEternalFarming\nfunction\ncreateEternalFarming\n(\nIncentiveKey\nmemory\nkey\n,\nIncentiveParams\nmemory\nparams\n,\naddress\nplugin\n)\nexternal\noverride\nonlyIncentiveMaker\nreturns\n(\naddress\nvirtualPool\n) {\naddress\nconnectedPlugin\n=\nkey\n.\npool\n.\nplugin\n();\nif\n(\nconnectedPlugin\n!=\nplugin\n||\nconnectedPlugin\n==\naddress\n(\n0\n))\nrevert\npluginNotConnected\n();\nif\n(\nIFarmingPlugin\n(\nconnectedPlugin\n).\nincentive\n() !=\naddress\n(\n0\n))\nrevert\nanotherFarmingIsActive\n();\nvirtualPool\n=\naddress\n(\nnew\nEternalVirtualPool\n(\naddress\n(\nthis\n),\nconnectedPlugin\n));\nIFarmingCenter\n(\nfarmingCenter\n).\nconnectVirtualPoolToPlugin\n(\nvirtualPool\n,\nIFarmingPlugin\n(\nconnectedPlugin\n));\nkey\n.\nnonce\n=\nnumOfIncentives\n++;\nincentiveKeys\n[\naddress\n(\nkey\n.\npool\n)] =\nkey\n;\nbytes32\nincentiveId\n=\nIncentiveId\n.\ncompute\n(\nkey\n);\nIncentive\nstorage\nnewIncentive\n=\nincentives\n[\nincentiveId\n];\n(\nparams\n.\nreward\n,\nparams\n.\nbonusReward\n) =\n_receiveRewards\n(\nkey\n,\nparams\n.\nreward\n,\nparams\n.\nbonusReward\n,\nnewIncentive\n);\nif\n(\nparams\n.\nreward\n==\n0\n)\nrevert\nzeroRewardAmount\n();\nunchecked\n{\nif\n(\nint256\n(\nuint256\n(\nparams\n.\nminimalPositionWidth\n)) > (\nint256\n(\nTickMath\n.\nMAX_TICK\n) -\nint256\n(\nTickMath\n.\nMIN_TICK\n)))\nrevert\nminimalPositionWidthTooWide\n();\n}\nnewIncentive\n.\nvirtualPoolAddress\n=\nvirtualPool\n;\nnewIncentive\n.\nminimalPositionWidth\n=\nparams\n.\nminimalPositionWidth\n;\nnewIncentive\n.\npluginAddress\n=\nconnectedPlugin\n;\nemit\nEternalFarmingCreated\n(\nkey\n.\nrewardToken\n,\nkey\n.\nbonusRewardToken\n,\nkey\n.\npool\n,\nvirtualPool\n,\nkey\n.\nnonce\n,\nparams\n.\nreward\n,\nparams\n.\nbonusReward\n,\nparams\n.\nminimalPositionWidth\n);\n_addRewards\n(\nIAlgebraEternalVirtualPool\n(\nvirtualPool\n),\nparams\n.\nreward\n,\nparams\n.\nbonusReward\n,\nincentiveId\n);\n_setRewardRates\n(\nIAlgebraEternalVirtualPool\n(\nvirtualPool\n),\nparams\n.\nrewardRate\n,\nparams\n.\nbonusRewardRate\n,\nincentiveId\n);\n}\n\nIt calls the\n_receiveRewards\nfunction\nhere\n:\n\nfunction\n_receiveRewards\n(\nIncentiveKey\nmemory\nkey\n,\nuint128\nreward\n,\nuint128\nbonusReward\n,\nIncentive\nstorage\nincentive\n)\ninternal\nreturns\n(\nuint128\nreceivedReward\n,\nuint128\nreceivedBonusReward\n) {\nif\n(!\nunlocked\n)\nrevert\nreentrancyLock\n();\nunlocked\n=\nfalse\n;\n// reentrancy lock\nif\n(\nreward\n>\n0\n)\nreceivedReward\n=\n_receiveToken\n(\nkey\n.\nrewardToken\n,\nreward\n);\nif\n(\nbonusReward\n>\n0\n)\nreceivedBonusReward\n=\n_receiveToken\n(\nkey\n.\nbonusRewardToken\n,\nbonusReward\n);\nunlocked\n=\ntrue\n;\n(\nuint128\n_totalRewardBefore\n,\nuint128\n_bonusRewardBefore\n) = (\nincentive\n.\ntotalReward\n,\nincentive\n.\nbonusReward\n);\nincentive\n.\ntotalReward\n=\n_totalRewardBefore\n+\nreceivedReward\n;\nincentive\n.\nbonusReward\n=\n_bonusRewardBefore\n+\nreceivedBonusReward\n;\n}\n\nIt calls the\n_receiveToken\nfunction\nhere\n:\n\nfunction\n_receiveToken\n(\nIERC20Minimal\ntoken\n,\nuint128\namount\n)\nprivate\nreturns\n(\nuint128\n) {\nuint256\nbalanceBefore\n=\n_getBalanceOf\n(\ntoken\n);\nTransferHelper\n.\nsafeTransferFrom\n(\naddress\n(\ntoken\n),\nmsg\n.\nsender\n,\naddress\n(\nthis\n),\namount\n);\nuint256\nbalanceAfter\n=\n_getBalanceOf\n(\ntoken\n);\nrequire\n(\nbalanceAfter\n>\nbalanceBefore\n);\nunchecked\n{\nuint256\nreceived\n=\nbalanceAfter\n-\nbalanceBefore\n;\nif\n(\nreceived\n>\ntype\n(\nuint128\n).\nmax\n)\nrevert\ninvalidTokenAmount\n();\nreturn\n(\nuint128\n(\nreceived\n));\n}\n}\n\n1e10\n(10,000) USDC has been transferred to the new algebra farm.\nAttacker repeats step 2 to 6 for 5 times to fully transfer 50,000 USDC out of the\nGaugeCLFactory\ncontract.\nAttacker stakes relevant LP NFT into the spam gauges through the\nGaugeCL.deposit\nfunction:\n\nfunction\ndeposit\n(\nuint256\ntokenId\n)\nexternal\nnonReentrant\nisNotEmergency\n{\nrequire\n(\nmsg\n.\nsender\n==\nnonfungiblePositionManager\n.\nownerOf\n(\ntokenId\n));\nnonfungiblePositionManager\n.\napproveForFarming\n(\ntokenId\n,\ntrue\n,\nfarmingParam\n.\nfarmingCenter\n);\n(\nIERC20Minimal\nrewardTokenAdd\n,\nIERC20Minimal\nbonusRewardTokenAdd\n,\nIAlgebraPool\npool\n,\nuint256\nnonce\n) =\nalgebraEternalFarming\n.\nincentiveKeys\n(\npoolAddress\n);\nIncentiveKey\nmemory\nincentivekey\n=\nIncentiveKey\n(\nrewardTokenAdd\n,\nbonusRewardTokenAdd\n,\npool\n,\nnonce\n);\nfarmingCenter\n.\nenterFarming\n(\nincentivekey\n,\ntokenId\n);\nemit\nDeposit\n(\nmsg\n.\nsender\n,\ntokenId\n);\n}\n\nAttacker directly calls the\nAlgebraEternalFarming.claimReward\nfunction to claim the rewards\nhere\n:\n\n/// @inheritdoc IAlgebraEternalFarming\nfunction\nclaimReward\n(\nIERC20Minimal\nrewardToken\n,\naddress\nto\n,\nuint256\namountRequested\n)\nexternal\noverride\nreturns\n(\nuint256\nreward\n) {\nreturn\n_claimReward\n(\nrewardToken\n,\nmsg\n.\nsender\n,\nto\n,\namountRequested\n);\n}\nfunction\n_claimReward\n(\nIERC20Minimal\nrewardToken\n,\naddress\nfrom\n,\naddress\nto\n,\nuint256\namountRequested\n)\ninternal\nreturns\n(\nuint256\nreward\n) {\nif\n(\nto\n==\naddress\n(\n0\n))\nrevert\nclaimToZeroAddress\n();\nmapping\n(\nIERC20Minimal\n=>\nuint256\n)\nstorage\nuserRewards\n=\nrewards\n[\nfrom\n];\nreward\n=\nuserRewards\n[\nrewardToken\n];\nif\n(\namountRequested\n==\n0\n||\namountRequested\n>\nreward\n)\namountRequested\n=\nreward\n;\nif\n(\namountRequested\n>\n0\n) {\nunchecked\n{\nuserRewards\n[\nrewardToken\n] =\nreward\n-\namountRequested\n;\n}\nTransferHelper\n.\nsafeTransfer\n(\naddress\n(\nrewardToken\n),\nto\n,\namountRequested\n);\nemit\nRewardClaimed\n(\nto\n,\namountRequested\n,\naddress\n(\nrewardToken\n),\nfrom\n);\n}\n}\n\nBlackhole commented:\n\nBlackhole Protocol disputes the classification of this issue as high severity, noting that the protocol is designed to deposit no more than\n$0.10\nworth of BLACK tokens, an amount sufficient to spawn over a million liquidity pools on Blackhole.\n\nBlackhole mitigated\n\nStatus:\nMitigation confirmed. Full details in reports from\nlonelybones\nand\nrayss\n.",
+      "severity": "high",
+      "reason": "Not found"
+    }
+  ],
+  "undecided_findings": [],
+  "extra_findings": [
+    {
+      "id": "code4rena_blackhole_2025_07_tool_000",
+      "title": "SMNFT Bonus Calculation and Burn Logic Mismatch Leads to Permanent Fund Loss",
+      "description": "The contract allows users to convert regular locks into SMNFTs (Special Multi-NFT) via the updateToSMNFT function, which burns the original token amount and adds a bonus. However, the bonus is calculated and added to the locked amount, but the burn operation only burns the original amount, not the total locked amount. This creates a discrepancy where the protocol's internal accounting (smNFTBalance) is inflated by the bonus amount, while the actual token supply is only reduced by the original amount. This results in a permanent inflation of the protocol's reported SMNFT balance, enabling attackers to claim disproportionate voting power without corresponding token backing. The flaw is in the inconsistent use of values: the locked amount includes the bonus, but the burn only removes the base amount, creating a net gain of bonus tokens in the system's accounting.",
+      "severity": "critical",
+      "original_id": "1c374e78013fec29"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_001",
+      "title": "Automatic Processing of Withdrawal Funds via External Token Returns",
+      "description": "The VotingEscrow contract has no protection against receiving BLACK tokens via direct transfers (e.g., from external systems or failed operations). When BLACK tokens are sent directly to the contract address (e.g., as a refund from a failed external call or system-generated transfer), the contract automatically treats them as new deposits because it lacks any mechanism to distinguish between user-initiated deposits and system-generated token returns. This allows an attacker to trigger inflation of the total supply and dilute voting power by sending tokens to the contract during or after a withdrawal, effectively stealing value from legitimate users.",
+      "severity": "critical",
+      "original_id": "1364d95adb6acc92"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_002",
+      "title": "Access Control Bypass in _deposit_for Allows Fee Avoidance and Vote Weight Manipulation",
+      "description": "The _deposit_for function, which updates critical economic state variables (supply, smNFTBalance, permanentLockBalance) and triggers _checkpoint for vote weight calculations, is internally called by public functions but lacks access control when invoked directly via external contracts. Attackers can call _deposit_for directly with manipulated parameters to bypass the required checks (e.g., _locked.amount > 0, _locked.end > block.timestamp) and inject arbitrary values into supply and balance tracking variables without transferring real tokens. This enables manipulation of vote weight calculations and fee distribution logic that depend on these variables, allowing attackers to gain disproportionate voting power or avoid fees.",
+      "severity": "critical",
+      "original_id": "f072df7b34a65c38"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_003",
+      "title": "Unit Mismatch in balanceOfNFT and totalSupplyAtT Causes Incorrect Vote Weight Calculations",
+      "description": "The balanceOfNFT function returns a value in raw wei units (uint), but the underlying VotingBalanceLogic.balanceOfNFT performs internal calculations using int128 and scaled values (MULTIPLIER = 1 ether). However, the return value is not normalized or converted to match the expected representation for voting calculations. When getVotes or getPastVotes sum these values across multiple NFTs, the total is interpreted as raw wei instead of scaled voting power, causing a 1e18-fold inflation in calculated vote weights. This leads to catastrophic misallocation of governance power and reward distribution, where attackers can gain 1e18x more voting power than their actual locked tokens warrant.",
+      "severity": "critical",
+      "original_id": "42e2e428c646fa42"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_004",
+      "title": "Desynchronized Iteration in getPastVotes Causes Vote Weight Undercounting",
+      "description": "The getPastVotes function iterates over tokenIds stored in a checkpoint array using a for-loop with a fixed length. However, the VotingDelegationLib._moveAllDelegates function can modify the tokenIds array during delegation changes, and if a token is removed from a delegatee's list (e.g., via transfer or burn) after a checkpoint is created but before getPastVotes is called, the array length remains unchanged while the actual valid tokenIds are fewer. This causes the loop to access zero-initialized or invalid tokenIds, which are then passed to balanceOfNFT, returning 0. The result is a systematic undercounting of vote weights in historical queries, leading to unfair reward distribution and governance outcomes that do not reflect true historical voting power.",
+      "severity": "high",
+      "original_id": "17c81c917c34875c"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_005",
+      "title": "Incorrect Interface Implementation for IERC20.transferFrom in _deposit_for",
+      "description": "The _deposit_for function calls IERC20(token).transferFrom(from, address(this), _value) for non-SMNFT deposits, but the contract uses a custom IBlack interface for burning tokens (via _black.burnFrom). The IERC20 interface is declared but not properly implemented for the token contract, which may be a non-standard ERC20 (e.g., with transferFrom returning bool or requiring approval flags). This mismatch causes ABI encoding failures or silent reverts when transferFrom is called, leading to locked tokens being unclaimed and supply being incorrectly incremented. This results in permanent loss of user funds and inflation of totalSupply without corresponding asset backing.",
+      "severity": "high",
+      "original_id": "f5171c0b8e9a35e2"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_006",
+      "title": "Integer Underflow in Burn Operations Due to Missing Balance Check",
+      "description": "The _burn and burnFrom functions allow burning of tokens without verifying that the sender has sufficient balance. This enables an attacker to burn more tokens than they own, causing totalSupply to underflow and effectively creating infinite tokens out of thin air. The lack of a balance check before decrementing balanceOf[_from] and totalSupply allows arbitrary negative values to be written, breaking the token supply invariant. This is a critical economic vulnerability that enables inflationary attacks and total protocol insolvency.",
+      "severity": "critical",
+      "original_id": "02c21808a3df6612"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_007",
+      "title": "Precision Loss in SMNFT Bonus Calculation Due to Integer Division Truncation",
+      "description": "The calculate_sm_nft_bonus and calculate_original_sm_nft_amount functions use integer division with fixed precision (PRECISISON=10000) to compute SMNFT bonuses and original amounts. However, these operations truncate fractional values, leading to irreversible precision loss. When converting back and forth between SMNFT and non-SMNFT representations, the total locked amount can be permanently reduced due to rounding down, effectively stealing user funds without explicit notice.",
+      "severity": "high",
+      "original_id": "ff39988612f35568"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_008",
+      "title": "State Inconsistency in Permanent Lock Unlock Operation",
+      "description": "The unlockPermanent function reduces permanentLockBalance and reverts the lock to a time-bound state, but fails to restore the original SMNFT balance if the lock was previously an SMNFT. This creates a permanent accounting imbalance: funds burned as SMNFT are not re-credited when unlocked, and the global smNFTBalance remains inflated. This leads to incorrect totalSupply calculations and misallocation of voting power.",
+      "severity": "high",
+      "original_id": "958e23c6325a306c"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_009",
+      "title": "Authorization Context Not Bound in delegateBySig Signature",
+      "description": "The delegateBySig function validates the signature against the signer's nonce and expiry, but does not bind the signature to the specific delegatee address in the EIP-712 domain. An attacker can capture a valid signature from a user (e.g., for delegatee=A) and replay it with a different delegatee=B, effectively hijacking the delegation without user consent. The signature is tied only to the signer and nonce, not the intent.",
+      "severity": "high",
+      "original_id": "4dfb85a09541dc25"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_010",
+      "title": "Mathematical Domain Violation in Slope Calculation with Zero End Time",
+      "description": "In the _checkpoint function, when calculating bias for a lock with end=0 (permanent or SMNFT), the code uses (end - block.timestamp) as a multiplier. When end=0, this becomes (-block.timestamp), which is negative. The code then multiplies this negative value by slope, producing a negative bias. The bias is later clamped to 0, but the slope calculation is based on invalid domain input (negative time delta), violating the mathematical assumption that time deltas must be non-negative for linear decay models.",
+      "severity": "medium",
+      "original_id": "3990c9cd33b34ebc"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_011",
+      "title": "Incorrect SMNFT Merge Logic Leading to Double-Burning of Tokens",
+      "description": "In the merge function, when merging a non-SMNFT lock into an SMNFT lock, the code burns the source amount via _black.burn(value0). However, the source lock's tokens were already transferred to the escrow contract upon creation. Burning them again via _black.burn() effectively destroys tokens that were already escrowed, reducing the total supply incorrectly. This is a double-burn: once during deposit, once during merge.",
+      "severity": "critical",
+      "original_id": "0f60850139a6ca6b"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_012",
+      "title": "State Commitment Before External Call in `increase_unlock_time` Allows Reentrancy and Double-Spending",
+      "description": "The `increase_unlock_time` function updates the lock state and calls `_checkpoint` before validating that the external `IVoter(voter).poke(_tokenId)` call succeeds. This allows an attacker to reenter the function via a malicious voter contract, manipulate the lock state multiple times, and effectively double-spend the same token amount by triggering multiple checkpoint updates and SMNFT balance increases without additional token deposits.",
+      "severity": "critical",
+      "original_id": "ecc705571780bb33"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_013",
+      "title": "Missing User Protection in `withdraw` Allows Forced Withdrawal of Locked Tokens Without Minimum Output Guarantee",
+      "description": "The `withdraw` function allows any approved address to withdraw the full locked amount without any mechanism for the user to specify a minimum acceptable output. This exposes users to front-running and MEV attacks where an attacker can trigger withdrawal at a time when the voting power has decayed significantly, effectively stealing the remaining value of the locked tokens by forcing a full withdrawal at a low effective value.",
+      "severity": "high",
+      "original_id": "8d9472070e1db4a4"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_014",
+      "title": "Validation After State Change in `merge` Allows Double-Spending of SMNFT Tokens",
+      "description": "In the `merge` function, the source token's balance is zeroed and the token is burned before validating that the destination token's lock conditions are valid. This allows an attacker to merge a token with a valid lock into a destination token that has been manipulated to appear valid (e.g., by a malicious contract), then re-merge the same source token again before the state is fully updated, effectively double-spending the same underlying token amount.",
+      "severity": "critical",
+      "original_id": "ef5f09d72f6f73e3"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_015",
+      "title": "Unit Mismatch in `calculate_sm_nft_bonus` and `calculate_original_sm_nft_amount` Causes Underflow and Incorrect SMNFT Balance Accounting",
+      "description": "The functions `calculate_sm_nft_bonus` and `calculate_original_sm_nft_amount` use integer division with `PRECISISON = 10000` and `SMNFT_BONUS` as a percentage. However, when `SMNFT_BONUS` is set to 0, `calculate_original_sm_nft_amount` performs `(amount * 10000) / 10000` which is correct, but when `SMNFT_BONUS` is non-zero, `calculate_original_sm_nft_amount` can underflow if `amount * PRECISISON` overflows uint256. This leads to incorrect SMNFT balance calculations, causing the protocol to mint more SMNFT tokens than backed by actual deposits, diluting voting power and enabling inflationary attacks.",
+      "severity": "high",
+      "original_id": "6135b671f32e5630"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_016",
+      "title": "Inconsistent State Update in `updateToSMNFT` Leads to Double Counting of SMNFT Balance",
+      "description": "In `updateToSMNFT`, the function adds the original amount to `smNFTBalance` and then recalculates the new locked amount as `amount + calculate_sm_nft_bonus(amount)`. However, the original amount was already included in the locked balance before conversion. This results in `smNFTBalance` being incremented by the full original amount, while the new locked amount includes the bonus again \u2014 effectively double-counting the base amount. This inflates the total SMNFT balance without additional token deposits, enabling inflation of voting power.",
+      "severity": "critical",
+      "original_id": "77ad453b41e86308"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_017",
+      "title": "Replay Protection Bypass in `delegateBySig` Due to Nonce Increment After Signature Validation",
+      "description": "In `delegateBySig`, the nonce is incremented after signature validation (`nonce == nonces[signatory]++`). This means that if the transaction reverts after signature validation (e.g., due to an external call failure), the nonce is still consumed. An attacker can submit multiple transactions with the same signature, knowing that the first will revert but the nonce will be incremented, preventing legitimate users from reusing the same signature and effectively locking them out of delegation.",
+      "severity": "high",
+      "original_id": "4884fe5a14b0b362"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_018",
+      "title": "Partial Execution in `split` Allows Token Theft via Incomplete Burn and Mint",
+      "description": "The `split` function burns the original token and creates two new ones. However, if the second `_createSplitNFT` call reverts (e.g., due to gas limit or external call failure), the original token is already burned and the first new token is minted, but the second is not. This results in a net loss of one token from the system \u2014 the attacker can trigger this by calling `split` with a value that causes the second mint to fail, effectively stealing the value of the lost token from the protocol's total supply.",
+      "severity": "critical",
+      "original_id": "240edf6df44374e8"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_019",
+      "title": "Access Control Violation in `setTeam` and `setArtProxy` via Interface Declaration",
+      "description": "The interface `IVotingEscrow` declares `setTeam` and `setArtProxy` as public functions without any access control modifiers. This misleads external systems and auditors into believing these functions are unrestricted. However, the implementation requires `msg.sender == team`. This interface-implementation mismatch creates a security blind spot where external contracts may assume these functions are callable by anyone, leading to potential front-running or accidental misuse that could compromise governance.",
+      "severity": "high",
+      "original_id": "10e716d2c395c299"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_020",
+      "title": "No Receive Function Prevents Withdrawal Funds from Being Collected",
+      "description": "The contract has no receive() or fallback() function, meaning any native currency (ETH) sent to the contract address is permanently lost. This breaks the fundamental assumption of DeFi protocols that users can withdraw funds by sending them to the contract. Since the contract only handles ERC-20 tokens and has no mechanism to return or track native currency, any ETH sent to it cannot be recovered, leading to irreversible fund loss for users or systems that accidentally or maliciously send ETH.",
+      "severity": "critical",
+      "original_id": "c0d02dedb6586903"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_021",
+      "title": "Missing User Protection in Transfer Functions - No Slippage Control",
+      "description": "The transfer and transferFrom functions allow users to send arbitrary amounts of tokens without any mechanism to specify minimum acceptable outputs. This exposes users to front-running and MEV attacks where an attacker can manipulate the token price (e.g., via a flash loan or sandwich attack) to cause the user to receive significantly less value than expected. Since there are no slippage tolerance parameters or execution bounds, users have no protection against unfavorable execution outcomes.",
+      "severity": "high",
+      "original_id": "5ebf77c332c52743"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_022",
+      "title": "Validation Timing Vulnerability in transferFrom and burnFrom - Allowance Updated After Transfer",
+      "description": "In both transferFrom and burnFrom functions, the allowance is decremented after the transfer/burn operation is executed. This creates a window where an attacker can re-enter the function (via a reentrancy attack) and execute multiple transfers using the same allowance before it is reduced. Since the allowance update occurs after the state change (transfer/burn), the function is vulnerable to reentrancy, allowing an attacker to drain the user's allowance multiple times.",
+      "severity": "critical",
+      "original_id": "712506f786bcb2e2"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_023",
+      "title": "Reentrancy Vulnerability in transferFrom and burnFrom Due to External Call Order",
+      "description": "The transferFrom and burnFrom functions perform state changes (balance updates) and then emit events, but crucially, they call _transfer and _burn internally before updating the allowance. Since these internal functions do not use reentrancy guards and the allowance update happens after the transfer, an attacker can exploit reentrancy by calling back into transferFrom or burnFrom during the internal _transfer/_burn execution. This allows the attacker to drain the entire allowance in a single transaction by recursively calling the function before the allowance is reduced.",
+      "severity": "critical",
+      "original_id": "28988824486570f1"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_024",
+      "title": "Insufficient Input Validation in _mint and mint - No Check for Zero Amount",
+      "description": "The _mint and mint functions allow minting of zero tokens without validation. While this may seem benign, it enables attackers to trigger unnecessary events and state changes (totalSupply increment, balanceOf update) with zero value, potentially bloating the blockchain state or interfering with off-chain indexing. More critically, if combined with other vulnerabilities (e.g., reentrancy), zero-value mints could be used to manipulate state transitions in unexpected ways.",
+      "severity": "medium",
+      "original_id": "3d0483661ccc4993"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_025",
+      "title": "Missing Access Control in Interface Declaration - IBlack Allows Public Minting",
+      "description": "The IBlack interface declares mint, burn, transfer, and transferFrom as public functions without any access control modifiers. This interface design misleads developers into assuming these functions are safe for public use, when in reality, mint and burn are administrative functions that should be restricted to the minter. The interface fails to communicate that mint() requires authorization, creating a false sense of security and potentially leading to integration errors in downstream contracts that assume unrestricted access.",
+      "severity": "high",
+      "original_id": "63ab4ecf1bbcae11"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_026",
+      "title": "State Synchronization Issue in burnFrom - Allowance Updated Before Burn, But Burn Can Revert",
+      "description": "In burnFrom, the allowance is decremented before calling _burn. If _burn reverts (e.g., due to insufficient balance), the allowance is still reduced, but the burn does not occur. This creates a state inconsistency: the spender's allowance is consumed, but the user's balance is unchanged. This is a denial-of-service vector \u2014 the spender loses their approved allowance without any benefit, and the user cannot recover the allowance because the burn failed. This violates the principle that state changes should only occur if the entire operation succeeds.",
+      "severity": "high",
+      "original_id": "d8eb772acc48a4a2"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_027",
+      "title": "Unbounded State Growth from Zero-Value Transfers and Approvals",
+      "description": "The contract allows unlimited approvals and transfers of zero value. Each approval creates a new mapping entry in allowance[address][address], and each transfer emits a Transfer event. An attacker can spam the contract with zero-value approvals and transfers, creating an unbounded number of storage slots and events. This leads to increasing gas costs for legitimate users and potential DoS due to storage exhaustion. The contract has no mechanism to clean up zero-value allowances or limit the number of approvals per address.",
+      "severity": "high",
+      "original_id": "e4e23a8bea4347f2"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_028",
+      "title": "No Protection Against Repeated Initial Minting - initialMinted Flag Not Atomic",
+      "description": "The initialMint function checks !initialMinted before setting it to true. However, this is not an atomic operation. In a high-concurrency environment (e.g., multiple transactions in the same block), two transactions could read initialMinted as false simultaneously, both pass the check, and both execute initialMint, minting 50M tokens twice. This results in double the intended supply, diluting all token holders and inflating the totalSupply beyond the protocol's economic model.",
+      "severity": "critical",
+      "original_id": "3773b0e94af1617a"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_029",
+      "title": "Integer Underflow in Burn Operations Due to Lack of Underflow Check",
+      "description": "The _burn function subtracts _amount from balanceOf[_from] and totalSupply without checking if the balance is sufficient. This allows any user to call burn or burnFrom with a value greater than their balance, causing an underflow that wraps around to a very large number, effectively creating infinite tokens. This breaks token economics and enables arbitrary minting via balance manipulation.",
+      "severity": "critical",
+      "original_id": "78819c1c001fab9f"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_030",
+      "title": "Inconsistent Allowance Decrement Logic Enables Double-Spend Attacks",
+      "description": "The transferFrom and burnFrom functions decrement allowance only if it is not type(uint).max, but do not check if the allowance is sufficient before decrementing. An attacker can call transferFrom with a value exceeding the allowance but less than their balance, causing the allowance to underflow (wrap to type(uint).max) while still transferring tokens. This allows the attacker to drain the allowance of any user without authorization, then use the wrapped allowance to perform unlimited future transfers.",
+      "severity": "high",
+      "original_id": "b368e077cb28d641"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_031",
+      "title": "Minter Can Mint Unlimited Tokens After Initial Mint",
+      "description": "The mint function allows the minter to mint any amount of tokens without any cap. After the initialMint (50M tokens), the minter can call mint(address, amount) with any arbitrary value, including values that cause totalSupply to overflow. This enables infinite inflation of the token supply, diluting all existing holders and destroying token value.",
+      "severity": "critical",
+      "original_id": "65589a92e6d99965"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_032",
+      "title": "Missing Reentrancy Guard Enables Token Theft via Callback Exploits",
+      "description": "The _transfer and _mint functions emit Transfer events but do not use a reentrancy guard. An attacker can deploy a malicious contract that calls transfer or transferFrom, then in the receive/external function, recursively call transferFrom to drain the victim's balance multiple times before the original transaction completes. This exploits the fact that state updates (balanceOf) occur after event emission, allowing reentrant calls to read stale balances.",
+      "severity": "high",
+      "original_id": "57838a9ddf89551d"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_033",
+      "title": "Initial Mint Can Be Triggered Multiple Times via Race Condition",
+      "description": "The initialMint function checks !initialMinted but does not use atomic state mutation. An attacker can front-run the initial mint transaction by submitting a transaction with higher gas price immediately after the legitimate initialMint is mined but before the state update is finalized. If the network delays the state update, multiple initialMint calls can succeed, minting multiple 50M token batches and inflating supply beyond 50M.",
+      "severity": "high",
+      "original_id": "a765561d67ea2bf6"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_034",
+      "title": "Quorum Calculation Uses Stale Total Supply Due to Missing Block Timestamp Context",
+      "description": "The quorum calculation in L2GovernorVotesQuorumFraction.quorum() uses token.getsmNFTPastTotalSupply() without passing the proposal's snapshot block timestamp. This causes the quorum to be computed using the current total supply instead of the supply at the proposal's snapshot time. As a result, an attacker can manipulate the quorum threshold by timing their vote to occur after a large token transfer, effectively lowering the required quorum for a proposal to pass. This breaks the fundamental governance invariant that quorum must be measured at the snapshot time, not at execution time.",
+      "severity": "critical",
+      "original_id": "2a0984b06376f3ff"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_035",
+      "title": "Vote Weight Calculation Uses Incorrect Block Timestamp in _getVotes",
+      "description": "The _getVotes function in L2GovernorVotes uses the proposal's voteStart.getDeadline() as the block timestamp for retrieving past votes. However, the underlying token's getsmNFTPastVotes(account, blockTimestamp) expects the block number (not timestamp) as its second parameter. This mismatch causes vote weights to be calculated using an incorrect historical state \u2014 potentially retrieving votes from a completely different block. This leads to vote weights being either inflated or deflated based on timing, enabling attackers to cast votes with incorrect weight by manipulating proposal submission timing.",
+      "severity": "critical",
+      "original_id": "69469b2cc183b203"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_036",
+      "title": "Governor Can Be Bypassed via relay() When Executor Is Not Itself",
+      "description": "The relay() function is protected by onlyGovernance(), which allows execution only via successful proposals. However, when _executor() is not address(this) (e.g., a Timelock), the function allows arbitrary calls to any target with any value. Since the onlyGovernance() modifier only checks that the caller is the executor and that the call is whitelisted via _governanceCall, an attacker who gains control of the executor contract (e.g., via a compromised timelock) can use relay() to drain any ETH or tokens sent to the Governor contract. This is especially dangerous because the Governor contract receives ETH via receive() only when executor == address(this), but relay() can still send ETH to arbitrary addresses regardless.",
+      "severity": "high",
+      "original_id": "161e70c7db989ce5"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_037",
+      "title": "Proposal Execution Bypasses Quorum and Vote Validation via Direct _execute Call",
+      "description": "The _execute function is marked internal and virtual, but it is called directly by execute() without re-validating the proposal state after the initial state() check. If an attacker can call _execute directly (e.g., via a malicious proxy or through a vulnerable module), they can bypass the state() validation entirely. The state() function checks for Succeeded/Defeated/Expired, but _execute() assumes the proposal is valid. If a proposal is in Active state but the attacker forces _execute() to run, funds can be transferred without quorum or majority support. This is possible if a module overrides _execute() without re-validating state.",
+      "severity": "high",
+      "original_id": "5c83beab0314dd53"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_038",
+      "title": "Incorrect Use of BlackTimeLibrary.epochNext() Causes Proposal ID Collisions Across Time Boundaries",
+      "description": "The proposalId is computed using hashProposal() with epochTimeHash = bytes32(BlackTimeLibrary.epochNext(block.timestamp)). However, epochNext() returns the next epoch boundary (e.g., every 12 hours), meaning multiple proposals submitted within the same epoch window will have identical epochTimeHash. If two proposals with identical targets, values, calldatas, and epochTimeHash are submitted, they will have the same proposalId, causing the second proposal to revert due to 'proposal already exists'. This allows an attacker to front-run legitimate proposals by submitting a malicious proposal with identical parameters but a different descriptionHash (which is not used in hashProposal), effectively blocking legitimate proposals by occupying their proposalId.",
+      "severity": "high",
+      "original_id": "17477c3579d27c99"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_039",
+      "title": "Missing Access Control on _mint and _burn Allows Arbitrary Supply Manipulation",
+      "description": "The internal functions _mint and _burn are not restricted to the minter role and can be called indirectly by any user via public functions that lack proper access control checks. Although mint() and burn() require msg.sender == minter, the internal functions _mint and _burn are publicly callable through transfer() and transferFrom() if an attacker can manipulate balanceOf values through other means. However, the critical flaw is that _mint and _burn are internal functions that are only called by mint(), burn(), transfer(), and transferFrom(). The real vulnerability is that the initialMint() function is the only function that sets totalSupply and balanceOf for the first time, but after that, any user can call mint() if they know the minter address \u2014 which is not protected after initial setup. However, the true boundary violation is that the minter role can be transferred without any delay or governance mechanism, and once transferred, the new minter can mint unlimited tokens, diluting all existing holders. This is an access control boundary failure because the state variable totalSupply and balanceOf are economic state variables used to represent token ownership and supply, and their update functions (mint, _mint) are accessible to the minter without any cap or audit. The attacker can mint an arbitrary amount of tokens and transfer them to themselves, diluting all other holders. This is a critical economic manipulation vulnerability.",
+      "severity": "critical",
+      "original_id": "7d26b06cd88f8441"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_040",
+      "title": "Unbounded Minting Allows Infinite Token Dilution and Protocol Insolvency",
+      "description": "The mint() function allows the minter to mint any arbitrary amount of tokens without any cap or limit. Since totalSupply and balanceOf are updated without bounds, an attacker who gains minter privileges (via setMinter) can mint an infinite number of tokens. For example, if the initial supply is 50M BLACK (50 * 10^6 * 10^18 = 5e25), an attacker can mint an additional 1e30 tokens. This causes the value of each existing token to collapse. If a user holds 100 BLACK before minting, and the attacker mints 1e30 tokens, the new total supply becomes ~1e30, reducing the user's share to 100 / 1e30 = 1e-28, effectively rendering their holdings worthless. This is a direct economic manipulation: the attacker gains all newly minted tokens at zero cost, while all existing holders suffer proportional dilution. The financial impact is total loss of value for all non-minter holders. The root cause is the absence of a maximum supply cap or minting limit in the mint() function, violating the access control boundary by allowing unbounded state mutation of economic variables.",
+      "severity": "critical",
+      "original_id": "3cbe903121dd5e9e"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_041",
+      "title": "No Protection Against Reentrancy in _transfer and _burn",
+      "description": "The _transfer and _burn functions emit Transfer events before updating balances, and are called by public functions (transfer, transferFrom, burn, burnFrom) that do not use reentrancy guards. An attacker can deploy a malicious contract that, upon receiving tokens via transfer(), triggers a reentrant call back into transferFrom() or burnFrom() to drain additional funds. For example: Attacker deploys a contract that calls transfer() to send 100 BLACK to itself. In the receive() or onERC777Received() hook (if called via a compatible interface), the contract calls transferFrom() to withdraw another 100 BLACK from its own balance (which hasn't been reduced yet due to reentrancy). This allows double-spending. Mathematical proof: Initial balance = 100. Attacker calls transfer(to=attackerContract, value=100). In the contract's fallback, it calls transferFrom(attackerContract, attacker, 100). Since balanceOf[attackerContract] is still 100 during the reentrant call (because the state update happens after emit), the transferFrom succeeds. After both calls, attackerContract has 0, but attacker has 200, and totalSupply is unchanged. The protocol loses 100 tokens to the attacker. This is a classic reentrancy vulnerability enabled by lack of checks-effects-interactions pattern and absence of reentrancy guard.",
+      "severity": "high",
+      "original_id": "d92495ce14b7413e"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_042",
+      "title": "Representation Boundary Violation: No Unit Conversion or Scaling Enforcement",
+      "description": "The contract uses raw wei-scale values (1e18) throughout, but does not enforce or document unit expectations. The initialMint() function hardcodes 500 * 1e6 * 1e18, which is correct for 50M tokens at 18 decimals. However, the mint() function accepts any uint amount without validation. If a caller passes 500 * 1e6 (without 1e18), they mint only 500M wei (0.5 tokens) instead of 50M tokens. This is not a bug per se, but a representation boundary failure: the interface expects raw units (as per ERC-20), but the documentation and human intent expect normalized units (e.g., 50M). The problem is that there is no input validation or conversion layer. If a user or frontend mistakenly passes 500000000000000000000 (50e18) thinking it's 50 tokens, they actually mint 50,000,000 tokens \u2014 a 1Mx overmint. Conversely, if a user passes 50000000 (50M wei), they get only 0.05 tokens. This creates a representation boundary mismatch between human intent and machine execution. The call chain: user calls mint(account, 50000000) \u2192 _mint(account, 50000000) \u2192 totalSupply += 50000000. But user expected 50 tokens (50 * 1e18). The calculation fails because no conversion or validation occurs at the boundary. This leads to unpredictable supply inflation or deflation based on user input error, breaking economic invariants.",
+      "severity": "high",
+      "original_id": "3f40e8357b36172a"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_043",
+      "title": "Data Access Integrity: Allowance Not Validated Against Balance in transferFrom",
+      "description": "The transferFrom function allows a spender to transfer up to the allowance amount, but does not check if the _from address has sufficient balance. This creates a data access integrity violation: the allowance can be set to a value greater than the actual balance, and transferFrom will still succeed, reducing the balance below zero. For example: Alice has 100 BLACK. She approves Bob for 200 BLACK. Bob calls transferFrom(Alice, Charlie, 200). The function subtracts 200 from Alice's balance (100 - 200 = underflow, but unchecked block prevents revert). Alice's balance becomes 2^256 - 100 (a huge positive number due to underflow), and Charlie receives 200. This corrupts the balance state permanently. The totalSupply remains unchanged, but Alice's balance is now a garbage value. Any future transfers from Alice will be based on this corrupted balance. This is a critical data structure boundary failure: the allowance and balance are two independent state variables that must be consistent, but the protocol assumes allowance \u2264 balance, which is not enforced. The mathematical impact: Alice's balance underflows to 2^256 - 100. If Alice later tries to send 1 token, the balance becomes 2^256 - 99, still corrupted. The funds are not stolen per se, but the account is permanently broken \u2014 a denial-of-service on Alice's account. This is a high-severity integrity violation.",
+      "severity": "high",
+      "original_id": "5455fa14a75097ae"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_044",
+      "title": "Access Control Bypass in Quorum Numerator Update Allows Manipulation of Voting Power Threshold",
+      "description": "The updateQuorumNumerator function is protected by the onlyGovernance modifier, which relies on _governanceCall to validate that the call originates from a successful governance proposal. However, the _beforeExecute and _afterExecute hooks only add and clear _governanceCall entries when targets[i] == address(this). If a proposal executes a transaction targeting a different contract (e.g., a timelock), the _governanceCall queue is never populated, yet updateQuorumNumerator can still be called externally by an attacker if they can trigger a proposal that executes a no-op or non-governor-targeted transaction. This creates a window where an attacker can call updateQuorumNumerator directly without being authorized by governance, since the _governanceCall queue remains empty and the while loop in onlyGovernance never executes, bypassing the access control entirely. This allows an attacker to arbitrarily lower the quorum threshold, enabling them to pass malicious proposals with minimal voting power.",
+      "severity": "critical",
+      "original_id": "829505914bdc379d"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_045",
+      "title": "Unit Mismatch in _getVotes Return Value Causes Incorrect Quorum and Vote Succeed Calculations",
+      "description": "The _getVotes function in L2GovernorVotes calls token.getsmNFTPastVotes(account, blockTimestamp), which returns a raw vote balance in the token's internal representation. However, the quorum and vote success logic in L2GovernorVotesQuorumFraction and L2GovernorCountingSimple assume this value is in the same unit as the total supply returned by token.getsmNFTPastTotalSupply(). If the token's getsmNFTPastVotes returns a value scaled differently (e.g., 18 decimals) while getsmNFTPastTotalSupply returns a value scaled to 6 decimals, the quorum calculation (supply * numerator / denominator) will be orders of magnitude off. For example, if total supply is 1,000,000 (6 decimals) but getsmNFTPastVotes returns 1,000,000,000,000,000,000,000 (18 decimals), then a voter with 1 token appears to have 1e18 votes, making quorum impossible to reach. This causes proposals to never pass or be incorrectly declared passed, leading to governance paralysis or unauthorized execution.",
+      "severity": "high",
+      "original_id": "23b5d624b553065b"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_046",
+      "title": "Desynchronized Proposal State Check in state() Function Allows Double Execution of Proposals",
+      "description": "The state() function checks _proposals[proposalId].executed before returning ProposalState.Executed, but does not check if the proposal has been canceled or expired in a way that synchronizes with the execution flag. An attacker can submit a proposal, wait for it to become Succeeded, then call execute() to mark it as executed. Immediately after, they can call _cancel() with the same proposal parameters (which hashes to the same proposalId) and set canceled=true. Since _proposals[proposalId].executed is already true, state() still returns Executed, but the proposal is now also marked as canceled. However, the execute() function does not check for cancellation after execution, and the _beforeExecute/_afterExecute hooks are still triggered. This creates a race condition where a proposal can be executed twice if the cancellation is called between the state() check and the execution in execute(). This allows an attacker to replay the same on-chain actions twice, potentially draining funds or manipulating state twice.",
+      "severity": "high",
+      "original_id": "861054f4436f874f"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_047",
+      "title": "Incorrect Proposal ID Hashing Enables Proposal Collision and Replay Attacks",
+      "description": "The hashProposal function uses abi.encode(targets, values, calldatas, epochTimeHash) to generate proposal IDs, but does not include the chain ID or governor address. This means the same proposal (same targets, values, calldatas, and epochTimeHash) will have the same proposalId on any network or governor instance. An attacker can submit a proposal on a testnet or another governor, wait for it to pass, then replay the exact same proposal on the mainnet governor using the same proposalId. Since _proposals[proposalId].voteStart.isUnset() only checks if the proposal exists, not if it was already executed on this chain, the attacker can call execute() with the same proposalId and parameters, triggering the same on-chain actions again. For example, if a proposal transfers 1000 ETH to an address on testnet, the same proposal on mainnet will transfer another 1000 ETH, resulting in double spending.",
+      "severity": "high",
+      "original_id": "10d9b1606d380ef0"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_048",
+      "title": "ETH Received by Governor Triggers Unintended Governance Execution via Relay",
+      "description": "The Governor contract's receive() function allows ETH to be sent directly to it, but when the executor is a third-party contract (e.g., Timelock), the contract has no mechanism to distinguish between user deposits and ETH sent as part of a governance proposal execution. An attacker can send ETH to the Governor contract, then submit a malicious governance proposal that calls relay() to withdraw those very funds. Since the relay() function is protected by onlyGovernance() and the _governanceCall queue is populated during _beforeExecute(), the attacker can craft a proposal that executes relay() to steal the ETH they just sent, effectively creating a self-funded theft loop.",
+      "severity": "critical",
+      "original_id": "34f6cec456af6426"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_049",
+      "title": "State Commitment Before External Execution Allows Reentrancy and Fund Loss",
+      "description": "The _execute function commits the proposal as executed before performing any external calls via _execute. This allows an attacker to reenter the governor during the execution of a proposal and trigger multiple executions of the same proposal, draining funds from the governor contract. The state change (_proposals[proposalId].executed = true) occurs before any external calls, making the proposal 'executed' even if the underlying calls fail or are reentered.",
+      "severity": "critical",
+      "original_id": "054d6ab61ff5d628"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_050",
+      "title": "Missing User Protection in Proposal Execution: No Minimum Output Bounds",
+      "description": "The execute function allows any caller to trigger execution of a proposal that has passed, but provides no mechanism for users to specify minimum acceptable outcomes (e.g., minimum token received, minimum value transferred). Since the execution involves arbitrary external calls with fixed values and calldatas, an attacker can manipulate the external targets (e.g., a malicious DEX) to return less value than expected, and users have no way to reject such unfavorable execution.",
+      "severity": "high",
+      "original_id": "a3a6677c4e967ba0"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_051",
+      "title": "External Call Failure Does Not Revert Proposal Execution State",
+      "description": "In _execute, if any external call fails (e.g., due to insufficient gas, reversion in target contract, or malicious behavior), the Address.verifyCallResult reverts the entire transaction. However, the proposal state has already been marked as executed in the execute function before _execute is called. This creates an inconsistency: the proposal is permanently marked as executed in storage, but the intended actions did not occur. This prevents re-submission of the proposal even though it failed to execute, locking governance actions and potentially freezing protocol upgrades.",
+      "severity": "high",
+      "original_id": "396bff606846a0af"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_052",
+      "title": "Insecure Signature Verification Allows Replay Attacks via Non-Bound Context",
+      "description": "The castVoteBySig and castVoteWithReasonAndParamsBySig functions use ECDSA.recover to verify signatures, but the signed message does not include the governor contract address or chainId. This means a vote signature generated on one governor instance (or network) can be replayed on another, allowing an attacker to cast votes on proposals they did not authorize if the same proposalId and voting parameters exist on a different governor. This breaks the uniqueness of vote authorization across contexts.",
+      "severity": "high",
+      "original_id": "c218bc300bc73769"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_053",
+      "title": "Quorum Calculation Uses Stale Total Supply Snapshot",
+      "description": "The quorum function in L2GovernorVotesQuorumFraction calculates quorum as (token.getsmNFTPastTotalSupply() * quorumNumerator()) / quorumDenominator(). However, getsmNFTPastTotalSupply() returns the total supply at the proposal snapshot time (voteStart), but the vote is cast over time. If the token supply changes during the voting period (e.g., due to minting or burning), the quorum threshold remains fixed to the snapshot value, but the actual voting power changes. This allows an attacker to mint tokens during voting to artificially lower the quorum threshold relative to the total votes cast, enabling a proposal to pass with fewer votes than intended.",
+      "severity": "high",
+      "original_id": "16a05ef03f58ee99"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_054",
+      "title": "Governor Can Receive ETH Without Handling It When Executor Is Not Itself",
+      "description": "The receive() function only accepts ETH if _executor() == address(this). However, if the executor is a timelock or other contract, ETH sent to the governor contract is permanently locked. There is no mechanism to recover these funds, and the relay() function only allows governance-executed calls \u2014 not arbitrary ETH withdrawal. This creates a permanent loss vector for any ETH sent to the governor contract during periods when it is not its own executor.",
+      "severity": "high",
+      "original_id": "103a1f54681f9353"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_055",
+      "title": "Proposal Execution Can Be Triggered with Invalid epochTimeHash",
+      "description": "The execute function accepts an epochTimeHash parameter, but does not validate that it matches the epochStart hash computed from the proposal's original data. An attacker can submit a proposal with a valid epochTimeHash, then later call execute with a different epochTimeHash that hashes to the same proposalId. If the proposalId collision occurs (due to weak entropy in epochTimeHash), the attacker can trigger execution of a proposal with mismatched parameters, potentially executing unintended operations.",
+      "severity": "medium",
+      "original_id": "6a600adb853b2fc4"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_056",
+      "title": "Vote Weight Calculation Uses Block Timestamp Instead of Block Number",
+      "description": "The _getVotes function is called with blockTimestamp, but the underlying token's getsmNFTPastVotes() likely expects a block number (as is standard in ERC20Votes). This mismatch causes the vote weight to be calculated using an incorrect snapshot point, potentially allowing users to vote with outdated or future weights. For example, if the token uses block number-based snapshots, using block.timestamp will return incorrect values, leading to inflated or deflated vote counts and potentially enabling vote manipulation.",
+      "severity": "high",
+      "original_id": "54d9271373578a3b"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_057",
+      "title": "Incorrect Unit Handling in _getAmountOut Leads to Catastrophic Fee Underpayment and Fund Loss",
+      "description": "The function _getAmountOut incorrectly returns 0 for sqrtPriceAfter when using a basic (v2-style) pool, but the calling function _createRoute assumes sqrtPriceAfter is a valid 160-bit value for concentrated pools. This causes _createRoute to pass a 0-value sqrtPriceAfter to external systems (e.g., QuoterV2 or future swap execution) when the route includes a basic pool, corrupting the swap route data. When a multi-hop swap includes a basic pool as the first or middle hop, the 0-value sqrtPriceAfter is stored in the route and later used by external systems (e.g., a router or liquidity provider) to compute price impact or slippage. Since 0 is an invalid sqrtPrice (which must be > 0), external systems may revert, or worse, interpret it as a zero-price asset, leading to 100% slippage and full loss of input tokens. The root cause is a unit mismatch: sqrtPriceAfter is a 160-bit fixed-point price (Q64.96) for concentrated pools, but the function returns 0 as a placeholder for basic pools, violating the semantic contract of the return type. This is not a gas optimization \u2014 it is a critical unit error that corrupts financial calculations.",
+      "severity": "critical",
+      "original_id": "b122ba2d8702a6ac"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_058",
+      "title": "State Commitment Before Execution Verification in _beforeExecute",
+      "description": "The _beforeExecute function commits governance call authorization to _governanceCall before verifying that the _execute function will succeed. If any external call in _execute reverts, the proposal is marked as executed and the _governanceCall queue is not properly cleared, leaving the queue in an inconsistent state. This allows future governance calls to be incorrectly rejected due to a corrupted queue, effectively locking governance functionality.",
+      "severity": "critical",
+      "original_id": "78076bdc68a1eb92"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_059",
+      "title": "Mathematical Domain Violation in Quorum Calculation",
+      "description": "The quorum() function in L2GovernorVotesQuorumFraction performs division (supply * numerator) / denominator without validating that denominator is non-zero. Although the constructor and update function check that numerator <= denominator, they do not validate that denominator > 0. If quorumDenominator() is overridden to return 0, the division results in a division-by-zero revert. However, if the denominator is 0 due to a malicious override, the function fails catastrophically instead of gracefully rejecting the invalid configuration.",
+      "severity": "high",
+      "original_id": "ea1d003886cbc54b"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_060",
+      "title": "Authorization Context Not Bound in Signature-Based Voting",
+      "description": "The signature-based voting functions (castVoteBySig and castVoteWithReasonAndParamsBySig) sign only the proposalId and support value, but not the voter address or execution context. An attacker can replay a valid signature from a legitimate voter to cast a vote on a different proposal with the same support value, consuming the voter's nonce and potentially influencing governance outcomes. The signature does not bind the proposalId to the voter's intent in a way that prevents context switching.",
+      "severity": "high",
+      "original_id": "c7bc3011565c0565"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_061",
+      "title": "Incomplete State Restoration in Proposal Cancellation",
+      "description": "When a proposal is canceled via _cancel, the proposal.canceled flag is set, but any votes already cast are not removed from _proposalVotes. This leaves the vote counts (forVotes, againstVotes, abstainVotes) and hasVoted mappings in an inconsistent state. If the proposal is later re-submitted with the same hash (which is possible if description changes), the system will incorrectly treat previously cast votes as still valid, leading to double-counting and potential governance manipulation.",
+      "severity": "high",
+      "original_id": "7bb67aabd69ff22d"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_062",
+      "title": "Interface Definition Incompatibility with IBlackHoleVotes",
+      "description": "The contract references IBlackHoleVotes.getsmNFTPastVotes and getsmNFTPastTotalSupply, but these function names are non-standard and likely typos. The standard OpenZeppelin ERC20Votes interface uses getPastVotes and getPastTotalSupply. If IBlackHoleVotes is intended to be a fork or variant of ERC20Votes, the mismatched function names will cause ABI encoding failures when the contract attempts to call these functions, resulting in silent reverts and zero vote counts, effectively breaking governance voting.",
+      "severity": "critical",
+      "original_id": "4abb9ae7e0aaea21"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_063",
+      "title": "Automatic Processing of Withdrawal Funds via External Token Returns",
+      "description": "The contract has no protection against unintended execution of swap routing logic when external tokens are sent to it. Since the contract has no fallback or receive function, but contains complex swap routing logic that can be triggered by external calls, an attacker can send tokens to the contract that match a valid swap path, causing the contract to internally process those tokens as if they were a user-initiated swap request. This leads to funds being routed out of the contract to an attacker-controlled address without any user authorization, effectively draining the contract's liquidity.",
+      "severity": "critical",
+      "original_id": "21470f75f0f9f729"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_064",
+      "title": "Mathematical Domain Violation in _getCLPoolAmountOut with Zero Input",
+      "description": "The _getCLPoolAmountOut function calls quoterV2.quoteExactInputSingle with amountIn=0, which is mathematically invalid for AMM pricing calculations. The function silently accepts zero input and returns (0, 0) without validation, producing mathematically meaningless results that can be exploited to manipulate swap routing decisions.",
+      "severity": "high",
+      "original_id": "7d3c934bf7b2a31d"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_065",
+      "title": "State Commitment Before Subcall Verification in _getAmountOut",
+      "description": "The _getAmountOut function commits to a return value (amountOut, sqrtPriceAfter) before verifying the success of the external quoterV2.quoteExactInputSingle call. If the subcall reverts due to insufficient liquidity or price slippage, the function still returns (0, 0) but the parent function (getAmountOut) proceeds as if the route is valid, leading to incomplete or incorrect swap routes being returned while gas and state are consumed.",
+      "severity": "high",
+      "original_id": "3d5039c1e3dd1db3"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_066",
+      "title": "Interface Definition Incompatibility in IQuoterV2.QuoteExactInputSingleParams",
+      "description": "The contract declares IQuoterV2.QuoteExactInputSingleParams with fields tokenIn, tokenOut, deployer, amountIn, limitSqrtPrice. However, the actual Algebra QuoterV2 interface requires an additional field: 'fee'. This 5-field struct declaration mismatches the actual 6-field interface, causing ABI encoding failure when calling quoteExactInputSingle, resulting in silent revert and failed swap calculations.",
+      "severity": "critical",
+      "original_id": "bb17b71728013bbc"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_067",
+      "title": "Incomplete State Restoration in getClaimable for Staked Fees",
+      "description": "The getClaimable function calculates staked token fees by calling getClaimable(gauge, pair), but the gauge's claimable0/claimable1 are not the same as the pair's. The gauge contract tracks user rewards, not fee accumulation. This misinterpretation leads to incorrect staked_token0_fees and staked_token1_fees values being returned, causing users to receive inaccurate fee claims and potentially enabling reward theft via manipulated fee reporting.",
+      "severity": "high",
+      "original_id": "14e14ce9294c32e6"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_068",
+      "title": "Fork Behavioral Divergence: Fee Collection Moved to Distributor Contract",
+      "description": "The contract assumes that Pair.fees() returns an address where fees are accumulated, and reads IERC20(token).balanceOf(feesAddress) to get fees. However, Algebra v3 forks moved fee collection to a separate FeeDistributor contract. Calling Pair.fees() now returns a zero address or non-fee-collecting address, causing staked_token0_fees and staked_token1_fees to always be zero. This breaks reward calculation entirely, locking user fees permanently.",
+      "severity": "critical",
+      "original_id": "686c2428695fa8fd"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_069",
+      "title": "Missing User Protection in Swap Route Selection - No Minimum Output Guarantee",
+      "description": "The getAmountOut function calculates and returns the best swap route without allowing users to specify a minimum acceptable output amount. This exposes users to front-running and MEV attacks where the returned route may execute at a significantly worse rate than expected, resulting in substantial loss of user funds. The function returns a swapRoute with amountOut but provides no slippage tolerance parameter, violating Pattern 1 (User Control Over Execution Outcomes).",
+      "severity": "critical",
+      "original_id": "926537568d40bcbe"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_070",
+      "title": "Validation After Execution in _getAmountOut and _getCLPoolAmountOut",
+      "description": "The _getAmountOut and _getCLPoolAmountOut functions execute external calls to IRouter and IQuoterV2 before validating whether the output is non-zero or acceptable. The try-catch blocks return (0,0) on failure, but the calling function (getAmountOut) continues processing and may use these zero values in subsequent calculations without validation. This violates Pattern 2 (Validation Timing) because the operation (external call) occurs before any validation of its success or adequacy.",
+      "severity": "high",
+      "original_id": "e1b0944d893fe34e"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_071",
+      "title": "Inconsistent Accounting in Multi-Hop Swaps - Uses Requested vs Actual Values",
+      "description": "In multi-hop swap functions (_getPoolSwapRoutesFromThreeHop and _getSwapRoutesFromTwoHop), the function calculates amountOut for each leg using _getAmountOut, but then uses the final amountOut to determine whether to accept the route. However, the route's amountOut is set to the final output, while the intermediate steps may have been calculated with different assumptions. Crucially, the function does not validate that the intermediate amounts are sufficient to support the final output. For example, if the first hop returns 100 tokens but the second hop only returns 50 due to slippage, the function still returns a route with amountOut=50, but the user may have expected a minimum of 80. The accounting is inconsistent because the route's amountOut is the actual result, but the user has no way to enforce a minimum acceptable value. This violates Pattern 3: validation and accounting do not align with user expectations.",
+      "severity": "high",
+      "original_id": "3ab9f315fd721d2e"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_072",
+      "title": "Access Control Missing in Public Interface Functions",
+      "description": "The getAmountOut function is public and returns swap routes that determine how users' funds are swapped. However, it is not marked as view despite modifying state via external calls (IRouter, IQuoterV2). More critically, the interface does not restrict who can call this function, and it returns data that could be used to front-run or manipulate the protocol. While not directly transferring funds, this function enables MEV extraction and front-running attacks by exposing internal swap logic. The interface design (Pattern 4) fails to indicate that this function should be restricted or rate-limited, creating a systemic risk.",
+      "severity": "high",
+      "original_id": "b2df0bb3eb8695d2"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_073",
+      "title": "State Synchronization Failure in getAllPair and getPair",
+      "description": "The getAllPair and getPair functions call _pairAddressToInfo, which reads and populates state variables including reserve0, reserve1, claimable0, claimable1, etc. However, these values are then overwritten by subsequent calls to getClaimable and _getBribes. The issue is that _pairAddressToInfo reads the pair's state (reserves, balances) at time T, but getClaimable and _getBribes may read different state at time T+\u0394 due to concurrent transactions. This creates a snapshot inconsistency: the reserves shown may be from one block, while the claimable fees are from another. For example, if a user calls getPair and a large swap occurs between the reserve read and the claimable read, the user sees outdated reserves but updated fees, leading to incorrect APY calculations and misinformed decisions. This violates Pattern 6 (State Synchronization in Function Chains).",
+      "severity": "high",
+      "original_id": "7cc0df0f705cf410"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_074",
+      "title": "Unit Mismatch in _getAmountOut Return Values",
+      "description": "The _getAmountOut function returns (uint256 amountOut, uint160 sqrtPriceAfter) for both basic and concentrated pools. For basic pools (isBasic=true), it calls IRouter(routerV2).getPoolAmountOut(amountIn, tokenIn, pair), which returns amountOut in the same unit as amountIn (e.g., wei). For concentrated pools, it calls quoterV2.quoteExactInputSingle, which returns amountOut in the same unit. However, the function _createRoute uses amountOut directly as the route's amountOut. The problem arises when the IRouter.getPoolAmountOut returns a value in a different decimal scale than expected by the frontend or downstream logic. For example, if the router returns 1000000000000000000 (1e18) for 1 USDC, but the frontend expects 1e6, the displayed amount will be 1 million times too large. This unit mismatch (Pattern 9) causes incorrect UI display and potential user loss if funds are sent based on misinterpreted values.",
+      "severity": "high",
+      "original_id": "07e6983ffe81af4c"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_075",
+      "title": "Partial Execution Risk in Multi-Hop Swap Logic",
+      "description": "The getAmountOut function attempts to find the best route among direct, two-hop, and three-hop paths. However, if a three-hop route is found, it returns that route even if one of the intermediate hops fails (e.g., due to insufficient liquidity). The function _getAmountViaHopping returns amounts for each leg, but if any leg returns 0, the function still proceeds and may return a route with a non-zero final amountOut if the last hop succeeds. For example, if hop1: 100 \u2192 90, hop2: 90 \u2192 0 (due to liquidity), hop3: 0 \u2192 50, the function returns a route with amountOut=50, but the user's input of 100 tokens has been partially consumed with no output from the middle hop. The user is left with a route that appears valid but has an invalid intermediate state. This violates Pattern 1 and Pattern 7: partial execution is allowed without user consent or protection, and state (user's input tokens) may be consumed without full output.",
+      "severity": "critical",
+      "original_id": "18929f2c336d2484"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_076",
+      "title": "Replay Protection State Commitment Before External Call Failure",
+      "description": "The getAmountOut function does not implement replay protection, but the _getAmountViaHopping and _getAmountOut functions make external calls to IRouter and IQuoterV2. If these external calls revert due to insufficient liquidity or price impact, the function returns (0,0) and continues. However, if the function were to use a nonce or signature-based system (e.g., for batched swaps), the state would be committed before the external call. In this case, since the function is stateless and only reads, this is not directly applicable. However, the lack of any mechanism to prevent re-entrancy or replay in a future extension (e.g., if this function were used in a swap executor) creates a latent vulnerability. The function assumes external calls are safe, but if the quoter or router were to be upgraded to require nonces, this function would be vulnerable to state commitment before success (Pattern 7).",
+      "severity": "medium",
+      "original_id": "0c325a02e5e09e45"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_077",
+      "title": "External System Assumption: Fixed Router and Quoter Interfaces",
+      "description": "The contract assumes that IRouter and IQuoterV2 have specific function signatures: IRouter.getAmountOut and IRouter.getPoolAmountOut, and IQuoterV2.quoteExactInputSingle. However, these interfaces are external and may be forked or upgraded. For example, if the IQuoterV2 interface changes to require a fee tier parameter or returns different fields, the contract will revert on the external call. Similarly, if IRouter.getPoolAmountOut is renamed or removed in a fork, the contract will fail. The contract makes fixed assumptions about external contract interfaces (Pattern 8) without dynamic discovery or version checking. This creates a high risk of protocol failure if the underlying DEX or quoter is upgraded or forked.",
+      "severity": "high",
+      "original_id": "4149ccf4d49cc408"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_078",
+      "title": "Incorrect Fee Calculation in _swapRatio Leads to Unauthorized Token Theft",
+      "description": "The _swapRatio function incorrectly applies the fee to the input token balance before performing the k-value invariant check, but uses the original reserve values for the comparison. This allows an attacker to manipulate the fee parameter to bypass the invariant check and steal tokens from the liquidity pool. The fee is subtracted from the input balance, but the reserve values used in the k-value calculation are the pre-fee values, creating a discrepancy that can be exploited to make an invalid swap appear valid.",
+      "severity": "critical",
+      "original_id": "eebb0887c0a46163"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_079",
+      "title": "Missing User Protection in Swap Functions Allows Slippage Exploitation",
+      "description": "The swap functions (swapExactTokensForTokens, swapExactETHForTokens, etc.) validate the minimum output amount (amountOutMin) only after the swap execution has already begun. This allows an attacker to front-run the transaction and manipulate the price by draining liquidity from the first pair in the route, causing the user to receive significantly less output than expected. The user has no mechanism to specify acceptable execution bounds beyond a static amountOutMin, which can be easily bypassed by a malicious actor with sufficient capital.",
+      "severity": "critical",
+      "original_id": "8374e797321744cc"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_080",
+      "title": "Validation Occurs After State Changes in Swap Functions",
+      "description": "In swap functions such as swapExactTokensForTokens, the validation of amountOutMin occurs after the _swap() function has already executed the token swaps. This means that the state changes (token transfers and liquidity adjustments) occur before the output is validated. An attacker can exploit this by triggering a front-run that drains liquidity from the first pair in the route, causing the actual output to fall below amountOutMin, but the transaction still completes, resulting in a loss for the user.",
+      "severity": "critical",
+      "original_id": "b238902e32e1f9e2"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_081",
+      "title": "Inconsistent Accounting in _swapSupportingFeeOnTransferTokens Causes Underpayment",
+      "description": "The function _swapSupportingFeeOnTransferTokens calculates the input amount as the difference between the current balance and the reserve, but then uses getAmountOut() to determine the output. However, getAmountOut() does not account for fee-on-transfer (FoT) token behavior, which reduces the actual amount received. This leads to an overestimation of the output amount. When the function later checks the balance increase against amountOutMin, it compares against the inflated expected output, allowing an attacker to drain liquidity and cause users to receive less than the minimum required, while the transaction still succeeds.",
+      "severity": "high",
+      "original_id": "a0d0c3938f1507e3"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_082",
+      "title": "State Synchronization Failure in removeLiquidityETHSupportingFeeOnTransferTokens",
+      "description": "The function removeLiquidityETHSupportingFeeOnTransferTokens calls removeLiquidity() to burn liquidity and receive tokens, but then uses erc20(token).balanceOf(address(this)) to determine the amount to transfer to the user. However, removeLiquidity() already transfers the tokens to 'to' (address(this)), so balanceOf(address(this)) is correct. However, the function does not validate that the amount received matches the calculated amount from the liquidity burn. This allows an attacker to manipulate the token balance via a fee-on-transfer token that burns or mints tokens on transfer, causing the user to receive less than the proportional share of the liquidity burned.",
+      "severity": "high",
+      "original_id": "93e1c5c2cd12b774"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_083",
+      "title": "Return Value Unit Mismatch in getAmountOut and getAmountsOut",
+      "description": "The function getAmountOut() returns a uint value representing the output amount, but it does not account for token decimals in its calculation. The underlying IBaseV1Pair.getAmountOut() also does not adjust for decimals. When getAmountsOut() uses this value in a multi-hop swap, the output from the first hop is used as input to the next hop without scaling for decimal differences. This causes a systematic underestimation of output amounts in multi-hop swaps involving tokens with different decimals, leading to users receiving less than expected. For example, swapping USDT (6 decimals) -> WETH (18 decimals) -> DAI (18 decimals) will result in the WETH output being treated as if it had 6 decimals in the next hop.",
+      "severity": "high",
+      "original_id": "3041116b963e675d"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_084",
+      "title": "Replay Protection State Committed Before External Call in removeLiquidityWithPermit",
+      "description": "The function removeLiquidityWithPermit commits the permit signature usage by calling IBaseV1Pair(pair).permit() before executing removeLiquidity(). If the removeLiquidity() call fails (e.g., due to insufficient liquidity or price slippage), the permit signature is still consumed, preventing the user from reusing it. This is a classic state commitment timing issue: the state (signature usage) is committed before the operation completes, leading to a denial-of-service for the user who must generate a new signature.",
+      "severity": "high",
+      "original_id": "ca82db085dd5aabc"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_085",
+      "title": "External System Assumption: Hardcoded Interface Assumptions in getAmountOut",
+      "description": "The function getAmountOut() assumes that IBaseV1Pair.getAmountOut() returns the correct output amount without considering that the external pair contract may have been forked or modified (e.g., to include fees, taxes, or custom logic). The function does not validate the output against the actual balance changes after the swap, making it vulnerable to malicious or non-standard pair implementations. An attacker can deploy a malicious pair that returns an inflated getAmountOut() value, tricking the router into accepting a swap that would otherwise be invalid, leading to loss of funds.",
+      "severity": "high",
+      "original_id": "2b265e6c24b02afe"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_086",
+      "title": "Partial Execution Risk in _swap with Concentrated Liquidity Pairs",
+      "description": "The _swap function executes multiple swaps in a loop. If one of the concentrated liquidity swaps (via ISwapRouter.exactInputSingle) fails due to insufficient liquidity or price impact, the entire transaction reverts. However, for non-concentrated swaps, the IBaseV1Pair.swap() call may succeed even if the output is less than expected, because it does not validate the output amount. This creates an inconsistent behavior: some hops are atomic, others are not. An attacker can exploit this by triggering a partial swap where the first hop succeeds but the second fails, leaving the user with an incomplete swap and lost gas, while the protocol does not revert the entire operation.",
+      "severity": "medium",
+      "original_id": "c7d840145b4f90f3"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_087",
+      "title": "Desynchronized Iteration in getAllPair Leads to Missing Pair Data",
+      "description": "The getAllPair function iterates over pairFactory.allPairs(i) using a loop bound derived from pairFactory.allPairsLength(), but the loop index i starts at _offset and increments linearly. If pairs are removed from the factory (e.g., via pair destruction or factory reset), the total number of pairs decreases, but the _offset parameter provided by the caller may point to an index that now corresponds to a deleted pair or a gap. The function does not validate that the pair at index i is still valid or has not been removed, leading to skipped valid pairs and incorrect data return. This breaks the invariant that getAllPair should return all pairs from _offset to _offset + _amounts, causing users to miss fee, reward, and bribe data for valid pairs they hold positions in.",
+      "severity": "high",
+      "original_id": "2776ca76205272b3"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_088",
+      "title": "Unit Mismatch in getClaimable Returns Raw Fees as Token Amounts",
+      "description": "The getClaimable function returns claimable0 and claimable1 values in raw token units (e.g., wei for ETH or 1e18-scaled for ERC20), but these values are directly assigned to pairInfo.claimable0/1, which are then used in UI and reward calculations expecting normalized values (e.g., 18-decimal scaled). However, the Pair contract's claimable0/1 functions return values already scaled to the token's native decimals (e.g., 6-decimal USDC). The function then adds accrued fees using _supplied * _delta0 / 1e18, which assumes 18-decimal scaling, but the original claimable0/1 values may be from a 6-decimal token. This causes a 12-order-of-magnitude error in fee display and reward calculations. For example, if a user has 1000 USDC (6-decimal) in fees, getClaimable returns 1000000000000000000 (1e18 scaled), but the UI expects 1000000000 (1e9 scaled for 9-decimal display), leading to 1000x overstatement of fees and misallocated rewards.",
+      "severity": "high",
+      "original_id": "ce0bf3c3ab0ce610"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_089",
+      "title": "Unrestricted Access to setVoter Enables Fee and Reward Hijacking",
+      "description": "The setVoter function allows the owner to change the voter contract, which in turn updates pairFactory and underlyingToken. However, there is no delay or governance mechanism to prevent immediate reversion or malicious replacement. An attacker who gains temporary access to the owner role (e.g., via compromised key or flash loan attack) can call setVoter to point to a malicious voter contract that returns a different pairFactory. This allows the attacker to manipulate which pairs are considered valid, effectively hiding legitimate pairs from getAllPair and getPair, and redirecting all fee and reward distributions to a fake pair under their control. For example, if the original voter points to 1000 pairs, the attacker replaces it with a voter that returns only 1 pair they control. All user fees and bribes are then redirected to that single pair, allowing the attacker to claim 100% of accumulated fees and emissions. The financial impact is total theft of all pending fees and emissions from all users.",
+      "severity": "critical",
+      "original_id": "7abe32deade66b65"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_090",
+      "title": "Incorrect Fee Calculation in getClaimable for Gauge Addresses",
+      "description": "The function getClaimable is called with the gauge address as the first argument to retrieve staked_token0_fees and staked_token1_fees. However, the getClaimable function is designed to work with Pair contracts, not Gauge contracts. When called as getClaimable(gauge, pair), it attempts to call gauge.balanceOf(_account), gauge.claimable0(_account), etc., but Gauge contracts do not implement these functions. This results in silent failures (returns 0) or reverts if the gauge contract has a fallback that reverts. As a result, staked_token0_fees and staked_token1_fees are always 0, even when users have staked positions earning fees. This breaks the entire fee accrual mechanism for staked positions, causing users to lose all fee rewards while the protocol falsely reports 0 fees accumulated.",
+      "severity": "high",
+      "original_id": "153794f0b72c5c52"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_091",
+      "title": "Unbounded Loop in getAmountOut Causes DoS on Large Networks",
+      "description": "The getAmountOut function contains nested loops iterating over totBasicPairs + totConcentratedPairs (up to 2000 pairs). For each pair, it performs another nested loop over the same range, resulting in O(n\u00b2) complexity \u2014 up to 4 million iterations per call. This is computationally infeasible on-chain and will cause transaction reverts due to gas exhaustion. Even if the loops were optimized, the function is externally callable by any user, making it a DoS vector. An attacker can trigger this function with any token pair, forcing the contract to execute the full O(n\u00b2) search, consuming all gas and preventing legitimate users from using swap routing. This breaks the core functionality of the protocol as a router.",
+      "severity": "critical",
+      "original_id": "a7a60489ebb1f236"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_092",
+      "title": "Automatic Processing of Withdrawal Funds via receive() Function",
+      "description": "The receive() function in RouterV2.sol only accepts ETH from the WETH contract but does not prevent the contract from receiving ETH through other means (e.g., direct transfers, failed swaps, or returned funds from external systems). When ETH is sent directly to RouterV2 (e.g., via a failed swap or malicious transfer), the contract holds the ETH without any accounting, and subsequent withdrawal operations (e.g., removeLiquidityETH) may incorrectly use these funds as if they were user deposits, leading to double-spending or fund theft.",
+      "severity": "critical",
+      "original_id": "c3ee32463730536e"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_093",
+      "title": "Reward Accounting Overflow in reportRewards() Allows Arbitrary Reward Minting",
+      "description": "The reportRewards() function calculates net reward changes by adding new rewards and subtracting previous rewards, but does not validate that the subtraction does not underflow. An attacker can report a zero reward for a user who previously had a large reward, causing _decrease to exceed _increase and underflowing _season.reward_amount. This allows an attacker to artificially inflate the total reward pool, enabling them or others to claim more tokens than were ever allocated by the treasury. The underflow occurs because reward_amount is uint256 and subtraction does not check for underflow, and the function does not validate that rewards_[i] >= season_rewards[players_[i]] before subtraction.",
+      "severity": "critical",
+      "original_id": "c82d025daa7863ab"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_094",
+      "title": "Access Control Bypass in Fee Calculation via Unprotected _swapRatio",
+      "description": "The _swapRatio function performs fee-adjusted reserve calculations to validate swap feasibility but is publicly callable and lacks access control. Attackers can manipulate the fee-adjusted balance inputs to falsely validate swaps that would otherwise violate the invariant k = x*y (or k = x^3*y + y^3*x for stable pools). This allows users to execute swaps that drain liquidity without paying the correct fee, effectively bypassing the protocol's fee mechanism. The function reads the pair's current reserves and balance, applies the fee percentage from the factory, and compares the post-swap k-value against the pre-swap k-value. Since it is public and called indirectly by swap functions, an attacker can call it directly with manipulated inputs to bypass the invariant check, enabling free swaps.",
+      "severity": "high",
+      "original_id": "a7d3230d31d1d9b9"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_095",
+      "title": "Unit Mismatch in getAmountOut for Fee-on-Transfer Tokens Leading to Underestimation of Output",
+      "description": "The getAmountOut function calculates output amounts using IBaseV1Pair.getAmountOut, which returns raw token amounts without accounting for fee-on-transfer (FoT) token behavior. However, in _swapSupportingFeeOnTransferTokens, the actual input amount is derived from balance - reserve, which correctly accounts for FoT fees. This creates a representation boundary violation: getAmountOut returns a value assuming no fee is taken on input, but _swapSupportingFeeOnTransferTokens uses a lower effective input (after fee deduction). This causes the swap path to underestimate the output amount, leading to users receiving less than expected. The mismatch propagates because getAmountsOut relies on getAmountOut for routing decisions, causing swaps to fail even when sufficient liquidity exists, or users to be charged higher slippage than necessary.",
+      "severity": "high",
+      "original_id": "99b3c8a7f889a3f4"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_096",
+      "title": "Desynchronized Iteration in _swapSupportingFeeOnTransferTokens Causes Missing Final Output Transfer",
+      "description": "In _swapSupportingFeeOnTransferTokens, the loop iterates over routes and sets the recipient for each swap as the next pair's address, except for the final step where it uses _to. However, the emit statement incorrectly uses _to for every swap instead of the actual recipient of that step. More critically, the final output token is not transferred to _to \u2014 the function only emits the swap event with _to, but the last swap's output is sent to the last pair's address (if there's a next pair) or to _to only if it's the last route. However, the logic for the final recipient is inconsistent: the recipient is set as 'to = i < routes.length - 1 ? pairFor(...) : _to', but the emit statement always uses _to. This creates a data access integrity issue: the final output token amount is correctly sent to _to, but the event logs misrepresent the recipient, and more importantly, if the last route's output is meant to go to _to, the function works. However, the real issue is that the function does not verify that the final output token balance has increased by the expected amount \u2014 it relies on the swap's internal mechanics. But the bigger issue is that the function does not handle the case where the last pair is a concentrated liquidity pool \u2014 it assumes all non-concentrated pairs use IBaseV1Pair.swap, but the final recipient might be an external address, and the function does not ensure the token is transferred out of the last pair to _to. This can lead to tokens being locked in the last pair if _to is not the pair itself and no external transfer occurs.",
+      "severity": "high",
+      "original_id": "4dfed9a794b1046a"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_097",
+      "title": "Incorrect Fee Application in _addLiquidity Leading to Underestimated Liquidity Minting",
+      "description": "In _addLiquidity, the function calculates optimal amounts based on reserves and desired inputs, but does not account for fee-on-transfer tokens when computing the actual deposited amounts. When a FoT token is deposited, the actual amount received by the pair is less than amountADesired or amountBDesired due to the transfer fee. However, the function still uses the desired amounts to compute liquidity minted via Math.min(amountA * _totalSupply / reserveA, amountB * _totalSupply / reserveB). This causes the liquidity minted to be overestimated relative to the actual value deposited. For example, if a user deposits 1000 FoT tokens with a 1% fee, only 990 tokens are received, but liquidity is calculated as if 1000 were deposited. This results in the user receiving more LP tokens than they are entitled to, diluting other liquidity providers. The mathematical proof: assume reserveA = 10000, reserveB = 10000, totalSupply = 10000. User wants to deposit 1000 A (FoT, 1% fee) and 1000 B. Actual A received = 990. Optimal B = 990 * 10000 / 10000 = 990. Liquidity = min(990 * 10000 / 10000, 990 * 10000 / 10000) = 990. But function computes liquidity as min(1000 * 10000 / 10000, 1000 * 10000 / 10000) = 1000. User receives 1000 LP tokens for 990 actual value \u2014 10 LP tokens stolen from other LPs.",
+      "severity": "high",
+      "original_id": "ab00e4daf32173fd"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_098",
+      "title": "Math.sqrt() Ignores Zero Input, Producing Invalid Liquidity",
+      "description": "The Math.sqrt() function returns 0 for input 0, but does not handle the case where y == 0 explicitly. In quoteAddLiquidity(), when a new pair is created (reserveA == 0 && reserveB == 0), liquidity is computed as sqrt(amountA * amountB) - MINIMUM_LIQUIDITY. If either amountA or amountB is 0, sqrt returns 0, resulting in negative liquidity (-1000), which is then minted. This violates the invariant that liquidity must be non-negative and leads to invalid pool state.",
+      "severity": "critical",
+      "original_id": "5e3787bb211bb62e"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_099",
+      "title": "Liquidity Minting with Negative Value Due to sqrt(0)",
+      "description": "In quoteAddLiquidity(), when creating a new pair, liquidity = Math.sqrt(amountA * amountB) - MINIMUM_LIQUIDITY. If amountA or amountB is 0, sqrt returns 0, making liquidity = -1000. This negative value is passed to mint(), which accepts uint and wraps to a huge positive number (2^256 - 1000). This creates a malformed liquidity token with invalid supply, enabling attackers to drain the pool by burning this forged liquidity.",
+      "severity": "critical",
+      "original_id": "70307e21148232dc"
+    }
+  ],
+  "input_tokens": 52541,
+  "output_tokens": 1387,
+  "cached_tokens": 1213
+}

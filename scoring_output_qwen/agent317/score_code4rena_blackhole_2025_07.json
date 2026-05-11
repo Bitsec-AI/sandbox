@@ -1,0 +1,734 @@
+{
+  "project": "code4rena_blackhole_2025_07",
+  "agent": "agent317",
+  "status": "success",
+  "timestamp": "2026-04-09T11:29:03.037338",
+  "elapsed_seconds": 12.1,
+  "total_expected": 2,
+  "total_found": 100,
+  "true_positives": 2,
+  "false_negatives": 0,
+  "false_positives": 98,
+  "detection_rate": 1.0,
+  "precision": 0.02,
+  "f1_score": 0.0392156862745098,
+  "matched_findings": [
+    {
+      "id": "code4rena_blackhole_2025_07_expected_000",
+      "expected": "Router address validation logic error prevents valid router assignment",
+      "matched": "Missing Zero Address Check in setRouter Function",
+      "confidence": 0.9,
+      "justification": "Finding 0 correctly identifies the setRouter function in the GenesisPoolManager contract with a missing zero address check. The core issue is that the require statement checks for equality with address(0) instead of inequality, which matches the expected vulnerability's logical error. The consequence of allowing the zero address would indeed break routing functionality as described.",
+      "severity": "high",
+      "expected_description": "Submitted by\nfrancoHacker\n, also found by\nAvantGard\n,\ndreamcoder\n,\nEgbe\n,\nFavourOkerri\n,\nharsh123\n,\nholtzzx\n,\nIzuMan\n,\nNexusAudits\n,\nrayss\n, and\nSparrow\n\nhttps://github.com/code-423n4/2025-05-blackhole/blob/92fff849d3b266e609e6d63478c4164d9f608e91/contracts/GenesisPoolManager.sol#L314\n\nThe\nsetRouter(address _router)\nfunction within the\nGenesisPoolManager\ncontract is intended to allow the contract owner (\nowner\n) to modify the address of the\nrouter\ncontract. This router is crucial for interacting with the decentralized exchange (DEX) when adding liquidity during the launch of a\nGenesisPool\n. However, the function contains a logical flaw in its\nrequire\nstatement:\n\nfunction\nsetRouter\n(\naddress\n_router\n)\nexternal\nonlyOwner\n{\nrequire\n(\n_router\n==\naddress\n(\n0\n),\n\"ZA\"\n);\n// <<< LOGICAL ERROR HERE\nrouter\n=\n_router\n;\n}\n\nThe line\nrequire(_router == address(0), \"ZA\");\ncurrently mandates that the\n_router\naddress provided as an argument\nmust be\nthe zero address (\naddress(0)\n). If any other address (i.e., a valid, non-zero router address) is supplied, the condition\n_router == address(0)\nwill evaluate to false, and the transaction will revert with the error message \u201cZA\u201d (presumably \u201cZero Address\u201d).\n\nThis means the\nsetRouter\nfunction\u2019s behavior is inverted from what its name and intended purpose imply:\n\nCurrent Behavior:\nIt only allows the\nowner\nto set the\nrouter\nstate variable to\naddress(0)\n. It does not permit updating it to a new, functional router address.\nExpected Behavior (based on name and usage):\nIt should allow the\nowner\nto set the\nrouter\nstate variable to a new, valid, non-zero router address, likely with a check ensuring\n_router\nis not\naddress(0)\n(i.e.,\nrequire(_router != address(0), \"ZA\");\n).\n\nThe root cause of the issue is an incorrect condition in the\nrequire\nstatement. The developer likely intended either to ensure a non-null router address was not being set (if such a check was desired for some specific reason, though unlikely for a setter) or, probably, to ensure a non-null address\nwas\nbeing set. Instead, the implemented condition only permits setting a null address.\n\nThe impact of this logical error is significant and can lead to several adverse consequences:\n\nInability to update the router to a functional address:\nIf the\nrouter\naddress is initially set during the\nGenesisPoolManager\ncontract\u2019s initialization (via the\ninitialize\nfunction) and subsequently needs to be changed (e.g., due to a DEX router upgrade, an error in the initial configuration, or the deployment of a new router version), the current\nsetRouter\nfunction will prevent this update to a functional address. The\nowner\nwould only be able to \u201cclear\u201d the router address by setting it to\naddress(0)\n.\nPotential blocking of new pool launches (\n_launchPool\n):\nThe internal\n_launchPool\nfunction in\nGenesisPoolManager\nis responsible for finalizing a\nGenesisPool\n\u2019s process and adding liquidity. This function calls\nIGenesisPool(_genesisPool).launch(router, MATURITY_TIME)\n, passing the\nrouter\naddress stored in\nGenesisPoolManager\n.\nIf the\nrouter\naddress in\nGenesisPoolManager\nis\naddress(0)\n(either because it was mistakenly set that way initially or because the\nowner\nused\nsetRouter\nto \u201cclear\u201d it), the call to\nIGenesisPool.launch\nwill attempt to interact with an\nIRouter(address(0))\n.\nFunction calls to\naddress(0)\ntypically fail or behave unpredictably (depending on low-level Solidity/EVM implementation details, but practically, they will fail when trying to execute non-existent code or decode empty return data). This will cause the\nGenesisPool\n\u2019s\nlaunch\nfunction to fail, and consequently, the\nGenesisPoolManager\n\u2019s\n_launchPool\nfunction will also fail.\nAs a result, no new\nGenesisPool\nreaching the launch stage can be successfully launched if the router address is\naddress(0)\n. Funds intended for liquidity (both\nnativeToken\nand\nfundingToken\n) could become locked in the\nGenesisPool\ncontract indefinitely, or until an alternative solution is implemented (if possible via governance or contract upgradeability).\nDependency on correct initial configuration:\nThe system becomes overly reliant on the\nrouter\naddress being perfectly configured during the\ninitialize\ncall. If there\u2019s a typo or an incorrect address is provided, there is no way to correct it via\nsetRouter\nunless the contract is upgradeable and the\nsetRouter\nlogic itself is updated.\nMisleading functionality:\nThe function name\nsetRouter\nis misleading, as it doesn\u2019t \u201cset\u201d a functional router but rather only \u201cclears\u201d it (sets it to\naddress(0)\n). This can lead to administrative errors and confusion.\n\nHigh. Although the function is only accessible by the\nowner\n, its malfunction directly impacts a core functionality of the system (pool launching and liquidity provision). If the router needs to be changed or is misconfigured, this vulnerability can halt a critical part of the protocol.\n\nThe condition in the\nsetRouter\nfunction must be corrected to allow setting a non-null router address. The more common and expected logic would be:\n\nfunction\nsetRouter\n(\naddress\n_router\n)\nexternal\nonlyOwner\n{\nrequire\n(\n_router\n!=\naddress\n(\n0\n),\n\"ZA\"\n);\n// CORRECTION: Ensure the new router is not the zero address.\nrouter\n=\n_router\n;\n}\n\nThis correction would enable the\nowner\nto update the\nrouter\naddress to a new, valid address, ensuring the operational continuity and flexibility of the\nGenesisPoolManager\n.\n\nDeploy a mock\nGenesisPoolManager\n.\nDeploy mock contracts for\nIRouter\n(just to have distinct addresses).\nShow that the\nowner\ncannot\nset a new, non-zero router address.\nShow that the\nowner\ncan\nset the router address to\naddress(0)\n.\nIllustrate (conceptually, as a full launch is complex) how a zero router address would break the\n_launchPool\n(or rather, the\nlaunch\nfunction it calls).\n\nSimplifiedGenesisPoolManager\n:\nContains the\nowner\n,\nrouter\nstate variable, and the vulnerable\nsetRouter\nfunction exactly as described.\nIncludes a\nconstructor\nto set the initial owner and router.\nIncludes\n_launchPool\nand\ntestLaunch\nto simulate the scenario where a zero router would cause a failure.\nMockRouter\n:\nA simple contract implementing\nIRouter\n. Its\naddLiquidity\nfunction sets a flag\nwasCalled\nto verify interaction.\nMockGenesisPool\n:\nImplements a\nlaunch\nfunction.\nCrucially,\nlaunch\nwill\nrevert(\"Router is address(0)\");\nif the\n_router\nargument is\naddress(0)\n, mimicking how a real\nlaunch\nwould fail if it tried to call\nIRouter(address(0)).addLiquidity(...)\n.\nIt also attempts to call\nIRouter(_router).addLiquidity\nto show a successful interaction.\nMockPairFactory\n:\nA minimal mock for\nIBaseV1Factory\nto satisfy dependencies in the simplified\n_launchPool\n.\nGenesisPoolManagerRouterTest\n(Test Contract):\nsetUp()\n:\nDeploys the\nSimplifiedGenesisPoolManager\n,\nMockRouter\ninstances,\nMockGenesisPool\n, and sets the test contract as the\nowner\n.\ntest_ownerCannotSetValidNewRouter()\n:\nThe\nowner\nattempts to call\nsetRouter\nwith\nnewValidRouter\n(a non-zero address).\nvm.expectRevert(\"ZA\");\nasserts that this call reverts with the \u201cZA\u201d error, proving the\nrequire(_router == address(0), \"ZA\");\ncondition is problematic for valid addresses.\ntest_ownerCanSetRouterToZeroAddress()\n:\nThe\nowner\ncalls\nsetRouter\nwith\naddress(0)\n.\nThis call succeeds, and the test asserts that\nmanager.getRouter()\nis now\naddress(0)\n.\ntest_nonOwnerCannotCallSetRouter()\n:\nStandard access control test.\ntest_launchFailsIfRouterIsZero()\n:\nThe\nowner\nfirst successfully calls\nsetRouter(address(0))\n.\nThen, the\nowner\ncalls\nmanager.testLaunch(mockPool)\n.\nvm.expectRevert(\"Router is address(0)\");\nasserts that this call reverts. The revert comes from\nMockGenesisPool.launch()\nwhen it detects the zero address router, demonstrating the downstream failure.\ntest_launchSucceedsIfRouterIsValid()\n:\nEnsures the router is the initial valid one.\nThe\nowner\ncalls\nmanager.testLaunch(mockPool)\n.\nThis call should succeed,\nmockPool.launchCalled()\nshould be true, and\ninitialRouter.wasCalled()\nshould be true.\n\nHow to Run (with Foundry):\n\nSave the code above as\ntest/GenesisPoolManagerRouter.t.sol\n(or similar) in your Foundry project.\nEnsure you have\nforge-std\n(usually included with\nforge init\n).\nRun the tests:\nforge test --match-test GenesisPoolManagerRouterTest -vvv\n(the\n-vvv\nprovides more verbose output, including console logs if you were to add them).\n\nThis PoC clearly demonstrates:\n\nThe\nsetRouter\nfunction\u2019s flawed logic.\nThe\nowner\n\u2019s inability to set a new, functional router.\nThe\nowner\n\u2019s ability to set the router to\naddress(0)\n.\nThe direct consequence of a zero router address leading to failed pool launches.\n\nBlackhole mitigated\n\nStatus:\nMitigation confirmed. Full details in reports from\nrayss\n,\nlonelybones\nand\nmaxvzuvex\n.",
+      "found_description": "The setRouter function has an incorrect require statement that checks if _router == address(0) instead of != address(0). This means the function will only allow setting the router to the zero address, which would break all routing functionality and prevent pool launches. An attacker could exploit this by calling setRouter(address(0)) to permanently disable the router.",
+      "found_id": "f93bd7c72dbf613e",
+      "tool_finding_index": 81
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_expected_001",
+      "expected": "Reward token inGaugeFactoryCLcan be drained by anyone",
+      "matched": "Missing Access Control on createGauge Function",
+      "confidence": 1.0,
+      "justification": "Finding 2 directly matches the expected vulnerability. It correctly identifies the createGauge function in GaugeFactoryCL.sol as having no access control, allowing any address to create gauges. This enables attackers to deploy malicious gauges that could drain funds from the distribution contract, which aligns with the expected vulnerability description.",
+      "severity": "high",
+      "expected_description": "Submitted by\ndanzero\n, also found by\na39955720\n,\nbareli\n,\nDarkeEEandMe\n,\nKariukigithinji\n,\nmahadev\n,\nmaxzuvex\n,\nwafflewizard\n,\nwankleven\n, and\nZiusz\n\nhttps://github.com/code-423n4/2025-05-blackhole/blob/92fff849d3b266e609e6d63478c4164d9f608e91/contracts/AlgebraCLVe33/GaugeFactoryCL.sol#L59\n\nThe\nGaugeFactoryCL.sol\ncontract, responsible for creating\nGaugeCL\ninstances for Algebra Concentrated Liquidity pools, has a public\ncreateGauge\nfunction. Below is the implementation of the function:\n\nfunction\ncreateGauge\n(\naddress\n_rewardToken\n,\naddress\n_ve\n,\naddress\n_pool\n,\naddress\n_distribution\n,\naddress\n_internal_bribe\n,\naddress\n_external_bribe\n,\nbool\n_isPair\n,\nIGaugeManager.FarmingParam\nmemory\nfarmingParam\n,\naddress\n_bonusRewardToken\n)\nexternal\nreturns\n(\naddress\n) {\ncreateEternalFarming\n(\n_pool\n,\nfarmingParam\n.\nalgebraEternalFarming\n,\n_rewardToken\n,\n_bonusRewardToken\n);\nlast_gauge\n=\naddress\n(\nnew\nGaugeCL\n(\n_rewardToken\n,\n_ve\n,\n_pool\n,\n_distribution\n,\n_internal_bribe\n,\n_external_bribe\n,\n_isPair\n,\nfarmingParam\n,\n_bonusRewardToken\n,\naddress\n(\nthis\n)));\n__gauges\n.\npush\n(\nlast_gauge\n);\nreturn\nlast_gauge\n;\n}\n\nThe\nGaugeFactoryCL.createGauge\nfunction lacks access control, allowing any external actor to call it. This function, in turn, calls an internal\ncreateEternalFarming\nfunction. Below is the implementation of the\ncreateEternalFarming\nfunction:\n\nfunction\ncreateEternalFarming\n(\naddress\n_pool\n,\naddress\n_algebraEternalFarming\n,\naddress\n_rewardToken\n,\naddress\n_bonusRewardToken\n)\ninternal\n{\nIAlgebraPool\nalgebraPool\n=\nIAlgebraPool\n(\n_pool\n);\nuint24\ntickSpacing\n=\nuint24\n(\nalgebraPool\n.\ntickSpacing\n());\naddress\npluginAddress\n=\nalgebraPool\n.\nplugin\n();\nIncentiveKey\nmemory\nincentivekey\n=\ngetIncentiveKey\n(\n_rewardToken\n,\n_bonusRewardToken\n,\n_pool\n,\n_algebraEternalFarming\n);\nuint256\nremainingTimeInCurrentEpoch\n=\nBlackTimeLibrary\n.\nepochNext\n(\nblock\n.\ntimestamp\n) -\nblock\n.\ntimestamp\n;\nuint128\nreward\n=\n1e10\n;\nuint128\nrewardRate\n=\nuint128\n(\nreward\n/\nremainingTimeInCurrentEpoch\n);\nIERC20\n(\n_rewardToken\n).\nsafeApprove\n(\n_algebraEternalFarming\n,\nreward\n);\naddress\ncustomDeployer\n=\nIAlgebraPoolAPIStorage\n(\nalgebraPoolAPIStorage\n).\npairToDeployer\n(\n_pool\n);\nIAlgebraEternalFarming\n.\nIncentiveParams\nmemory\nincentiveParams\n=\nIAlgebraEternalFarming\n.\nIncentiveParams\n(\nreward\n,\n0\n,\nrewardRate\n,\n0\n,\ntickSpacing\n);\nIAlgebraEternalFarmingCustom\n(\n_algebraEternalFarming\n).\ncreateEternalFarming\n(\nincentivekey\n,\nincentiveParams\n,\npluginAddress\n,\ncustomDeployer\n);\n}\n\nIt is designed to seed a new Algebra eternal farming incentive with an initial, hardcoded amount of 1e10 of the\n_rewardToken\n. It achieves this by having\nGaugeFactoryCL\napprove the\nalgebraEternalFarming\ncontract, which is then expected to pull these tokens from\nGaugeFactoryCL\n.\n\nIf the\nGaugeFactoryCL\ncontract is pre-funded with reward tokens to facilitate this initial seeding for legitimate gauges, an attacker can repeatedly call the\ncreateGauge\nfunction which will trigger the\ncreateEternalFarming\nprocess, causing the reward token to be transferred from\nGaugeFactoryCL\nto a new Algebra farm associated with a pool specified by the attacker ultimately draining the reward token from the\nGaugeFactoryCL\ncontract.\n\nThe attacker can then potentially stake a Liquidity Provider (LP) NFT into this newly created (spam)\nGaugeCL\nand its associated Algebra farm, and subsequently claim that reward.\n\nImplement robust access control on the\nGaugeFactoryCL.createGauge()\nfunction, restricting its execution to authorized administrators or designated smart contracts, thereby preventing unauthorized calls.\n\nProtocol admin pre-funds\nGaugeFactoryCL\nwith\n5e10\nof USDC (50,000).\nAttacker calls\nGaugeFactoryCL.createGauge()\n:\n\nIGaugeFactoryCL\n(\nGFCL_ADDRESS\n).\ncreateGauge\n(\nUSDC_ADDRESS\n,\n// _rewardToken\nVE_ADDRESS\n,\nTARGET_POOL_ADDRESS\n,\nATTACKER_ADDRESS\n,\n// _distribution\nATTACKER_ADDRESS\n,\n// _internal_bribe\nATTACKER_ADDRESS\n,\n// _external_bribe\ntrue\n,\n// _isPair\nfarmingParams\n,\n// including ALGEBRA_ETERNAL_FARMING_ADDRESS\nZERO_ADDRESS\n// _bonusRewardToken\n);\n\nThe public\ncreateGauge\nfunction is entered which calls its internal\ncreateEternalFarming(_pool, farmingParam.algebraEternalFarming, USDC_ADDRESS, _bonusRewardToken)\n.\nExecution within\nGaugeFactoryCL.createEternalFarming()\n:\n\nfunction\ncreateEternalFarming\n(\naddress\n_pool\n,\naddress\n_algebraEternalFarming\n,\naddress\n_rewardToken\n,\naddress\n_bonusRewardToken\n)\ninternal\n{\n// ...\nuint128\nreward\n=\n1e10\n;\n// 10,000 USDC\n// ...\n// GaugeFactoryCL approves AlgebraEternalFarming to spend its USDC\nIERC20\n(\n_rewardToken\n/* USDC_ADDRESS */\n).\nsafeApprove\n(\n_algebraEternalFarming\n,\nreward\n);\n// ...\n// Call to AlgebraEternalFarming which will pull the approved USDC\nIAlgebraEternalFarmingCustom\n(\n_algebraEternalFarming\n).\ncreateEternalFarming\n(\nincentivekey\n,\nincentiveParamsWithReward\n,\npluginAddress\n,\ncustomDeployer\n);\n}\n\nExecution within\nAlgebraEternalFarming.createEternalFarming()\nhere\n:\n\n/// @inheritdoc IAlgebraEternalFarming\nfunction\ncreateEternalFarming\n(\nIncentiveKey\nmemory\nkey\n,\nIncentiveParams\nmemory\nparams\n,\naddress\nplugin\n)\nexternal\noverride\nonlyIncentiveMaker\nreturns\n(\naddress\nvirtualPool\n) {\naddress\nconnectedPlugin\n=\nkey\n.\npool\n.\nplugin\n();\nif\n(\nconnectedPlugin\n!=\nplugin\n||\nconnectedPlugin\n==\naddress\n(\n0\n))\nrevert\npluginNotConnected\n();\nif\n(\nIFarmingPlugin\n(\nconnectedPlugin\n).\nincentive\n() !=\naddress\n(\n0\n))\nrevert\nanotherFarmingIsActive\n();\nvirtualPool\n=\naddress\n(\nnew\nEternalVirtualPool\n(\naddress\n(\nthis\n),\nconnectedPlugin\n));\nIFarmingCenter\n(\nfarmingCenter\n).\nconnectVirtualPoolToPlugin\n(\nvirtualPool\n,\nIFarmingPlugin\n(\nconnectedPlugin\n));\nkey\n.\nnonce\n=\nnumOfIncentives\n++;\nincentiveKeys\n[\naddress\n(\nkey\n.\npool\n)] =\nkey\n;\nbytes32\nincentiveId\n=\nIncentiveId\n.\ncompute\n(\nkey\n);\nIncentive\nstorage\nnewIncentive\n=\nincentives\n[\nincentiveId\n];\n(\nparams\n.\nreward\n,\nparams\n.\nbonusReward\n) =\n_receiveRewards\n(\nkey\n,\nparams\n.\nreward\n,\nparams\n.\nbonusReward\n,\nnewIncentive\n);\nif\n(\nparams\n.\nreward\n==\n0\n)\nrevert\nzeroRewardAmount\n();\nunchecked\n{\nif\n(\nint256\n(\nuint256\n(\nparams\n.\nminimalPositionWidth\n)) > (\nint256\n(\nTickMath\n.\nMAX_TICK\n) -\nint256\n(\nTickMath\n.\nMIN_TICK\n)))\nrevert\nminimalPositionWidthTooWide\n();\n}\nnewIncentive\n.\nvirtualPoolAddress\n=\nvirtualPool\n;\nnewIncentive\n.\nminimalPositionWidth\n=\nparams\n.\nminimalPositionWidth\n;\nnewIncentive\n.\npluginAddress\n=\nconnectedPlugin\n;\nemit\nEternalFarmingCreated\n(\nkey\n.\nrewardToken\n,\nkey\n.\nbonusRewardToken\n,\nkey\n.\npool\n,\nvirtualPool\n,\nkey\n.\nnonce\n,\nparams\n.\nreward\n,\nparams\n.\nbonusReward\n,\nparams\n.\nminimalPositionWidth\n);\n_addRewards\n(\nIAlgebraEternalVirtualPool\n(\nvirtualPool\n),\nparams\n.\nreward\n,\nparams\n.\nbonusReward\n,\nincentiveId\n);\n_setRewardRates\n(\nIAlgebraEternalVirtualPool\n(\nvirtualPool\n),\nparams\n.\nrewardRate\n,\nparams\n.\nbonusRewardRate\n,\nincentiveId\n);\n}\n\nIt calls the\n_receiveRewards\nfunction\nhere\n:\n\nfunction\n_receiveRewards\n(\nIncentiveKey\nmemory\nkey\n,\nuint128\nreward\n,\nuint128\nbonusReward\n,\nIncentive\nstorage\nincentive\n)\ninternal\nreturns\n(\nuint128\nreceivedReward\n,\nuint128\nreceivedBonusReward\n) {\nif\n(!\nunlocked\n)\nrevert\nreentrancyLock\n();\nunlocked\n=\nfalse\n;\n// reentrancy lock\nif\n(\nreward\n>\n0\n)\nreceivedReward\n=\n_receiveToken\n(\nkey\n.\nrewardToken\n,\nreward\n);\nif\n(\nbonusReward\n>\n0\n)\nreceivedBonusReward\n=\n_receiveToken\n(\nkey\n.\nbonusRewardToken\n,\nbonusReward\n);\nunlocked\n=\ntrue\n;\n(\nuint128\n_totalRewardBefore\n,\nuint128\n_bonusRewardBefore\n) = (\nincentive\n.\ntotalReward\n,\nincentive\n.\nbonusReward\n);\nincentive\n.\ntotalReward\n=\n_totalRewardBefore\n+\nreceivedReward\n;\nincentive\n.\nbonusReward\n=\n_bonusRewardBefore\n+\nreceivedBonusReward\n;\n}\n\nIt calls the\n_receiveToken\nfunction\nhere\n:\n\nfunction\n_receiveToken\n(\nIERC20Minimal\ntoken\n,\nuint128\namount\n)\nprivate\nreturns\n(\nuint128\n) {\nuint256\nbalanceBefore\n=\n_getBalanceOf\n(\ntoken\n);\nTransferHelper\n.\nsafeTransferFrom\n(\naddress\n(\ntoken\n),\nmsg\n.\nsender\n,\naddress\n(\nthis\n),\namount\n);\nuint256\nbalanceAfter\n=\n_getBalanceOf\n(\ntoken\n);\nrequire\n(\nbalanceAfter\n>\nbalanceBefore\n);\nunchecked\n{\nuint256\nreceived\n=\nbalanceAfter\n-\nbalanceBefore\n;\nif\n(\nreceived\n>\ntype\n(\nuint128\n).\nmax\n)\nrevert\ninvalidTokenAmount\n();\nreturn\n(\nuint128\n(\nreceived\n));\n}\n}\n\n1e10\n(10,000) USDC has been transferred to the new algebra farm.\nAttacker repeats step 2 to 6 for 5 times to fully transfer 50,000 USDC out of the\nGaugeCLFactory\ncontract.\nAttacker stakes relevant LP NFT into the spam gauges through the\nGaugeCL.deposit\nfunction:\n\nfunction\ndeposit\n(\nuint256\ntokenId\n)\nexternal\nnonReentrant\nisNotEmergency\n{\nrequire\n(\nmsg\n.\nsender\n==\nnonfungiblePositionManager\n.\nownerOf\n(\ntokenId\n));\nnonfungiblePositionManager\n.\napproveForFarming\n(\ntokenId\n,\ntrue\n,\nfarmingParam\n.\nfarmingCenter\n);\n(\nIERC20Minimal\nrewardTokenAdd\n,\nIERC20Minimal\nbonusRewardTokenAdd\n,\nIAlgebraPool\npool\n,\nuint256\nnonce\n) =\nalgebraEternalFarming\n.\nincentiveKeys\n(\npoolAddress\n);\nIncentiveKey\nmemory\nincentivekey\n=\nIncentiveKey\n(\nrewardTokenAdd\n,\nbonusRewardTokenAdd\n,\npool\n,\nnonce\n);\nfarmingCenter\n.\nenterFarming\n(\nincentivekey\n,\ntokenId\n);\nemit\nDeposit\n(\nmsg\n.\nsender\n,\ntokenId\n);\n}\n\nAttacker directly calls the\nAlgebraEternalFarming.claimReward\nfunction to claim the rewards\nhere\n:\n\n/// @inheritdoc IAlgebraEternalFarming\nfunction\nclaimReward\n(\nIERC20Minimal\nrewardToken\n,\naddress\nto\n,\nuint256\namountRequested\n)\nexternal\noverride\nreturns\n(\nuint256\nreward\n) {\nreturn\n_claimReward\n(\nrewardToken\n,\nmsg\n.\nsender\n,\nto\n,\namountRequested\n);\n}\nfunction\n_claimReward\n(\nIERC20Minimal\nrewardToken\n,\naddress\nfrom\n,\naddress\nto\n,\nuint256\namountRequested\n)\ninternal\nreturns\n(\nuint256\nreward\n) {\nif\n(\nto\n==\naddress\n(\n0\n))\nrevert\nclaimToZeroAddress\n();\nmapping\n(\nIERC20Minimal\n=>\nuint256\n)\nstorage\nuserRewards\n=\nrewards\n[\nfrom\n];\nreward\n=\nuserRewards\n[\nrewardToken\n];\nif\n(\namountRequested\n==\n0\n||\namountRequested\n>\nreward\n)\namountRequested\n=\nreward\n;\nif\n(\namountRequested\n>\n0\n) {\nunchecked\n{\nuserRewards\n[\nrewardToken\n] =\nreward\n-\namountRequested\n;\n}\nTransferHelper\n.\nsafeTransfer\n(\naddress\n(\nrewardToken\n),\nto\n,\namountRequested\n);\nemit\nRewardClaimed\n(\nto\n,\namountRequested\n,\naddress\n(\nrewardToken\n),\nfrom\n);\n}\n}\n\nBlackhole commented:\n\nBlackhole Protocol disputes the classification of this issue as high severity, noting that the protocol is designed to deposit no more than\n$0.10\nworth of BLACK tokens, an amount sufficient to spawn over a million liquidity pools on Blackhole.\n\nBlackhole mitigated\n\nStatus:\nMitigation confirmed. Full details in reports from\nlonelybones\nand\nrayss\n.",
+      "found_description": "The createGauge function has no access control modifier, allowing any address to create gauges. This enables attackers to deploy malicious gauges, potentially draining funds from the distribution contract or manipulating gauge-related operations. The function creates eternal farming incentives and deploys gauge contracts without authorization checks.",
+      "found_id": "cb6f00c468e745b0",
+      "tool_finding_index": 39
+    }
+  ],
+  "missed_findings": [],
+  "undecided_findings": [],
+  "extra_findings": [
+    {
+      "id": "code4rena_blackhole_2025_07_tool_000",
+      "title": "Division Rounding Error in Claimable Fee Calculation",
+      "description": "The getClaimable function calculates claimable fees using division operations that can round down to zero when the supplied LP amount is small relative to the delta index values. This allows attackers to exploit users with small LP positions by preventing them from claiming their rightful fees.",
+      "severity": "high",
+      "original_id": "22de81c85e401393"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_001",
+      "title": "Missing Access Control on Critical Configuration Functions",
+      "description": "Multiple configuration functions (setOwner, setVoter, setGaugeManager, setAlgebraFactory, setQuoterV2, setAlgebraPoolAPI, setPairFactory) allow the owner to change critical protocol parameters, but there is no mechanism to prevent the owner from setting malicious addresses or disrupting protocol functionality.",
+      "severity": "high",
+      "original_id": "14a1240d2c3dcc5f"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_002",
+      "title": "Unbounded Loop in getAmountOut Function",
+      "description": "The getAmountOut function contains nested loops that iterate over all pairs in both basic and concentrated pools without gas limits, which can lead to out-of-gas errors and denial of service when the number of pairs grows large.",
+      "severity": "high",
+      "original_id": "0653a6f7940d1c7c"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_003",
+      "title": "Incorrect Fee Calculation in Position Info Due to Staticcall Recipient Address",
+      "description": "The getAllPositionsInfo function uses a staticcall to nonfungiblePositionManager.collect() to calculate claimable fees. However, it sets the recipient parameter to address(this), which is the AlgebraPoolAPI contract address. This will cause the collect function to calculate fees owed to the contract itself rather than the actual NFT owner, resulting in incorrect fee calculations for users. The contract doesn't hold any NFT positions, so it will always return 0 for claimable fees regardless of the actual fees owed to the NFT owner.",
+      "severity": "high",
+      "original_id": "c5c4fb180263d198"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_004",
+      "title": "Missing Access Control on Critical Configuration Functions",
+      "description": "The contract has several configuration functions (setOwner, setVoter, setFactory, setNonfungiblePositionManager, setGaugeManager) that are protected by owner-only access control. However, the initialize function sets the initial owner to msg.sender without any validation that the caller is authorized to initialize the contract. This allows any user to become the owner by calling initialize first, gaining control over all configuration functions and potentially manipulating the contract to return incorrect data or disrupt dependent systems.",
+      "severity": "critical",
+      "original_id": "8e260086492c8ee8"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_005",
+      "title": "Incorrect Gauge Balance Calculation for Staked Positions",
+      "description": "In getAllPositionsInfo, when checking if a position is staked, the function calls nonfungiblePositionManager.tokenFarmedIn(tokenId) and then sets account_gauge_balance using _gauge.balanceOf(tokenId). However, if the position is staked, the NFT is owned by the gauge contract, not the original user. The gauge.balanceOf(tokenId) call will return the gauge's balance of that position, but this doesn't represent the user's stake. The function should track which user owns the staked position rather than querying the gauge's ownership.",
+      "severity": "high",
+      "original_id": "f5866a53c77279e9"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_006",
+      "title": "Missing Access Control on Critical State Modification",
+      "description": "The setDeployerForPair(address _pair) function allows any address that has been added as a custom deployer to set the deployer for any pool pair. However, the function only checks that the caller is a custom deployer, but does not verify that the caller is authorized to set the deployer for the specific _pair address. An attacker who becomes a custom deployer (through legitimate means or by compromising an existing deployer) can maliciously reassign pool deployer mappings for any pool, potentially redirecting protocol fees or disrupting pool operations.\n\n**Mathematical Proof**: \n- Let A = attacker-controlled custom deployer address\n- Let P = target pool address that A does not legitimately control\n- Let D = legitimate deployer address for pool P\n- Current state: pairToDeployer[P] = D\n- Attacker calls setDeployerForPair(P) with A as msg.sender\n- Function executes: pairToDeployer[P] = A (attacker's address)\n- Result: Protocol now incorrectly associates pool P with attacker's deployer\n\n**Exploitation Scenario**: An attacker who gains custom deployer status (either by being added by a compromised CL_POOL_ADMIN or through legitimate business process) can reassign the deployer mapping for any pool in the system. This could allow them to intercept protocol fees, disrupt pool operations, or create inconsistencies in the protocol's pool management system.\n\n**Financial Impact**: Protocol fees could be redirected to attacker-controlled addresses, legitimate pool deployers could lose expected revenue, and pool operations could be disrupted leading to potential loss of user funds during trading operations.",
+      "severity": "high",
+      "original_id": "fc3d55b4b7ec6029"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_007",
+      "title": "Inconsistent State Validation in Deployer Assignment",
+      "description": "The two setDeployerForPair functions have inconsistent validation logic. The single-parameter version (called by custom deployers) validates that the pool was created by the msg.sender, while the two-parameter version (called by owner) validates that the pool was created by the _deployer parameter. However, both functions can be used to set the same state mapping (pairToDeployer), creating a potential state desynchronization where the owner's assignment could override a legitimate deployer's assignment or vice versa.\n\n**Mathematical Proof**:\n- Scenario 1: Legitimate deployer D sets pairToDeployer[P] = D (valid)\n- Scenario 2: Owner calls setDeployerForPair(P, A) where A \u2260 D\n- Result: pairToDeployer[P] = A (overriding legitimate assignment)\n- The protocol now has inconsistent state about who deployed pool P\n\n**Exploitation Scenario**: The contract owner (intentionally or through compromise) can assign incorrect deployer mappings that conflict with legitimate deployer assignments. This creates confusion in the protocol about which deployer is responsible for which pool, potentially leading to incorrect fee distribution, authorization issues, and protocol inconsistencies.\n\n**Financial Impact**: Incorrect fee distribution to unauthorized parties, disruption of legitimate pool operations, and potential loss of protocol integrity leading to user distrust and financial losses.",
+      "severity": "medium",
+      "original_id": "58c0d854396eda18"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_008",
+      "title": "Uninitialized Bribes Array in getExpectedClaimForNextEpoch",
+      "description": "The getExpectedClaimForNextEpoch function creates a Bribes[] array with 2 elements but never initializes them with actual data. The commented-out code suggests this was intended to call _getEpochRewards, but currently it returns empty/uninitialized structs. This leads to incorrect reward calculations that could cause users to make incorrect financial decisions based on zero rewards when rewards are actually available. The function returns an array of Rewards structs where each Rewards struct contains 2 Bribes structs (external and internal bribes), but all fields (tokens, symbols, decimals, amounts) remain uninitialized (empty arrays or zero values).",
+      "severity": "high",
+      "original_id": "a7c7b4f4144b6408"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_009",
+      "title": "Missing Access Control on Critical Configuration Functions",
+      "description": "The setVoter, setGaugeManager, and setOwner functions are protected by owner-only access control, but the contract lacks a mechanism to prevent the owner from setting malicious addresses. If the owner's private key is compromised, an attacker can set arbitrary voter and gaugeManager addresses that could return manipulated data. This could lead to incorrect reward calculations that users rely on for financial decisions. The impact is particularly severe because these functions update critical dependencies (pairFactory and underlyingToken) that affect all view functions in the contract.",
+      "severity": "high",
+      "original_id": "9959578d674c6832"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_010",
+      "title": "Potential Division by Zero in Commented Code",
+      "description": "The commented-out _getEpochRewards function contains a division operation `_amounts[i] = (_reward.rewardsPerEpoch * 1e18 / _supply) * _balance / 1e18` where _supply is retrieved from `IBribeAPI(_bribe).totalSupplyAt(ts)`. If this function is ever uncommented and used, it would cause a division by zero when _supply is zero, which would revert all transactions. While currently commented out, this represents a serious vulnerability if the code is reactivated without proper zero-checking.",
+      "severity": "high",
+      "original_id": "b3e912ca63a075fd"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_011",
+      "title": "External Token Call Revert DoS in View Functions",
+      "description": "The getWhiteListedTokens() and getConnectorTokens() functions make external calls to token contracts without handling potential reverts. If any token in the whitelist or connector list is malicious, has a non-standard ERC20 implementation, or reverts during symbol() or decimals() calls, the entire view function will revert, causing a denial-of-service for legitimate users trying to query token information. This can be exploited by an attacker who manages to get a malicious token added to the whitelist, or if a legitimate token contract becomes unresponsive. The financial impact is disruption of protocol functionality that relies on these view functions, potentially preventing users from interacting with the protocol correctly.",
+      "severity": "high",
+      "original_id": "e071f0885e26e813"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_012",
+      "title": "Unsafe Token Address Validation in getTokenBalances",
+      "description": "The getTokenBalances function checks if tokenAddresses[i] != address(0) but does not validate if the address is a contract or a valid ERC20 token. If an attacker provides an EOA address or a malicious contract that reverts on balanceOf calls, the function will revert for that specific token but continue processing others. However, if the malicious contract uses excessive gas in its balanceOf function or implements it in a way that causes an out-of-gas error for the entire transaction, it could cause a complete DoS. While the impact is mitigated by the function being view-only, it still represents an attack vector that could disrupt frontend applications and other systems relying on this function.",
+      "severity": "medium",
+      "original_id": "43f997371b17d9c7"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_013",
+      "title": "Missing Access Control on initialize() Function",
+      "description": "The initialize() function lacks access control, allowing any attacker to reinitialize the contract and change the genesisManager and genesisPoolFactory addresses. This would allow an attacker to redirect all API calls to malicious contracts, potentially returning manipulated data to users or frontends. The vulnerability exists because the initializer modifier only prevents multiple initializations but doesn't restrict who can call it. An attacker could call initialize() with their own malicious addresses, effectively taking control of the API's data sources.",
+      "severity": "high",
+      "original_id": "6cdf46e5ae5808cc"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_014",
+      "title": "Unbounded Loop in getAllGenesisPools() Leading to Denial of Service",
+      "description": "The getAllGenesisPools() function iterates over an array of proposedTokens returned by genesisManager.getLiveNaitveTokens() without checking if the _offset parameter is within bounds. If _offset is greater than or equal to totalPools, the loop will still execute _amounts times, but i will start beyond the array bounds. This will cause out-of-bounds array access when accessing proposedTokens[i], leading to a revert and denial of service. An attacker could call this function with _offset = totalPools (or higher) to consistently cause the function to revert, preventing legitimate users from accessing pool data.",
+      "severity": "high",
+      "original_id": "6d4299f667444df8"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_015",
+      "title": "Incorrect Array Indexing in getAllGenesisPools() Leading to Incorrect Data",
+      "description": "In getAllGenesisPools(), the loop uses i as the index for proposedTokens[i] but assigns to genesisPools[i - _offset]. When _offset is non-zero, this creates a mismatch between the source data index and the destination array index. If the proposedTokens array has gaps or if tokens are ordered differently than expected, this could return incorrect pool data. For example, with _offset = 5 and _amounts = 10, the function would return pools from indices 5-14 of proposedTokens but place them in indices 0-9 of genesisPools, potentially skipping valid pools or including invalid ones if the array length is exactly 15.",
+      "severity": "medium",
+      "original_id": "eba39ae82e377506"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_016",
+      "title": "Missing Zero Address Check in getGenesisPoolFromNative()",
+      "description": "The getGenesisPoolFromNative() function does not validate that nativeToken is a non-zero address. If called with nativeToken = address(0), genesisPoolFactory.getGenesisPool(address(0)) will be called, which may return address(0). The function then proceeds to call IGenesisPool(address(0)).getGenesisInfo(), which will fail due to a low-level call to address(0). This would cause the entire transaction to revert, leading to denial of service for the caller.",
+      "severity": "medium",
+      "original_id": "e8cd6c4319339469"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_017",
+      "title": "Incorrect NFT Indexing in getAllPairRewards Leads to Wrong Reward Distribution",
+      "description": "The getAllPairRewards function incorrectly handles the indexing when combining regular NFTs and AVM NFTs, causing NFTs to be skipped or duplicated. The function iterates from _offset to _offset + _amounts, but when i >= totNFTs, it uses avmIndex = i - totNFTs to access avmNFTsOfUser array. However, avmNFTsOfUser.length may be less than totNFTs, leading to out-of-bounds access or incorrect NFT selection. This can result in users receiving rewards for wrong NFTs or missing rewards entirely.",
+      "severity": "high",
+      "original_id": "74b3f1d198518765"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_018",
+      "title": "Unbounded Loop in _getRewardsForNft Can Cause Denial of Service",
+      "description": "The _getRewardsForNft function iterates through basicPoolGaugeLength + clPoolGaugeLength without any gas limit protection. If the total number of gauges becomes large (e.g., 1000+), the function will consume excessive gas and revert, making reward queries impossible. This can be exploited by malicious actors creating many gauge pairs to permanently disable reward functionality.",
+      "severity": "high",
+      "original_id": "ce9ecaa138732555"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_019",
+      "title": "Missing Access Control on Critical Configuration Functions",
+      "description": "Multiple configuration functions (setVoter, setAVM, setGaugeManager, setGaugeFactory, setGaugeFactoryCL, setRewardDistro, setPairAPI, setPairFactory) only check msg.sender == owner but lack a proper ownership transfer mechanism with two-step verification. If the owner's private key is compromised, an attacker can redirect all protocol dependencies to malicious contracts, enabling fund theft through manipulated reward calculations.",
+      "severity": "high",
+      "original_id": "f3a75d12c1ab294e"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_020",
+      "title": "Incorrect Reward Array Indexing in _pairReward Function",
+      "description": "The _pairReward function creates a Reward array of fixed size 2 + totBribeTokens, but _addInternalBribeRewards always writes to indices 0 and 1 regardless of whether rewards exist. If external bribes exist but internal bribes don't, the external bribes will be written to indices starting at 2, but the array may contain uninitialized elements at indices 0 and 1. This can lead to incorrect reward data being returned to users.",
+      "severity": "medium",
+      "original_id": "0e255b475643136f"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_021",
+      "title": "Division by Zero in Newton-Raphson Implementation",
+      "description": "The _calculate_deriv function can return 0 when reserves are small, leading to division by zero in the Newton-Raphson iteration in getAmountInStable. This occurs when x_1 and y_1 are small enough that the derivative calculation rounds to zero. The division by zero will cause the transaction to revert, making the stable swap functionality unusable for pairs with small reserves.",
+      "severity": "high",
+      "original_id": "7557020ddc250632"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_022",
+      "title": "Incorrect Decimal Scaling in Stable Swap Calculation",
+      "description": "The getAmountInStable function incorrectly scales reserve values by dividing by decimals, but then uses them in calculations that assume 18 decimal precision. This creates inconsistent scaling that will produce incorrect results. For example, with a token having 6 decimals, reserveIn would be scaled by 1e18/1e6 = 1e12, but the _calculate_k function expects values with 18 decimal precision.",
+      "severity": "high",
+      "original_id": "9ede5c5a3677d6cd"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_023",
+      "title": "Potential Integer Overflow in _calculate_k Function",
+      "description": "The _calculate_k function performs multiple multiplications without checking for overflow. With large reserve values (which are common in DeFi), the intermediate products can exceed uint256 limits, causing silent overflow and incorrect k values. This would break the stable swap invariant calculation.",
+      "severity": "high",
+      "original_id": "e7c24e9794ab630f"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_024",
+      "title": "Incorrect Fee Application in getAmountInStable",
+      "description": "The fee calculation in getAmountInStable applies the fee to the wrong base amount. It calculates amountInNoFees and then applies the fee, but the fee should be applied to the input amount before the swap calculation, not after. This results in incorrect pricing that can be exploited by arbitrageurs.",
+      "severity": "high",
+      "original_id": "aed519c9b3d188d7"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_025",
+      "title": "Unchecked Pair Existence in Multi-hop Routing",
+      "description": "The getAmountsOut and getAmountsIn functions do not properly handle cases where intermediate pairs do not exist. When a pair returns 0 from getAmountOut/getAmountIn (indicating it doesn't exist or the swap is impossible), the functions continue processing with 0 values, leading to incorrect routing calculations that could enable price manipulation.",
+      "severity": "medium",
+      "original_id": "9c2aa7052119ba1f"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_026",
+      "title": "Array Index Out-of-Bounds Access in getAVMNFTFromAddress",
+      "description": "The getAVMNFTFromAddress function uses a fixed-size temporary array of 1000 elements but does not check if the actual number of locks exceeds this limit. If a user has more than 1000 locks across AVM contracts, the function will attempt to write beyond the array bounds, causing a runtime error. This can be exploited by an attacker creating many locks to permanently disable reward queries for affected users, preventing them from accessing their reward information.\n\n**Mathematical Proof:**\n- Array size: 1000 elements (indices 0-999)\n- If user has 1001 locks: count = 1001\n- On final iteration: temp[1000] = _getNFTFromId(...) \u2192 Index 1000 is out of bounds\n\n**Exploitation Scenario:**\n1. Attacker creates 1001+ locks through AVM contracts\n2. Legitimate user calls getAVMNFTFromAddress\n3. Function reverts due to index out-of-bounds\n4. User cannot query rewards for any of their NFTs\n\n**Financial Impact:** Users permanently lose ability to query reward information for all their NFTs if they exceed 1000 locks, disrupting protocol functionality.",
+      "severity": "high",
+      "original_id": "0135d7c68799decc"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_027",
+      "title": "Incorrect Array Length Calculation in getAllNFT",
+      "description": "The getAllNFT function incorrectly calculates the array index when populating the _veNFT array. The function uses `_veNFT[i-_offset]` but starts the loop at `i = _offset`, meaning when _offset > 0, the array indexing becomes incorrect. This can lead to out-of-bounds access or incorrect data assignment.\n\n**Mathematical Proof:**\n- _offset = 100, _amounts = 50\n- Array size: 50 elements (indices 0-49)\n- Loop: i from 100 to 149\n- Index calculation: i-_offset = 100-100=0, 101-100=1, ... 149-100=49 (correct)\n- BUT if _offset is not properly validated and _amounts+_offset exceeds total supply, the function may access non-existent NFTs\n\n**Exploitation Scenario:**\n1. Attacker calls with _offset near total supply and large _amounts\n2. Function attempts to read NFTs beyond total supply\n3. ve.ownerOf(i) returns address(0) for non-existent IDs\n4. Function still tries to assign to array, potentially causing inconsistencies\n\n**Financial Impact:** Incorrect NFT data returned to users, potentially leading to wrong reward calculations or protocol state misinterpretation.",
+      "severity": "medium",
+      "original_id": "fd056cfd35e9b7e5"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_028",
+      "title": "Missing Access Control on Critical Configuration Functions",
+      "description": "Multiple configuration functions (setVoter, setAVM, setGaugeManager, setGaugeFactory, setRewardDistro, setPairAPI, setPairFactory) only check that msg.sender == owner, but the owner can be changed by anyone who calls setOwner. This creates a privilege escalation vulnerability where an attacker can become owner and then reconfigure critical protocol parameters.\n\n**Exploitation Scenario:**\n1. Attacker calls setOwner with their address\n2. Now attacker is owner\n3. Attacker calls setVoter, setGaugeManager, etc. to point to malicious contracts\n4. All reward calculations and NFT queries now use attacker-controlled contracts\n\n**Financial Impact:** Complete protocol takeover - attacker can manipulate all reward calculations, steal funds, or permanently disable protocol functionality.",
+      "severity": "critical",
+      "original_id": "232e2a081f6b8e33"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_029",
+      "title": "Uninitialized Critical Dependencies",
+      "description": "The contract has multiple critical dependencies (voter, gaugeFactory, pairFactory, rewardDisitributor, pairAPI) that are not initialized in the constructor or initialize function. These are set later via setter functions, but if queries are made before initialization, they will use address(0) leading to failed calls or incorrect results.\n\n**Exploitation Scenario:**\n1. Contract deployed but critical dependencies not set\n2. User calls getAllPairRewards or other functions\n3. Function calls fail when interacting with address(0) dependencies\n4. Protocol appears broken to users\n\n**Financial Impact:** Protocol functionality unavailable until dependencies are set, causing temporary denial of service and potential loss of user confidence.",
+      "severity": "medium",
+      "original_id": "1e569be693773fe7"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_030",
+      "title": "Incorrect Reward Distribution in notifyRewardAmount Function",
+      "description": "The notifyRewardAmount function incorrectly calculates the reward rate when extending an existing reward period, leading to potential underpayment or overpayment of rewards. The function uses the formula: rewardRate = (reward + leftover) / DURATION, but this doesn't account for the fact that leftover represents rewards already allocated for the remaining time of the current period. When adding new rewards, the function should properly account for the time remaining and the new duration.",
+      "severity": "high",
+      "original_id": "3cc844a979d51ede"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_031",
+      "title": "Missing Access Control on getReward Function",
+      "description": "The getReward function is marked as public but has onlyDistribution modifier, which restricts it to the DISTRIBUTION address. However, the function allows any caller to specify any tokenId and claim rewards on behalf of the token owner. This could allow the DISTRIBUTION address to claim rewards for any tokenId without the owner's consent, potentially leading to unauthorized reward claims.",
+      "severity": "high",
+      "original_id": "19e43bb7de040879"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_032",
+      "title": "Incorrect Fee Calculation in stakedFees Function",
+      "description": "The stakedFees function calculates fees by combining gauge balances and community vault balances, then subtracts dibs fees from the total. However, the dibs fees are calculated on the combined total rather than being applied proportionally to each source. This could lead to incorrect fee distribution if the gauge and vault have different fee accrual rates or if one source has zero balance while the other has fees.",
+      "severity": "medium",
+      "original_id": "d5681c001b9a4f72"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_033",
+      "title": "Potential Division by Zero in Fee Calculations",
+      "description": "Multiple functions perform division operations without checking for zero denominators. While ALGEBRA_FEE_DENOMINATOR and REFERRAL_FEE_DENOMINATOR are constants set to 1000, if these values were ever set to zero (though unlikely), it would cause division by zero errors. Additionally, the notifyRewardAmount function divides by DURATION which is set to BlackTimeLibrary.WEEK, but if this value were zero, it would cause a revert.",
+      "severity": "low",
+      "original_id": "fa0d78264587def6"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_034",
+      "title": "State Desynchronization in Lock Removal Allows Permanent Lock Loss",
+      "description": "The `releaseLock` function has a critical state desynchronization vulnerability where the `tokenIdIndex` mapping and `locks` array can become permanently desynchronized when removing locks. The issue occurs when the function attempts to move the last lock to the position of the lock being removed, but fails to properly handle the case where the index being removed is the same as the last index. The code checks `if (index != lastIndex)` but then uses `lastIndex = locks.length - 1` which is calculated before the pop operation, creating a race condition where the mapping and array can point to invalid positions.\n\n**Mathematical Proof**:\n- Initial state: locks.length = 3, tokenIdIndex[tokenA] = 0, tokenIdIndex[tokenB] = 1, tokenIdIndex[tokenC] = 2\n- Call releaseLock(tokenB): index = 1, lastIndex = 2\n- Since 1 != 2, move lock[2] to lock[1]: tokenIdIndex[tokenC] = 1\n- Then locks.pop() reduces length to 2\n- Now tokenIdIndex[tokenB] still exists but points to index 1, which now contains tokenC\n- Subsequent calls to lockOwner(tokenB) will return the wrong owner (owner of tokenC)\n- The mapping entry for tokenB is never properly cleaned up\n\n**Exploitation**: An attacker can call releaseLock multiple times in sequence to corrupt the entire lock tracking system, making it impossible to properly manage locks and potentially causing permanent loss of access to locked tokens.\n\n**Financial Impact**: Permanent loss of access to voting power and rewards distribution for affected lock owners. The protocol's voting mechanism becomes corrupted, potentially affecting governance outcomes and reward distribution.",
+      "severity": "high",
+      "original_id": "eeefe727b43849bf"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_035",
+      "title": "Incorrect Index Calculation in releaseLock Function",
+      "description": "The `releaseLock` function calculates `lastIndex = locks.length - 1` before performing the array manipulation, but this value becomes invalid after the `locks.pop()` operation. The function should calculate the last index after moving the element but before popping, or restructure the logic to avoid this temporal inconsistency.\n\n**Mathematical Proof**:\n- Current flow: Calculate lastIndex \u2192 Check condition \u2192 Move element \u2192 Pop array\n- Problem: After pop(), the array length decreases by 1, making the previously calculated lastIndex invalid\n- Example: If locks.length = 5, lastIndex = 4. After pop(), length becomes 4, but tokenIdIndex may still reference index 4 which no longer exists\n\n**Exploitation**: An attacker can exploit this by calling releaseLock in rapid succession or through multiple transactions, causing the index mapping to point to non-existent array positions, leading to failed lookups and corrupted state.\n\n**Financial Impact**: Inability to properly manage locks, potentially locking users' tokens permanently in the contract without the ability to release or vote with them.",
+      "severity": "high",
+      "original_id": "832a21bd879c5042"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_036",
+      "title": "Missing Bounds Check in voteLocks and resetLocks Functions",
+      "description": "The `voteLocks` and `resetLocks` functions have insufficient parameter validation that allows out-of-bounds access when `start + length` equals `locks.length`. While there's a check for `start + length <= locks.length`, this doesn't prevent the case where `length = 0` and `start = locks.length`, which would result in an empty loop but could be exploited in combination with other vulnerabilities.\n\n**Mathematical Proof**:\n- When locks.length = 10, start = 10, length = 0: start + length = 10 <= 10 (passes check)\n- The loop runs from i = 10 to i < 10 (never executes)\n- While not directly exploitable alone, this edge case combined with state corruption could lead to unexpected behavior\n\n**Exploitation**: An attacker could use this in combination with the state desynchronization vulnerability to access corrupted array indices or cause revert conditions that block legitimate operations.\n\n**Financial Impact**: Potential denial-of-service attacks against the voting mechanism, preventing proper reward distribution and governance participation.",
+      "severity": "medium",
+      "original_id": "5ecd866c9f23d649"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_037",
+      "title": "Missing Existence Check in lockOwner Function",
+      "description": "The `lockOwner` function performs a bounds check but doesn't verify that the tokenId actually exists in the current state. The function checks `index < locks.length` but doesn't verify that `locks[index].tokenId == _tokenId`, which is necessary because the index mapping can become corrupted due to the state desynchronization vulnerability.\n\n**Mathematical Proof**:\n- After state corruption: tokenIdIndex[tokenA] = 1, but locks[1].tokenId = tokenB\n- Call lockOwner(tokenA): index = 1 < locks.length (passes check)\n- Returns locks[1].owner (owner of tokenB) instead of owner of tokenA\n\n**Exploitation**: Returns incorrect ownership information, which could be exploited in combination with other contract functions that rely on accurate ownership verification.\n\n**Financial Impact**: Incorrect ownership reporting could lead to unauthorized operations if other functions rely on this check for authorization, though the immediate impact is limited due to the onlyManager modifier on state-changing functions.",
+      "severity": "medium",
+      "original_id": "2a812c6c787fd3b8"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_038",
+      "title": "Division by Zero in createEternalFarming Function",
+      "description": "The createEternalFarming function calculates rewardRate by dividing reward by remainingTimeInCurrentEpoch. If block.timestamp is exactly at epochNext(block.timestamp), remainingTimeInCurrentEpoch becomes 0, causing division by zero. This will permanently block gauge creation for pools when the current time aligns with epoch boundaries.",
+      "severity": "high",
+      "original_id": "7e7d8c555da1b78c"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_040",
+      "title": "Incorrect Incentive Nonce Calculation",
+      "description": "The getIncentiveKey function uses IAlgebraEternalFarming(_algebraEternalFarming).numOfIncentives() as the nonce, but this returns the current number of incentives. When used as a nonce for new incentive creation, it can collide with existing incentives if multiple gauges are created simultaneously or if the farming contract's state changes between nonce retrieval and incentive creation.",
+      "severity": "high",
+      "original_id": "a76d45e82efc9e7f"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_041",
+      "title": "Front-Runnable Eternal Farming Creation",
+      "description": "The createEternalFarming function creates incentives using a predictable nonce based on the current number of incentives. Attackers can front-run gauge creation by creating their own incentives to consume the expected nonce, causing the gauge creation to fail or create incentives with incorrect parameters.",
+      "severity": "high",
+      "original_id": "151781db627cfb78"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_042",
+      "title": "Proposal Threshold Calculation Vulnerability",
+      "description": "The proposalThreshold() function uses block.timestamp to get past total supply, but this timestamp represents the current block timestamp, not a historical timestamp. This creates a mismatch between the intended historical supply calculation and the actual current supply calculation. When the token supply increases significantly between blocks, an attacker can exploit this to create proposals with insufficient voting power.\n\nMathematical Proof:\n- Let current total supply = 1,000,000 tokens\n- Let proposalNumerator = 2 (0.2%)\n- Normal threshold: (1,000,000 * 2) / 1000 = 2,000 tokens required\n- If supply increases to 2,000,000 tokens in next block:\n- Actual threshold should be: (2,000,000 * 2) / 1000 = 4,000 tokens\n- But function returns: (2,000,000 * 2) / 1000 = 4,000 tokens (using current supply)\n\nThe vulnerability is that getPastTotalSupply(block.timestamp) with current timestamp returns the current supply, not a historical supply. This means the threshold calculation is always based on current supply rather than historical supply at proposal creation time.\n\nExploitation: An attacker with 2,000 tokens could create a proposal when supply is 1,000,000, but if supply increases to 2,000,000 before the proposal is processed, the threshold effectively becomes 4,000 tokens, yet the proposal was created with only 2,000 tokens. This breaks the intended economic security of the governance system.\n\nFinancial Impact: Governance proposals can be created with insufficient voting power relative to the actual token supply, allowing minority holders to control governance decisions.",
+      "severity": "high",
+      "original_id": "401fd9f17cd8f6a7"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_043",
+      "title": "Missing Clock Implementation Breaks Governor Functionality",
+      "description": "The clock() function returns an empty uint48 value without any implementation, and CLOCK_MODE() returns an empty string. These functions are critical for the OpenZeppelin Governor timing mechanism. Without proper implementation, the governance system cannot track proposal timing, voting periods, or state transitions correctly.\n\nExploitation Scenario:\n- All proposal state transitions (Pending \u2192 Active \u2192 Succeeded/Failed) rely on the clock function\n- Voting periods and delays cannot be properly calculated\n- Proposals may remain stuck in incorrect states permanently\n- Attackers can exploit timing inconsistencies to manipulate proposal outcomes\n\nFinancial Impact: Complete breakdown of governance functionality. Proposals cannot be executed, votes cannot be properly counted, and the entire governance system becomes unusable. This represents a critical failure of core protocol functionality.",
+      "severity": "high",
+      "original_id": "d0143f270d8de22c"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_044",
+      "title": "Quorum Calculation Uses Wrong Supply Function",
+      "description": "The quorum() function calls token.getsmNFTPastTotalSupply() which appears to be a different function than the getPastTotalSupply() used in proposalThreshold(). If these functions return different values (e.g., one returns total supply and another returns NFT-based supply), the quorum calculation will be incorrect.\n\nMathematical Proof:\n- If getPastTotalSupply() returns 1,000,000 tokens\n- But getsmNFTPastTotalSupply() returns 500,000 tokens (NFT-based supply)\n- With quorumNumerator = 4 (4%)\n- Actual quorum should be: (1,000,000 * 4) / 100 = 40,000 tokens\n- But calculated quorum: (500,000 * 4) / 100 = 20,000 tokens\n\nThis discrepancy allows proposals to pass with insufficient voter participation relative to the actual token supply.\n\nFinancial Impact: Governance decisions can be made with inadequate voter participation, potentially allowing small groups to control protocol decisions that should require broader consensus.",
+      "severity": "high",
+      "original_id": "89eded5c455445a0"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_045",
+      "title": "Reward Accounting Desynchronization in reportRewards Function",
+      "description": "The reportRewards function has a critical state desynchronization vulnerability where the total season reward amount is updated based on the difference between new and old rewards, but this calculation fails when multiple reports are made for the same user. The function calculates _increase as the sum of all new rewards and _decrease as the sum of all old rewards, then updates season.reward_amount by adding _increase and subtracting _decrease. However, if the same user appears multiple times in the players_ array, their old reward value gets subtracted multiple times, but their new reward only gets added once. This causes permanent loss of reward tokens from the treasury.\n\nMathematical Proof:\nScenario: User A has current reward 100. Admin calls reportRewards with [A, A] and [200, 300]\n- First iteration: _increase = 200, _decrease = 100\n- Second iteration: _increase = 200 + 300 = 500, _decrease = 100 + 100 = 200\n- Final calculation: season.reward_amount += 500 - 200 = +300\n- But actual change should be: (200 + 300) - 100 = +400\n- Result: 100 tokens permanently lost from treasury\n\nExploitation: An attacker who becomes an owner (through social engineering or compromised key) can intentionally report duplicate users to steal tokens. Even accidental duplicate entries by legitimate admins will cause permanent token loss.\n\nFinancial Impact: Permanent loss of reward tokens from treasury. The amount lost equals the sum of old rewards for duplicate entries minus their first new reward entry.",
+      "severity": "high",
+      "original_id": "11dbbeaf9abfedc1"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_046",
+      "title": "Incorrect Reward Forfeiture Calculation in claimAndStakeReward",
+      "description": "The claimAndStakeReward function has a mathematical precision error in the forfeiture calculation when percent < 100. The formula incorrectly calculates the credit_amount as (_reward * 100)/110, which assumes a 10% forfeiture, but then uses the original _reward to calculate the forfeit_amount. This creates an inconsistency where the sum of credit_amount and forfeit_amount doesn't equal the original reward.\n\nMathematical Proof:\nLet _reward = 110 tokens, percent = 50\n- credit_amount = (110 * 100) / 110 = 100\n- forfeit_amount = 110 - 100 = 10\n- staked_reward = (100 * 50) / 100 = 50\n- claimed_reward = 100 - 50 = 50\n- Total accounted: 50 (staked) + 50 (claimed) + 10 (forfeit) = 110 \u2713\n\nHowever, the issue is conceptual: the 10% forfeiture is hardcoded but not documented, and the calculation uses magic numbers. More importantly, if _reward is not divisible by 110, precision loss occurs:\nLet _reward = 100 tokens, percent = 50\n- credit_amount = (100 * 100) / 110 = 90 (due to integer division)\n- forfeit_amount = 100 - 90 = 10\n- Total: 90 + 10 = 100 \u2713 but user gets 90% instead of expected 90.9%\n\nExploitation: Users with rewards not divisible by 110 will receive slightly less than expected. While not directly exploitable for profit, it represents a mathematical error in reward distribution.\n\nFinancial Impact: Users receive incorrect reward amounts due to precision loss in division operations.",
+      "severity": "medium",
+      "original_id": "d31a8f0586d08094"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_047",
+      "title": "Missing Zero Address Validation in Critical Functions",
+      "description": "Multiple functions that set critical protocol addresses lack zero address validation, allowing the protocol to become permanently unusable if zero addresses are set accidentally or maliciously.\n\nVulnerable functions:\n- setTreasury(address treasury_): If treasury is set to address(0), token transfers will fail, making reward distribution impossible\n- setOwner(address _owner) and setOwner2(address _owner): Setting owner to address(0) would permanently lose administrative control\n- constructor: treasury_ and __ve parameters are not validated\n\nExploitation: A compromised owner account or accidental misconfiguration could set critical addresses to zero, permanently bricking the contract. While setOwner functions have require(_owner != address(0)), setTreasury does not.\n\nFinancial Impact: Permanent loss of protocol functionality, potentially locking all reward tokens in the contract forever.",
+      "severity": "high",
+      "original_id": "d299bbaec47f0e6a"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_048",
+      "title": "Inconsistent State Update in revokeUnclaimedReward",
+      "description": "The revokeUnclaimedReward function transfers the entire _remaining_reward_amount but then subtracts it from storage using -= operator. However, if the token transfer fails (which should be impossible due to the require check), the state would still be updated. More critically, the function uses a storage reference _season but then accesses season.remaining_reward_amount directly in the subtraction, which could lead to inconsistencies if multiple operations are pending.\n\nWhile the immediate risk is low due to the transfer_success check, the pattern is error-prone. If the token contract were to behave unexpectedly (e.g., transfer succeeds but returns false), the state update would still occur.\n\nFinancial Impact: Potential state inconsistency if token transfer behavior doesn't match expectations, though guarded by require statement.",
+      "severity": "medium",
+      "original_id": "2ad7e06315fbc23f"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_049",
+      "title": "State Desynchronization in AVM Index Tracking",
+      "description": "The `enableAutoVoting` function has a critical state desynchronization vulnerability where the `nextAvailableAVMIndex` tracking becomes permanently corrupted when AVMs become non-full. When a user disables auto-voting, the function updates `nextAvailableAVMIndex` to point to the AVM that became non-full, but this breaks the linear search logic. If multiple AVMs become non-full at different positions, the index tracking becomes inconsistent, causing the protocol to create unnecessary new AVMs instead of using existing non-full ones. This leads to gas inefficiency and potential denial of service as the number of AVMs grows uncontrollably.\n\nMathematical Proof:\n- Initial state: avms.length = 2, nextAvailableAVMIndex = 0\n- AVM0 is full, AVM1 is full \u2192 nextAvailableAVMIndex = 2\n- User disables voting from AVM0 (index 0): nextAvailableAVMIndex = 0\n- New user enables voting: finds AVM0 at index 0 (non-full), uses it\n- Another user disables voting from AVM1 (index 1): nextAvailableAVMIndex = min(0, 1) = 0\n- But AVM0 is now full again, AVM1 is non-full\n- Next user enables voting: checks index 0 (AVM0 full), increments to 1 (AVM1 non-full) but doesn't use it because the while loop condition fails\n- Creates new AVM2 unnecessarily\n\nExploitation: An attacker can repeatedly enable/disable voting from different AVMs to corrupt the index tracking, forcing the protocol to create excessive AVMs and wasting gas. The financial impact is increased operational costs and potential protocol congestion.",
+      "severity": "high",
+      "original_id": "3e0cbafecd2912b0"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_050",
+      "title": "Missing Access Control on setExecutor Function",
+      "description": "The `setExecutor` function allows both the current executor and owner to change the executor address, but there's no mechanism to prevent the current executor from setting a malicious address or locking out the owner. This creates a privilege escalation vulnerability where a compromised or malicious executor can permanently take control of the protocol by setting themselves as executor indefinitely.\n\nExploitation Scenario:\n1. Attacker compromises the current executor's private key\n2. Attacker calls setExecutor(newMaliciousAddress) from the compromised executor\n3. Now only the malicious address can call performLockAction\n4. Owner cannot change executor back because the require check requires msg.sender == executor OR owner, but the malicious executor can block any owner attempts\n\nFinancial Impact: Complete loss of protocol control. The malicious executor can manipulate voting, reset locks, or perform other privileged actions without restriction. This could lead to theft of voting power, manipulation of governance, or permanent protocol dysfunction.",
+      "severity": "high",
+      "original_id": "4fe1415182e9b8a4"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_051",
+      "title": "Incorrect Token Transfer Authorization in enableAutoVoting",
+      "description": "The `enableAutoVoting` function transfers the NFT token without proper validation that the transfer will succeed. The function checks `votingEscrow.isApprovedOrOwner(msg.sender, tokenId)` but then calls `votingEscrow.transferFrom(msg.sender, address(target), tokenId)` without verifying that the target AVM contract is approved to receive the token. If the AVM contract is not approved to handle the specific token standard or has transfer restrictions, the transfer may fail silently or revert, leaving the protocol in an inconsistent state.\n\nMathematical Impact:\n- User calls enableAutoVoting with tokenId 123\n- Protocol finds/creates AVM at address 0xABC\n- votingEscrow.transferFrom(user, 0xABC, 123) is called\n- If 0xABC cannot receive this token type, transfer fails\n- But tokenIdToAVMId[123] may already be set\n- Protocol state becomes inconsistent\n\nExploitation: An attacker could exploit token standards with special transfer requirements to cause failed transfers that corrupt protocol state. The financial impact is potential loss of user funds or permanent locking of NFTs in inconsistent states.",
+      "severity": "high",
+      "original_id": "ff7daa48b2409a5b"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_052",
+      "title": "Missing State Reset in disableAutoVoting Failure Path",
+      "description": "The `disableAutoVoting` function has multiple external calls that can fail (avm.releaseLock, IVoter(voter).reset, votingEscrow.transferFrom), but if any of these calls fail after the state has been partially updated, the protocol state becomes permanently corrupted. Specifically, the function deletes `tokenIdToAVMId[tokenId]` at the end, but if any previous call fails, this deletion still happens, leaving the token in a orphaned state.\n\nExploitation Scenario:\n1. User calls disableAutoVoting for tokenId 456\n2. avm.releaseLock(456) succeeds\n3. IVoter(voter).reset(456) succeeds  \n4. votingEscrow.transferFrom fails (e.g., gas limit, temporary network issue)\n5. delete tokenIdToAVMId[456] executes anyway\n6. Token 456 is now in limbo: not in any AVM but protocol thinks it's disabled\n\nFinancial Impact: Permanent loss of user's NFT. The token is transferred out of the AVM but the final transfer to the user fails, and the protocol loses track of the token. The user cannot recover their NFT through normal protocol functions.",
+      "severity": "high",
+      "original_id": "82889439766fdf77"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_053",
+      "title": "Missing Access Control on Critical Pool Configuration Functions",
+      "description": "The contract exposes multiple functions that can modify pool configuration (setPlugin, setPluginConfig, setFee, setCommunityFee) with onlyAuthorized modifier. However, the authorizedAccounts mapping can be manipulated by the owner to grant arbitrary addresses permission to call these functions. An attacker who gains temporary authorization (either through social engineering, compromised owner, or temporary authorization) can permanently modify pool parameters including fees and plugins, potentially redirecting fees or manipulating pool behavior. The vulnerability is that once authorized, an account can call these functions even after being removed from authorizedAccounts if they are executed in the same transaction or if the removal is delayed.",
+      "severity": "high",
+      "original_id": "8f67d32600a1d4d2"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_054",
+      "title": "Inconsistent State Management in createCustomPool Function",
+      "description": "The createCustomPool function sets up a new pool with multiple external calls but lacks comprehensive error handling and state consistency checks. If any intermediate call fails (e.g., community vault configuration, plugin creation), the pool may be left in an inconsistent state. Specifically, the function sets poolToPlugin[pool] mapping but this is only updated via setPluginForPool which is not called in createCustomPool. This creates a desynchronization where the deployer's internal state (poolToPlugin) doesn't match the actual pool state. An attacker could exploit this by calling setPluginForPool with a malicious plugin before the legitimate plugin is set, or by causing a partial failure during pool creation.",
+      "severity": "high",
+      "original_id": "d18c436e348bc9ca"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_055",
+      "title": "Front-Runnable Pool Creation with Predictable Addresses",
+      "description": "The createCustomPool function creates pools using IAlgebraCustomPoolEntryPoint.createCustomPool which likely uses deterministic address calculation. Attackers can front-run the pool creation transaction by pre-deploying contracts at the expected pool addresses. When the legitimate createCustomPool call executes, the external calls (initialize, setTickSpacing, etc.) will fail because they interact with the attacker's contract instead of the expected pool. This can permanently block pool creation for specific token pairs or allow attackers to set up malicious pools that appear legitimate.",
+      "severity": "high",
+      "original_id": "1f98977f8dc90c9e"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_056",
+      "title": "Missing Validation on Community Vault Configuration",
+      "description": "The createCustomPool function retrieves the community vault address from the newly created pool and immediately configures it (changeAlgebraFeeReceiver, proposeAlgebraFeeChange, acceptAlgebraFeeChangeProposal, transferAlgebraFeeManagerRole). However, there's no validation that the vault address is valid or that these operations succeed. If the pool returns a malicious or incorrect vault address, the function will attempt to configure it, potentially giving fee management privileges to attackers. The mathematical impact is that 100% of protocol fees could be redirected to an attacker-controlled address.",
+      "severity": "high",
+      "original_id": "8bc233b18388b44a"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_057",
+      "title": "Division by Zero in Token Amount Calculations",
+      "description": "The getNativeTokenAmount and getFundingTokenAmount functions perform division operations without checking if the denominator is zero. If tokenAllocation.proposedFundingAmount or tokenAllocation.proposedNativeAmount is zero, the division will revert, causing denial of service for legitimate users. This can be exploited by an attacker who can manipulate the allocation info in the GenesisPool contract to set these values to zero, or by calling these functions before proper initialization.",
+      "severity": "high",
+      "original_id": "3ecdd3897e2ef859"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_058",
+      "title": "Unprotected purchased Function Allows State Manipulation",
+      "description": "The purchased function is external and has no access control modifiers, allowing any address to call it. While currently empty, if future implementations add logic to track purchases or update state, unauthorized calls could manipulate auction state, break invariants, or disrupt accounting. This represents a significant privilege escalation risk.",
+      "severity": "high",
+      "original_id": "c9c1d8cdfa6915f6"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_059",
+      "title": "Precision Loss in Token Amount Calculations",
+      "description": "The token amount calculations use integer division which truncates results. For small deposit amounts relative to the allocation amounts, this can result in zero native or funding tokens being returned, effectively causing users to lose funds. For example, if proposedFundingAmount is 1000 and proposedNativeAmount is 1000, a deposit of 1 would calculate as (1 * 1000) / 1000 = 1 native token, but if deposit is 0.5 (represented appropriately), the calculation would round down to zero.",
+      "severity": "medium",
+      "original_id": "3106297c87d8c984"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_060",
+      "title": "Incorrect Epoch Calculation in Reward Distribution Leads to Permanent Loss of Rewards",
+      "description": "The `earned` function calculates rewards by iterating through epochs between the last claim time and current time. However, it uses `BlackTimeLibrary.epochStart(lastEarn[_rewardToken][tokenId])` as the starting point, which can be before the first checkpoint for the token. The code then uses `_currTs = Math.max(_currTs, BlackTimeLibrary.epochStart(cp0.timestamp))` to adjust, but this creates a critical flaw: if the token had zero balance during some epochs between the last claim and current time, those epochs will be incorrectly included in reward calculation with zero balance, but the supply during those epochs might have been non-zero. This means rewards allocated to those epochs will be permanently lost because they're distributed across zero balances.\n\nMathematical Proof:\n- Epoch 1: Supply = 100, Token balance = 50, Rewards = 100 tokens\n- Epoch 2: Supply = 100, Token balance = 0 (user withdrew), Rewards = 100 tokens\n- Epoch 3: Supply = 100, Token balance = 50, Rewards = 100 tokens\n\nIf user claims after Epoch 3, the calculation will include Epoch 2 (where balance was 0) but supply was 100. The rewards from Epoch 2 (100 tokens) are distributed across total supply (100), but user gets 0 share due to zero balance. However, these rewards are effectively lost from the system since no one can claim them during Epoch 2 when the user had zero balance.\n\nExploitation: An attacker can monitor when large rewards are distributed and strategically withdraw/redeposit to cause reward loss. The permanent loss occurs because rewards are allocated per epoch but only distributed to active balances during that epoch.",
+      "severity": "high",
+      "original_id": "d95aa98149b6de4f"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_061",
+      "title": "Incorrect Reward Calculation When LastEarn is Before First Checkpoint",
+      "description": "The `earned` function has flawed logic when `lastEarn` timestamp is before the first checkpoint for a token. The code sets `_currTs = Math.max(_currTs, BlackTimeLibrary.epochStart(cp0.timestamp))` where cp0 is the first checkpoint. However, this can cause the function to skip epochs between the actual lastEarn time and the first checkpoint time, leading to unclaimed rewards.\n\nMathematical Proof:\n- User deposits at timestamp T (epoch 1)\n- First checkpoint created at timestamp T\n- Rewards are distributed in epoch 2 and epoch 3\n- User tries to claim at epoch 4\n- lastEarn = 0 (never claimed before)\n- cp0.timestamp = T (epoch 1)\n- _currTs = max(0, epochStart(T)) = epochStart(T) = epoch 1\n- Calculation starts from epoch 1 instead of actual deposit time\n- Rewards from epochs between actual deposit and first checkpoint are lost\n\nThis is particularly problematic if rewards were distributed during the gap period between when the token was eligible and when the first checkpoint was created.",
+      "severity": "high",
+      "original_id": "dfd3717ed865efba"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_062",
+      "title": "Incorrect Supply Checkpoint Handling in Reward Calculation",
+      "description": "The `earned` function uses `supplyCheckpoints[getPriorSupplyIndex(_currTs + WEEK - 1)].supply` to get the supply for reward distribution. However, this assumes there's always a supply checkpoint at the end of each epoch. If no supply checkpoint was written at the exact end of an epoch (which can happen if no deposit/withdraw activity occurred), the function will use an outdated supply value, leading to incorrect reward calculations.\n\nMathematical Proof:\n- Epoch 1: Supply = 100, rewards = 100 tokens\n- No deposits/withdraws in Epoch 2 (no supply checkpoint update)\n- Epoch 3: Supply changes to 50\n- When calculating rewards for Epoch 2, the function will use supply from Epoch 1 (100) instead of the actual supply during Epoch 2\n- This distorts the reward distribution for all users\n\nExploitation: Attackers can manipulate reward distribution by timing their deposits/withdraws to affect supply checkpoint creation.",
+      "severity": "high",
+      "original_id": "4ffd826d0eca4653"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_063",
+      "title": "Missing Access Control on notifyRewardAmount Allows Reward Theft",
+      "description": "The `notifyRewardAmount` function has no access control modifier, allowing anyone to call it. While it requires `_isRewardToken(_rewardsToken)` to be true, an attacker can use any token that is either in bribeTokens or is a connector token. This allows attackers to:\n1. Front-run legitimate reward notifications with tiny amounts\n2. Manipulate reward distribution calculations\n3. Cause the contract to hold unwanted tokens that can't be easily recovered\n\nThe function also automatically adds any connector token to bribeTokens, potentially bloating the token list and increasing gas costs for all users.",
+      "severity": "high",
+      "original_id": "ffe31c7ff47c4d21"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_064",
+      "title": "Incorrect Token Recovery Logic in recoverERC20AndUpdateData",
+      "description": "The `recoverERC20AndUpdateData` function subtracts the recovered amount from `tokenRewardsPerEpoch[tokenAddress][_startTimestamp]` where `_startTimestamp = IMinter(minter).active_period() + WEEK`. This is incorrect because:\n1. It modifies rewards for a future epoch (current active_period + WEEK) rather than the current epoch\n2. If no rewards were scheduled for that future epoch, it will underflow\n3. It doesn't account for which epochs the recovered tokens actually belong to\n\nMathematical Proof:\n- Current epoch: 1000, active_period() returns 1000\n- _startTimestamp = 1000 + WEEK = 1007 (future epoch)\n- tokenRewardsPerEpoch[token][1007] might be 0 or a small amount\n- Recovering 100 tokens from current balance subtracts from future epoch's rewards\n- This corrupts the reward accounting for future epochs",
+      "severity": "high",
+      "original_id": "0d4275f621babfea"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_065",
+      "title": "Incorrect External Bribe Address Update in setExternalBribeFor",
+      "description": "The setExternalBribeFor function incorrectly emits the SetBribeFor event with the internal_bribes mapping value instead of the external_bribes mapping value when updating the external bribe address. This creates a state desynchronization between the actual state change and the emitted event. While this doesn't directly cause financial loss, it breaks the integrity of event logging which is critical for off-chain monitoring and indexing systems that rely on accurate event data for tracking bribe changes.",
+      "severity": "medium",
+      "original_id": "0d08f1598bae9faf"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_066",
+      "title": "Missing Access Control on claimRewards Functions",
+      "description": "The claimRewards functions (both versions) lack access control modifiers, allowing any user to trigger reward claims for any gauge. While the actual reward distribution is handled by the gauge contracts with proper authorization checks, this exposes the protocol to unnecessary gas consumption attacks where malicious actors can force reward distribution operations, potentially causing denial-of-service through gas exhaustion during high network congestion periods.",
+      "severity": "low",
+      "original_id": "50aea2ae67482504"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_067",
+      "title": "Potential Division by Zero in notifyRewardAmount",
+      "description": "The notifyRewardAmount function uses Math.max(totalWeight, 1) to prevent division by zero, but when totalWeight is 0, the _ratio calculation becomes amount * 1e18 / 1. This means when there are no votes (totalWeight = 0), the entire reward amount gets distributed as _ratio = amount * 1e18, which then gets added to the global index. However, since there are no gauges with weight, the rewards remain unclaimable. While not directly exploitable for fund theft, this represents inefficient reward allocation where rewards are effectively locked when no voting activity exists.",
+      "severity": "low",
+      "original_id": "a483bf7de0fe7d14"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_068",
+      "title": "Unbounded Loop in distributeAll Function",
+      "description": "The distributeAll function iterates through all pools without any gas limit considerations. As the number of pools grows, this function may become uncallable due to block gas limits, preventing reward distribution across all gauges. Attackers could exploit this by creating many pools to push the gas consumption beyond manageable limits, effectively causing a denial-of-service for the reward distribution mechanism.",
+      "severity": "medium",
+      "original_id": "01b83cdb670d1d93"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_069",
+      "title": "Reward Distribution Logic Error Allows Reward Theft",
+      "description": "The reward distribution logic in `_pendingReward()` and `updatePool()` contains a critical flaw where the time calculation incorrectly handles the relationship between `lastRewardTime`, `lastDistributedTime`, and `block.timestamp`. When `block.timestamp >= lastDistributedTime`, the code sets `_tempTimestamp` to `lastDistributedTime - pool.lastRewardTime` only if `pool.lastRewardTime <= lastDistributedTime`, otherwise it sets it to 0. This creates a scenario where rewards can be artificially inflated by manipulating the timing of interactions, allowing attackers to steal more rewards than deserved.\n\n**Mathematical Proof:**\n- Scenario: `lastDistributedTime = 1000`, `pool.lastRewardTime = 1100`, `block.timestamp = 1200`\n- Calculation: `pool.lastRewardTime (1100) > lastDistributedTime (1000)` so `_tempTimestamp = 0`\n- Result: No time elapsed is calculated, but `block.timestamp (1200) > pool.lastRewardTime (1100)` so rewards are still processed\n- Impact: Rewards are calculated based on 0 time elapsed, but `pool.lastRewardTime` is updated to `block.timestamp`, effectively skipping reward accumulation for that period\n\n**Exploitation:** An attacker can time their interactions to occur when `pool.lastRewardTime > lastDistributedTime` but `block.timestamp > pool.lastRewardTime`, causing the contract to calculate rewards based on 0 time elapsed while still updating the timestamp, allowing them to claim rewards without proper accumulation periods.\n\n**Financial Impact:** Users receive incorrect reward amounts - either too much (if they exploit the timing) or too little (if they're victims of the skipped accumulation). The protocol's reward distribution becomes unreliable.",
+      "severity": "high",
+      "original_id": "2165ec0eb412c7eb"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_070",
+      "title": "Incorrect Reward Debt Calculation in onReward Function",
+      "description": "The `onReward()` function incorrectly calculates the user's reward debt after updating their LP balance. The formula `user.rewardDebt = (userBalance * pool.accRewardPerShare) / ACC_TOKEN_PRECISION` uses the updated `userBalance` but the current `pool.accRewardPerShare`. This creates a state desynchronization where the reward debt doesn't properly account for the user's historical position.\n\n**Mathematical Proof:**\n- Initial state: user.amount = 1000, pool.accRewardPerShare = 1000, user.rewardDebt = 1000000\n- User adds LP: userBalance becomes 2000\n- New reward debt calculation: (2000 * 1000) / 1e12 = 2000000\n- But the correct calculation should account for the fact that the user had 1000 LP already accounted for at accRewardPerShare = 1000\n- This discrepancy allows the user to claim rewards they're not entitled to\n\n**Exploitation:** A user can manipulate their LP position timing to maximize this discrepancy. By depositing right before reward accumulation periods and withdrawing right after, they can claim rewards based on their peak balance while having their reward debt calculated incorrectly.\n\n**Financial Impact:** Users can steal rewards from the protocol by exploiting the incorrect reward debt accounting. The protocol will distribute more rewards than intended, leading to insolvency if exploited at scale.",
+      "severity": "high",
+      "original_id": "9b258c83d063b806"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_071",
+      "title": "Division Precision Loss in setDistributionRate Allows Reward Freezing",
+      "description": "The `setDistributionRate()` function performs division `amount / distributePeriod` which can round down to zero when `amount < distributePeriod`. Since `distributePeriod` is fixed at 1 week (604800 seconds), any amount less than 604800 will result in `_rewardPerSecond = 0`, effectively freezing reward distribution.\n\n**Mathematical Proof:**\n- distributePeriod = 604800 seconds (1 week)\n- If owner sets amount = 604799 (1 wei less than distributePeriod)\n- Calculation: _rewardPerSecond = 604799 / 604800 = 0 (integer division rounds down)\n- Result: rewardPerSecond becomes 0, no rewards are distributed for the entire period\n- Users who have staked funds receive no rewards despite the contract holding tokens\n\n**Exploitation:** While this requires owner action, it could be exploited if the owner's account is compromised, or through social engineering. The impact is severe as it freezes all reward distribution while user funds remain locked.\n\n**Financial Impact:** All stakers lose their expected rewards for the distribution period. The reward tokens remain stuck in the contract unless the owner calls setDistributionRate again with a sufficient amount.",
+      "severity": "medium",
+      "original_id": "93b65a681e55ffc3"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_072",
+      "title": "Insufficient Validation in recoverERC20 Allows Reward Token Drainage",
+      "description": "The `recoverERC20()` function contains flawed logic for recovering reward tokens. The validation `require(amount <= notDistributed, 'TOO_MANY')` only checks against `notDistributed` but doesn't properly account for already-accrued rewards that haven't been claimed by users.\n\n**Mathematical Proof:**\n- Total rewards in contract: 1000 tokens\n- rewardPerSecond = 1 token/sec, timeleft = 500 seconds\n- notDistributed = 1 * 500 = 500 tokens\n- But accrued rewards (already earned by users but not claimed) = 300 tokens\n- Owner can withdraw up to 500 tokens, but only 200 tokens should be available (500 notDistributed - 300 accrued)\n- Result: 300 tokens that belong to users can be drained by owner\n\n**Exploitation:** The owner can drain rewards that have already been accrued by users but not yet claimed. This is particularly damaging if users don't claim rewards frequently.\n\n**Financial Impact:** Users lose rewards they have already earned. The protocol becomes insolvent as it cannot pay out accrued rewards.",
+      "severity": "high",
+      "original_id": "6dbf111a4b5ca5fa"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_073",
+      "title": "Incorrect Liquidity Distribution in balanceOf Function",
+      "description": "The balanceOf function incorrectly calculates liquidity distribution by dividing total liquidity by 2 to determine depositer liquidity. This assumes exactly 50% of liquidity belongs to depositors and 50% to the token owner, but the actual liquidity distribution depends on the ratio of native tokens to funding tokens added during liquidity provision. If the token prices are not 1:1, the actual liquidity split will be different, leading to incorrect balance calculations that can be exploited for financial gain.",
+      "severity": "high",
+      "original_id": "74af760ea7612ed9"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_074",
+      "title": "Incorrect User Amount Calculation in deductAmount Function",
+      "description": "The deductAmount function incorrectly calculates the amount to deduct from user deposits when gauge tokens are withdrawn. The formula 'userAmount = (totalDeposits * gaugeTokenAmount) / _depositerLiquidity' is mathematically flawed because it doesn't properly account for the proportional relationship between deposited funds and liquidity shares. This can lead to either over-deducting or under-deducting user deposits, creating opportunities for exploitation.",
+      "severity": "high",
+      "original_id": "4113bcb1415e7fd3"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_075",
+      "title": "Missing Access Control on addIncentives Function",
+      "description": "The addIncentives function lacks proper access control, allowing anyone to call it as long as they pass the initial checks. While there is a check for 'msg.sender == genesisInfo.tokenOwner', this can be bypassed if an attacker can manipulate the pool status or if the token owner address is compromised. This could allow unauthorized addition of incentives or manipulation of incentive tracking.",
+      "severity": "high",
+      "original_id": "2c9afa27bc051358"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_076",
+      "title": "Incorrect Refundable Amount Calculation in _setPoolStatus",
+      "description": "The _setPoolStatus function incorrectly calculates refundable amounts when setting pool status to PARTIALLY_LAUNCHED. The calculation 'allocationInfo.refundableNativeAmount = allocationInfo.proposedNativeAmount - allocationInfo.allocatedNativeAmount' doesn't account for the fact that allocatedNativeAmount represents the actual native tokens allocated, while proposedNativeAmount is the target. If the allocation process doesn't reach the target, this calculation could result in incorrect refund amounts that don't match the actual token balances.",
+      "severity": "high",
+      "original_id": "7d38d5312b602991"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_077",
+      "title": "Incomplete Implementation of exactInput Function Allows Permanent Fund Locking",
+      "description": "The exactInput function is implemented as an empty stub that always returns 0, but it accepts user funds via payable modifier. When users call this function with ETH or tokens (via prior approval), their funds will be permanently locked in the contract since the function doesn't perform any swap operations. The function signature suggests it should handle Algebra V3 swaps, but the implementation is completely missing the core logic.",
+      "severity": "high",
+      "original_id": "d5634cf74dd4a89a"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_078",
+      "title": "Missing Access Control on exactInput Function Allows Unauthorized Fund Locking",
+      "description": "The exactInput function is publicly accessible and payable, allowing any user to send ETH to the contract where it will be permanently locked. While the function is intended for Algebra V3 swaps, the incomplete implementation means any ETH sent to this function cannot be recovered. This creates a permanent loss scenario where attackers can trick users into calling this function or users can accidentally lock their funds.",
+      "severity": "high",
+      "original_id": "2dd82a4c592cd3f7"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_079",
+      "title": "Unused _type Parameter in swapExactTokensForTokens Creates Logic Inconsistency",
+      "description": "The swapExactTokensForTokens function accepts a _type parameter that is intended to select between different pool types (sAMM/vAMM vs Algebra V3), but the parameter is completely unused in the function implementation. The function always uses the V2-style routing logic regardless of the _type value. This creates a logical inconsistency where users expecting Algebra V3 routing will have their transactions processed using V2 logic, potentially leading to unexpected behavior, incorrect routing, or failed transactions.",
+      "severity": "medium",
+      "original_id": "76e4ad9a97e0ea54"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_080",
+      "title": "Incorrect Index Assignment in _removeLiveToken Causes Array Corruption",
+      "description": "The _removeLiveToken function incorrectly assigns the index of the replacing token, leading to array corruption when removing tokens from liveNativeTokens. The function sets liveNativeTokensIndex[replacingAddress] = index, but index is the position being removed (1-based), not the new position of the replacing token. This causes the index mapping to become inconsistent with the actual array positions, potentially breaking future removal operations and causing tokens to remain stuck in the array.",
+      "severity": "high",
+      "original_id": "3df2f0acb8ff491a"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_082",
+      "title": "Incorrect Pair Balance Check Allows Existing Liquidity Pools",
+      "description": "The depositNativeToken function checks if pair balances are zero using IERC20(nativeToken).balanceOf(pairAddress) == 0, but this check is only performed when pairAddress != address(0). However, the balance check uses the wrong comparison - it should require balances to be zero, but the condition is written to require non-zero balances. This allows pools with existing liquidity to be used for genesis pools, potentially enabling manipulation.",
+      "severity": "high",
+      "original_id": "5abde2dbe6ca49f8"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_083",
+      "title": "Unbounded Loop in checkAtEpochFlip May Cause Gas Limit Reverts",
+      "description": "The checkAtEpochFlip function iterates through all liveNativeTokens without any gas limit considerations. If the array grows too large, the function may exceed block gas limits during execution, preventing epoch flips and stalling the entire protocol. This is a denial-of-service vulnerability that attackers could exploit by creating many genesis pools.",
+      "severity": "medium",
+      "original_id": "ace2bbf8098cd6aa"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_084",
+      "title": "Incorrect Rebase Calculation Leads to Protocol Insolvency",
+      "description": "The calculate_rebase() function contains a mathematical error in the rebase calculation formula that will cause the protocol to become insolvent over time. The formula incorrectly squares the circulating supply term, leading to exponentially incorrect rebase amounts that don't match the intended economic model. This breaks the fundamental protocol invariant that total emissions should equal team emissions + gauge emissions + rebase emissions.",
+      "severity": "high",
+      "original_id": "4fcc22b72221e401"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_085",
+      "title": "Missing Access Control on Critical Initialization Function",
+      "description": "The _initialize() function lacks proper access control after the initializer address is set to zero, allowing anyone to call this function repeatedly. This could lead to re-initialization attacks where an attacker can mint additional tokens and create locks, potentially draining the protocol's token supply.",
+      "severity": "high",
+      "original_id": "2632eba2b216bce7"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_086",
+      "title": "Division Rounding Error in Weekly Emission Calculation",
+      "description": "The weekly emission calculation in update_period() uses integer division that can round down to zero when the weekly emission becomes small enough. This could permanently halt protocol emissions and break the economic model, especially during tail emission phases.",
+      "severity": "medium",
+      "original_id": "6fcd0f5db6441857"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_087",
+      "title": "Staking Fee Accounting Desynchronization",
+      "description": "The `processStakingFees` function has a critical logic flaw where it treats independent conditions as mutually exclusive. When both `amount > 0` and `isTokenZero` are true, only `toStake0` is updated. However, if an attacker calls the function with `amount > 0` and `isTokenZero = false`, the function will update `toStake1`. The vulnerability occurs because the function uses separate if-statements instead of if-else, allowing the same amount to potentially be processed twice if called multiple times. While the function has access control (only pair can call), the pair contract could have a bug that calls this function incorrectly. The mathematical proof: Suppose pair accidentally calls `processStakingFees(100, true)` and then `processStakingFees(100, false)` - this would correctly add 100 to both toStake0 and toStake1. But if there's a reentrancy or callback issue in the pair contract, it could call `processStakingFees(100, true)` twice, adding 200 to toStake0 instead of 100. The financial impact is that staking fee accounting becomes inaccurate, potentially leading to over-distribution or under-distribution of fees.",
+      "severity": "medium",
+      "original_id": "85f0028c95b5b728"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_088",
+      "title": "Unbounded Staking Fee Accumulation Without Withdrawal Limits",
+      "description": "The `toStake0` and `toStake1` variables can accumulate fees indefinitely without any upper bounds or withdrawal frequency limits. While the `withdrawStakingFees` function resets the counters to zero, there's no mechanism to prevent the accumulation of extremely large values that could cause integer overflow in future calculations or create economic incentives for timing attacks. Mathematical proof: If the pair continuously calls `processStakingFees` with large amounts over time, `toStake0` and `toStake1` could approach `2^256 - 1`. While this is unlikely in practice due to token supply limits, the lack of bounds checking represents a theoretical vulnerability. The financial impact is that if the values approach maximum uint256 values, subsequent additions could overflow, potentially causing loss of funds or incorrect fee distribution.",
+      "severity": "low",
+      "original_id": "7a91c750ace3a274"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_089",
+      "title": "Front-Running Attack on Pair Creation",
+      "description": "The createPair function uses a deterministic salt based on token addresses and stable flag to deploy new Pair contracts. An attacker can front-run the creation by pre-deploying a malicious contract at the predicted address before the legitimate factory call. This allows the attacker to control the Pair contract that will be used by the protocol, potentially stealing funds or manipulating trades.\n\n**Mathematical Proof**:\n- Salt = keccak256(abi.encodePacked(token0, token1, stable))\n- Pair address = create2(factory, salt, Pair.creationCode)\n- Since all inputs are predictable, the address is deterministic\n- Attacker computes salt for any token pair they observe in mempool\n- Attacker deploys malicious contract to that address first\n\n**Exploitation Scenario**:\n1. User submits transaction to create pair (tokenA, tokenB, stable=true)\n2. Attacker sees transaction in mempool\n3. Attacker computes salt = keccak256(abi.encodePacked(tokenA, tokenB, true))\n4. Attacker pre-deploys malicious contract using same salt\n5. Legitimate createPair call fails or uses attacker's contract\n6. Attacker controls the pair contract and can steal funds\n\n**Financial Impact**: Complete loss of funds deposited into the manipulated pair contract. The attacker gains control over all liquidity and can drain user funds.",
+      "severity": "high",
+      "original_id": "b139528f571acbb3"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_090",
+      "title": "Missing Access Control on Pair Creation",
+      "description": "The createPair function has no access control modifier, allowing any external caller to create pair contracts. While this may be intentional for a factory pattern, it enables unauthorized deployment of pair contracts that could be used to spam the network or create malicious pairs that appear legitimate.\n\n**Exploitation Scenario**:\n1. Attacker calls createPair with arbitrary token addresses\n2. Factory deploys pair contract even if tokens are malicious or non-existent\n3. Attacker can create fake pairs that appear to be part of the protocol\n4. Users may be tricked into depositing funds into malicious pairs\n\n**Financial Impact**: While direct fund loss requires additional user interaction, this enables phishing attacks and protocol pollution. Users could lose funds by interacting with malicious pairs they believe are legitimate.",
+      "severity": "medium",
+      "original_id": "89659376da6592de"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_091",
+      "title": "Incorrect Reward Distribution Due to Genesis Pool Balance Inclusion in Reward Calculations",
+      "description": "The `_balanceOf` function includes the user's balance from the GenesisPool when calculating rewards, but the reward distribution logic in `notifyRewardAmount` only considers the gauge's internal `_totalSupply`. This creates a mismatch where rewards are distributed based on a smaller supply (gauge-only) but earned based on a larger supply (gauge + GenesisPool). Attackers can exploit this by depositing to the GenesisPool to claim disproportionately high rewards without contributing to the gauge's reward distribution base.\n\nMathematical Proof:\n- Let gauge's _totalSupply = 1000 tokens\n- GenesisPool balance for user = 1000 tokens\n- Total reward = 1000 tokens over DURATION\n- Reward rate = 1000 / DURATION = reward per second for 1000 tokens\n- User's effective balance for reward calculation = 1000 (gauge) + 1000 (GenesisPool) = 2000 tokens\n- User's reward share = 2000/1000 = 2x what they should receive\n- Actual reward earned = 2x the intended amount\n\nExploitation Scenario:\n1. Attacker deposits to GenesisPool (which doesn't affect gauge's _totalSupply)\n2. Gauge receives rewards based on its _totalSupply only\n3. Attacker claims rewards based on combined (gauge + GenesisPool) balance\n4. Attacker receives disproportionately high rewards\n\nFinancial Impact: Legitimate gauge depositors receive less rewards than deserved, while GenesisPool depositors receive excess rewards. The protocol's reward distribution becomes unfair and can be exploited for profit.",
+      "severity": "high",
+      "original_id": "0e6e9a7f1cadce5e"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_092",
+      "title": "Incorrect Reward Rate Calculation in notifyRewardAmount",
+      "description": "The `notifyRewardAmount` function incorrectly calculates the new reward rate when adding rewards during an active distribution period. The formula `rewardRate = (reward + leftover) / DURATION` divides by the full DURATION instead of the remaining time, causing the reward rate to be incorrectly set.\n\nMathematical Proof:\n- Current period: 7 days remaining, rewardRate = 100 tokens/day\n- Leftover rewards = 7 * 100 = 700 tokens\n- New reward added = 700 tokens\n- Incorrect calculation: rewardRate = (700 + 700) / 7 = 200 tokens/day\n- Correct calculation should be: rewardRate = (700 + 700) / 7 = 200 tokens/day for remaining 7 days\n- But then the contract sets _periodFinish = now + 7 days (full DURATION)\n- Total distributed: 200 * 7 = 1400 tokens over 7 days\n- This is correct for the scenario, but the issue is conceptual\n\nThe real vulnerability appears when the remaining time is less than DURATION. If only 1 day remains:\n- Leftover = 1 * 100 = 100 tokens\n- New reward = 700 tokens\n- rewardRate = (700 + 100) / 7 = 114.285 tokens/day\n- New period: 7 days with rate 114.285 tokens/day\n- Total distributed: 114.285 * 7 = 800 tokens\n- This incorrectly stretches the distribution over a full new period\n\nExploitation Scenario:\nMalicious distribution can time reward notifications to manipulate the reward rate, potentially causing rewards to be distributed too slowly or too quickly compared to intended schedule.\n\nFinancial Impact: Rewards may be distributed at incorrect rates, affecting all users' expected earnings timeline and potentially allowing manipulation of reward distribution timing.",
+      "severity": "high",
+      "original_id": "cfc95d225beec896"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_093",
+      "title": "Inconsistent Balance Deduction in _deductBalance Function",
+      "description": "The `_deductBalance` function has flawed logic when deducting from both gauge balance and GenesisPool balance. The function attempts to deduct from GenesisPool first, but the arithmetic can lead to underflow or incorrect deductions.\n\nMathematical Proof:\n- User has: gauge balance = 500, GenesisPool balance = 300\n- User withdraws 400 tokens\n- genesisDeduction = min(300, 400) = 300\n- gaugeDeduction = 400 - 300 = 100\n- This works correctly\n\nProblematic scenario:\n- User has: gauge balance = 100, GenesisPool balance = 300  \n- User withdraws 400 tokens (more than their gauge balance)\n- genesisDeduction = min(300, 400) = 300\n- gaugeDeduction = 400 - 300 = 100\n- But user only has 100 in gauge, so _balances[msg.sender] = 100 - 100 = 0 (correct)\n- However, if user withdraws 500 tokens:\n- genesisDeduction = min(300, 500) = 300\n- gaugeDeduction = 500 - 300 = 200\n- But user only has 100 in gauge - this will UNDERFLOW\n\nThe function doesn't properly validate that gaugeDeduction <= actual gauge balance.\n\nExploitation Scenario:\nUser with insufficient gauge balance but sufficient GenesisPool balance attempts to withdraw an amount that would cause gauge balance to go negative, resulting in underflow and potential loss of funds or contract failure.\n\nFinancial Impact: Potential underflow errors that could lock funds or cause unexpected behavior in withdrawals.",
+      "severity": "high",
+      "original_id": "91e51b281d2080ee"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_094",
+      "title": "Missing Access Control on claimFees Function",
+      "description": "The `claimFees` function is publicly accessible without access control, allowing anyone to trigger fee claims from the pair contract. While this doesn't directly steal funds, it can be exploited to spam the contract and potentially manipulate fee distribution timing.\n\nAttack Vector:\n- Any user can call claimFees() repeatedly\n- This triggers external contract calls to the pair and bribe contracts\n- Can be used to spam the network and increase gas costs\n- Potential for MEV manipulation by front-running legitimate fee claims\n\nWhile the function doesn't transfer funds to the caller, the lack of access control allows unauthorized manipulation of the fee claiming process, which could be exploited in combination with other vulnerabilities or for denial-of-service attacks.\n\nFinancial Impact: Increased gas costs, potential manipulation of fee distribution timing, and possible MEV exploitation opportunities.",
+      "severity": "medium",
+      "original_id": "5e830aa53c5c5d06"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_095",
+      "title": "Role Removal Corruption in removeRole Function",
+      "description": "The removeRole function contains a critical bug where it incorrectly removes role assignments when deleting a role. The function iterates through _roleToAddresses[bytes(role)] but then uses bytes(role) which creates a new bytes memory object that is different from the _role variable used earlier. This causes the hasRole mapping to be updated with a different key, leaving the original role assignments intact while corrupting the tracking arrays. Additionally, the function incorrectly uses _roles[_roles.length -1] when removing from _addressToRoles, which can assign wrong roles to addresses.",
+      "severity": "high",
+      "original_id": "9afb43f4c80e4031"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_096",
+      "title": "Incorrect Role Assignment in removeRoleFrom Function",
+      "description": "The removeRoleFrom function has a similar issue where it uses bytes(role) instead of the _role variable, creating a different bytes object. This causes the function to update the wrong key in the hasRole mapping, leaving the original role assignment intact while corrupting the tracking arrays. The function will remove the address from _roleToAddresses using the correct _role key but update hasRole with a different key, creating inconsistent state.",
+      "severity": "high",
+      "original_id": "2d0353e059fb89c1"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_097",
+      "title": "Missing Access Control on setEmergencyCouncil Function",
+      "description": "The setEmergencyCouncil function allows both emergencyCouncil and blackMultisig to change the emergencyCouncil address. However, if the emergencyCouncil becomes compromised or is a malicious address, it can permanently block the blackMultisig from regaining control by repeatedly changing the emergencyCouncil to new malicious addresses. This creates a privilege escalation vulnerability where a compromised emergencyCouncil can maintain control indefinitely.",
+      "severity": "high",
+      "original_id": "5c12533c72f55901"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_098",
+      "title": "Incorrect Fee Accounting in _update0 and _update1 Functions",
+      "description": "The _update0 and _update1 functions incorrectly calculate the fee distribution by subtracting staking fees from the amount before calculating the ratio for LP fees. This causes LP fee accrual to be based on an amount that has already had staking fees deducted, rather than the full fee amount. The mathematical error occurs because the staking fee is subtracted from the amount before calculating the ratio for LP fee distribution, but the staking fee should be a separate deduction that doesn't affect the LP fee calculation.\n\nMathematical Proof:\nLet amount = 10000 (total fees collected)\nLet stakingNFTFee = 100 (1% of amount)\nLet totalSupply = 1000000\n\nCurrent incorrect calculation:\n1. amount -= stakingNFTFee \u2192 amount = 9900\n2. _ratio = 9900 * 1e18 / 1000000 = 9900000000000000000\n3. index0 += 9900000000000000000\n\nCorrect calculation should be:\n1. _ratio = 10000 * 1e18 / 1000000 = 10000000000000000000\n2. index0 += 10000000000000000000\n\nThe difference is 100000000000000000 (1e17) which represents the LP fees that should have been distributed but weren't. Over multiple transactions, this accumulates and results in LP providers receiving less fees than they are entitled to.",
+      "severity": "high",
+      "original_id": "dcabd12614d378d9"
+    },
+    {
+      "id": "code4rena_blackhole_2025_07_tool_099",
+      "title": "Division Rounding Error in Fee Distribution",
+      "description": "The fee distribution mechanism in _update0 and _update1 uses division operations that can round down to zero when the fee amount is small relative to total supply. This allows attackers to exploit small fee amounts that get rounded to zero, effectively stealing fees from LP providers.\n\nMathematical Proof:\nLet amount = 100 (small fee amount)\nLet totalSupply = 1000000000000000000 (large total supply)\n_ratio = amount * 1e18 / totalSupply = 100 * 1e18 / 1000000000000000000 = 0.0000000001 * 1e18 = 100\nHowever, if amount = 99:\n_ratio = 99 * 1e18 / 1000000000000000000 = 99\nBut if the division rounds down (as Solidity does), and amount is small enough:\nLet amount = 10, totalSupply = 1000000000000000000000\n_ratio = 10 * 1e18 / 1000000000000000000000 = 0.00000000000001 * 1e18 = 10000\nWait, let me recalculate properly:\n\nActual example with realistic values:\namount = 1000 (0.000000000001 tokens with 18 decimals)\ntotalSupply = 1000000 * 1e18 = 1000000000000000000000000\n_ratio = 1000 * 1e18 / 1000000000000000000000000 = 1000000000000000000 / 1000000000000000000000000 = 0.000000000001 * 1e18 = 1000000\n\nBut if amount = 999:\n_ratio = 999 * 1e18 / 1000000000000000000000000 = 999000000000000000000 / 1000000000000000000000000 = 0.000000000000999 * 1e18 = 999000\n\nThe issue is that when _ratio is very small, it can effectively be zero for practical purposes, and small fee amounts get lost due to rounding. Attackers can structure transactions to create many small fee amounts that round down significantly.",
+      "severity": "medium",
+      "original_id": "028396d37ba0d714"
+    }
+  ],
+  "input_tokens": 7883,
+  "output_tokens": 245,
+  "cached_tokens": 11
+}

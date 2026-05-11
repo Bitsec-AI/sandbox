@@ -1,0 +1,770 @@
+{
+  "project": "code4rena_bakerfi-invitational_2025_02",
+  "agent": "agent794",
+  "status": "success",
+  "timestamp": "2026-04-05T19:59:59.754555",
+  "elapsed_seconds": 766.7,
+  "total_expected": 7,
+  "total_found": 100,
+  "true_positives": 2,
+  "false_negatives": 5,
+  "false_positives": 98,
+  "detection_rate": 0.2857142857142857,
+  "precision": 0.02,
+  "f1_score": 0.037383177570093455,
+  "matched_findings": [
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_expected_001",
+      "expected": "Anyone can callStrategySupplyBase.harvest, allowing users to avoid paying performance fees on interest",
+      "matched": "Missing Access Control on `_harvestAndMintFees` Enables Fee Manipulation",
+      "confidence": 0.8,
+      "justification": "FINDING 0 directly matches the expected vulnerability. It correctly identifies the missing access control on fee-related functions (_harvestAndMintFees) in StrategySupplyBase.sol that allows users to manipulate harvest timing to avoid paying performance fees. The finding describes the same core issue - unauthorized users can trigger fee calculations at favorable times to avoid fees - which aligns with the expected vulnerability about anyone being able to call harvest and avoid performance fees.",
+      "severity": "high",
+      "expected_description": "Submitted by\nklau5\n, also found by\n0xlemon\n,\n0xpiken\n, and\nshaflow2\n\nhttps://github.com/code-423n4/2024-12-bakerfi/blob/0daf8a0547b6245faed5b6cd3f5daf44d2ea7c9a/contracts/core/strategies/StrategySupplyBase.sol#L90\n\nSince\nStrategySupplyBase.harvest\ncan be called by anyone, users can front-run the\nrebalance\ncall or regularly call harvest to avoid paying protocol fees on interest. This allows users to receive more interest than they should.\n\nWhen there are profits in the Strategy, the administrator calls\nrebalance\nto settle protocol fees(performance fee). This calls\nStrategy.harvest\nto update the total deployed asset amount including interest and returns the amount of newly generated interest. Then\nn%\nof the interest is taken as protocol fees.\n\nfunction\n_harvestAndMintFees\n()\ninternal\n{\nuint256\ncurrentPosition\n=\n_totalAssets\n();\nif\n(\ncurrentPosition\n==\n0\n) {\nreturn\n;\n}\n@>\nint256\nbalanceChange\n=\n_harvest\n();\nif\n(\nbalanceChange\n>\n0\n) {\naddress\nfeeReceiver\n=\ngetFeeReceiver\n();\nuint256\nperformanceFee\n=\ngetPerformanceFee\n();\nif\n(\nfeeReceiver\n!=\naddress\n(\nthis\n) &&\nfeeReceiver\n!=\naddress\n(\n0\n) &&\nperformanceFee\n>\n0\n) {\nuint256\nfeeInEth\n=\nuint256\n(\nbalanceChange\n) *\nperformanceFee\n;\nuint256\nsharesToMint\n=\nfeeInEth\n.\nmulDivUp\n(\ntotalSupply\n(),\ncurrentPosition\n*\nPERCENTAGE_PRECISION\n);\n@>\n_mint\n(\nfeeReceiver\n,\nsharesToMint\n);\n}\n}\n}\nfunction\n_harvest\n()\ninternal\nvirtual\noverride\nreturns\n(\nint256\nbalanceChange\n) {\n@>\nreturn\n_strategy\n.\nharvest\n();\n// Calls the harvest function of the strategy\n}\n\nHowever,\nStrategySupplyBase.harvest\ncan be called by anyone. By front-running the\nrebalance\nrequest or regularly calling this function, users can avoid paying protocol fees on interest. This allows users to receive more interest than they should.\n\n@>\nfunction\nharvest\n()\nexternal\nreturns\n(\nint256\nbalanceChange\n) {\n// Get Balance\nuint256\nnewBalance\n=\ngetBalance\n();\n@>\nbalanceChange\n=\nint256\n(\nnewBalance\n) -\nint256\n(\n_deployedAmount\n);\nif\n(\nbalanceChange\n>\n0\n) {\nemit\nStrategyProfit\n(\nuint256\n(\nbalanceChange\n));\n}\nelse\nif\n(\nbalanceChange\n<\n0\n) {\nemit\nStrategyLoss\n(\nuint256\n(-\nbalanceChange\n));\n}\nif\n(\nbalanceChange\n!=\n0\n) {\nemit\nStrategyAmountUpdate\n(\nnewBalance\n);\n}\n@>\n_deployedAmount\n=\nnewBalance\n;\n}\n\nThis is PoC. It demonstrates that anyone can call\nStrategySupplyBase.harvest\n. This can be run by adding it to the\nStrategySupplyAAVEv3.ts\nfile.\n\nit('PoC - anyone can call harvest', async () => {\nconst { owner, strategySupply, stETH, aave3Pool, otherAccount } = await loadFixture(\ndeployStrategySupplyFixture,\n);\nconst deployAmount = ethers.parseEther('10');\nawait stETH.approve(await strategySupply.getAddress(), deployAmount);\nawait strategySupply.deploy(deployAmount);\n//artificial profit\nawait aave3Pool.mintAtokensArbitrarily(await strategySupply.getAddress(), deployAmount);\nawait expect(strategySupply.connect(otherAccount).harvest())\n.to.emit(strategySupply, 'StrategyProfit')\n.to.emit(strategySupply, 'StrategyAmountUpdate');\n});\n\nAdd the\nonlyOwner\nmodifier to\nStrategySupplyBase.harvest\nto restrict access.\n\nchefkenji (BakerFi) confirmed\n\nBakerFi mitigated\n:\n\nPR-15\n\nStatus:\nMitigation confirmed. Full details in reports from\n0xlemon\nand\nshaflow2\n.",
+      "found_description": "The internal function `_harvestAndMintFees` updates state variables used in economic calculations (performance fees) without access control. This allows any user to trigger fee calculations at favorable times, manipulating the timing of harvests to avoid fees or gain unfair advantages.",
+      "found_id": "f2350b5257e1c1cc",
+      "tool_finding_index": 38
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_expected_003",
+      "expected": "There are multiple issues with the decimal conversions between the vault and the strategy",
+      "matched": "Precision Loss in _toDebt and _toCollateral Conversions",
+      "confidence": 0.8,
+      "justification": "Finding 4 (Precision Loss in _toDebt and _toCollateral Conversions) matches the expected vulnerability about decimal conversion issues. The finding correctly identifies the _toDebt and _toCollateral functions as having precision issues with oracle price conversions, which aligns with the expected vulnerability description mentioning issues with decimal conversions between vault and strategy. The function hints also include _toCollateral and _toDebt which are mentioned in the expected vulnerability.",
+      "severity": "high",
+      "expected_description": "Submitted by\nshaflow2\n, also found by\n0xlemon\n,\n0xpiken\n,\nABAIKUNANBAEV\n,\nklau5\n, and\nshaflow2\n\nhttps://github.com/code-423n4/2024-12-bakerfi/blob/0daf8a0547b6245faed5b6cd3f5daf44d2ea7c9a/contracts/core/strategies/StrategyLeverage.sol#L234\n\nhttps://github.com/code-423n4/2024-12-bakerfi/blob/0daf8a0547b6245faed5b6cd3f5daf44d2ea7c9a/contracts/core/strategies/StrategyLeverage.sol#L347\n\nhttps://github.com/code-423n4/2024-12-bakerfi/blob/0daf8a0547b6245faed5b6cd3f5daf44d2ea7c9a/contracts/core/strategies/StrategyLeverage.sol#L359\n\nhttps://github.com/code-423n4/2024-12-bakerfi/blob/0daf8a0547b6245faed5b6cd3f5daf44d2ea7c9a/contracts/core/strategies/StrategyLeverage.sol#L673\n\nhttps://github.com/code-423n4/2024-12-bakerfi/blob/0daf8a0547b6245faed5b6cd3f5daf44d2ea7c9a/contracts/core/strategies/StrategyLeverage.sol#L640\n\nhttps://github.com/code-423n4/2024-12-bakerfi/blob/0daf8a0547b6245faed5b6cd3f5daf44d2ea7c9a/contracts/core/strategies/StrategySupplyBase.sol#L110\n\nhttps://github.com/code-423n4/2024-12-bakerfi/blob/0daf8a0547b6245faed5b6cd3f5daf44d2ea7c9a/contracts/core/strategies/StrategySupplyBase.sol#L69\n\nThe\nStrategyLeverage\ncontract has multiple incorrect decimal handling issues, causing the system to not support tokens with decimals other than 18.\n\nFirst, the vault contract\u2019s share decimal is set to 18, as recommended by the ERC4626 standard. Ideally, the vault\u2019s share decimal should reflect the underlying token\u2019s decimal. Otherwise, conversions through\nconvertToShares\nand\nconvertToAssets\nwould be required.\n\nIn\nStrategyLeverage\n, we can see that all calls to\ntotalAssets()\nare converted to 18 decimals for share calculations.\n\nUnder the above premise, the contract has multiple decimal handling errors, making it incompatible with tokens that use decimals other than 18:\n\nThe\n_deploy\nfunction should return the amount in the system\u2019s 18-decimal format, rather than the token\u2019s native decimal format.\nfunction\n_depositInternal\n(\nuint256\nassets\n,\naddress\nreceiver\n)\nprivate\nreturns\n(\nuint256\nshares\n) {\n...\nuint256\ndeployedAmount\n=\n_deploy\n(\nassets\n);\n// Calculate shares to mint\nshares\n=\ntotal\n.\ntoBase\n(\ndeployedAmount\n,\nfalse\n);\n// Prevent inflation attack for the first deposit\nif\n(\ntotal\n.\nbase\n==\n0\n&&\nshares\n<\n_MINIMUM_SHARE_BALANCE\n) {\nrevert\nInvalidShareBalance\n();\n}\n// Mint shares to the receiver\n_mint\n(\nreceiver\n,\nshares\n);\n// Emit deposit event\nemit\nDeposit\n(\nmsg\n.\nsender\n,\nreceiver\n,\nassets\n,\nshares\n);\n}\nThe\n_deploy\nfunction is used to calculate shares, so it should return the amount in the system\u2019s 18-decimal format. However, the strategy always returns the amount in the token\u2019s native decimal format.\nTo address this, the\n_pendingAmount\nin the\n_supplyBorrow\nfunction should be converted to 18-decimal format.\nIn the\n_redeemInternal\nprocess, the\nwithdrawAmount\npassed to\n_undeploy\nis in 18-decimal format (since\ntotalAssets\nreturns 18-decimal values).\nfunction\n_redeemInternal\n(\nuint256\nshares\n,\naddress\nreceiver\n,\naddress\nholder\n,\nbool\nshouldRedeemETH\n)\nprivate\nreturns\n(\nuint256\nretAmount\n) {\nif\n(\nshares\n==\n0\n)\nrevert\nInvalidAmount\n();\nif\n(\nreceiver\n==\naddress\n(\n0\n))\nrevert\nInvalidReceiver\n();\nif\n(\nbalanceOf\n(\nholder\n) <\nshares\n)\nrevert\nNotEnoughBalanceToWithdraw\n();\n// Transfer shares to the contract if sender is not the holder\nif\n(\nmsg\n.\nsender\n!=\nholder\n) {\nif\n(\nallowance\n(\nholder\n,\nmsg\n.\nsender\n) <\nshares\n)\nrevert\nNoAllowance\n();\ntransferFrom\n(\nholder\n,\nmsg\n.\nsender\n,\nshares\n);\n}\n// Calculate the amount to withdraw based on shares\nuint256\nwithdrawAmount\n= (\nshares\n*\ntotalAssets\n()) /\ntotalSupply\n();\nif\n(\nwithdrawAmount\n==\n0\n)\nrevert\nNoAssetsToWithdraw\n();\n\n@>        uint256 amount = _undeploy(withdrawAmount);\n\u2026\n\nTherefore, in the `undeploy` process, `deltaCollateralAmount` is in 18-decimal format. It is directly packed into `data` and passed to `_repayAndWithdraw` during the callback.\nAs a result, the `_withdraw` functions in `StrategyLeverageAAVEv3` and `StrategyLeverageMorphoBlue` should convert the input `amount` from 18-decimal format to the token's actual decimal format. Otherwise, the wrong amount will be withdrawn.\n3. In the `_undeploy` process, `deltaDebt` and fees should be converted from 18-decimal format to the `debtToken`'s actual decimal format.\n4. The `_convertToCollateral` and `_convertToDebt` functions expect the `amount` parameter to be in 18-decimal format, as required for calculations by `_toDebt` and `_toCollateral` using the oracle. However, before proceeding with the swap, the amount needs to be converted to the respective token's actual decimal format.\nAdditionally, `_convertToCollateral` receives the token's original decimal `amount` during the deploy process, leading to incorrect calculations by the oracle.\n```solidity\n/**\n* @dev Internal function to convert the specified amount from Debt Token to the underlying collateral asset cbETH, wstETH, rETH.\n*\n* This function is virtual and intended to be overridden in derived contracts for customized implementation.\n*\n* @param amount The amount to convert from debtToken.\n* @return uint256 The converted amount in the underlying collateral.\n*/\nfunction _convertToCollateral(uint256 amount) internal virtual returns (uint256) {\nuint256 amountOutMinimum = 0;\nif (getMaxSlippage() > 0) {\nuint256 wsthETHAmount = _toCollateral(\nIOracle.PriceOptions({maxAge: getPriceMaxAge(), maxConf: getPriceMaxConf()}),\namount,\nfalse\n);\namountOutMinimum = (wsthETHAmount * (PERCENTAGE_PRECISION - getMaxSlippage())) / PERCENTAGE_PRECISION;\n}\n// 1. Swap Debt Token -> Collateral Token\n(, uint256 amountOut) = swap(\nISwapHandler.SwapParams(\n_debtToken, // Asset In\n_collateralToken, // Asset Out\nISwapHandler.SwapType.EXACT_INPUT, // Swap Mode\namount, // Amount In\namountOutMinimum, // Amount Out\nbytes(\"\") // User Payload\n)\n);\nreturn amountOut;\n}\n/**\n* @dev Internal function to convert the specified amount to Debt Token from the underlying collateral.\n*\n* This function is virtual and intended to be overridden in derived contracts for customized implementation.\n*\n* @param amount The amount to convert to Debt Token.\n* @return uint256 The converted amount in Debt Token.\n*/\nfunction _convertToDebt(uint256 amount) internal virtual returns (uint256) {\nuint256 amountOutMinimum = 0;\nif (getMaxSlippage() > 0) {\nuint256 ethAmount = _toDebt(\nIOracle.PriceOptions({maxAge: getPriceMaxAge(), maxConf: getPriceMaxConf()}),\namount,\nfalse\n);\namountOutMinimum = (ethAmount * (PERCENTAGE_PRECISION - getMaxSlippage())) / PERCENTAGE_PRECISION;\n}\n// 1.Swap Colalteral -> Debt Token\n(, uint256 amountOut) = swap(\nISwapHandler.SwapParams(\n_collateralToken, // Asset In\n_debtToken, // Asset Out\nISwapHandler.SwapType.EXACT_INPUT, // Swap Mode\namount, // Amount In\namountOutMinimum, // Amount Out\nbytes(\"\") // User Payload\n)\n);\nreturn amountOut;\n}\n\nThe\n_convertToCollateral\nand\n_convertToDebt\nfunctions default to returning the\namount\nin the token\u2019s actual decimal format. However, certain parts of the code assume they return the amount in 18-decimal format, leading to potential miscalculations.\nThe\n_adjustDebt\nfunction should convert the flash loan amount from 18-decimal format to the token\u2019s original decimal format.\nThe\n_payDebt\nfunction will receive an amount in 18-decimal format, but when performing the swap, the amount is not converted to the token\u2019s actual decimal format. This can lead to incorrect calculations during the swap process.\n\nIt is recommended to align the vault\u2019s decimals with the underlying token\u2019s decimals instead of using 18 decimals. This alignment can significantly reduce the complexity of decimal conversions throughout the system.\n\nchefkenji (BakerFi) confirmed\n\nBakerFi mitigated\n:\n\nPR-24\n\nStatus:\nMitigation confirmed. Full details in reports from\n0xlemon\nand\nshaflow2\n.",
+      "found_description": "The _toDebt and _toCollateral functions use mulDiv for price conversions, but the precision of the oracle price may not be sufficient for the required decimal places, leading to silent truncation of the result. This is especially problematic when the price has fewer decimal places than the token decimals, causing the result to be truncated by more than the expected slippage.",
+      "found_id": "36a966839b1d14a1",
+      "tool_finding_index": 32
+    }
+  ],
+  "missed_findings": [
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_expected_000",
+      "title": "Users may encounter losses on assets deposited throughStrategySupplyERC4626",
+      "description": "Submitted by\n0xpiken\n, also found by\n0xlemon\n,\nklau5\n,\nklau5\n,\nMrPotatoMagic\n, and\nshaflow2\n\nhttps://github.com/code-423n4/2024-12-bakerfi/blob/main/contracts/core/strategies/StrategySupplyERC4626.sol#L44\n\nhttps://github.com/code-423n4/2024-12-bakerfi/blob/main/contracts/core/strategies/StrategySupplyERC4626.sol#L51\n\nhttps://github.com/code-423n4/2024-12-bakerfi/blob/main/contracts/core/strategies/StrategySupplyERC4626.sol#L58\n\nThe\n_deploy()\n,\n_undeploy()\n, and\n_getBalance()\nfunctions of\nStrategySupplyERC4626\ncurrently return the amount of shares instead of the amount of the underlying asset. This mistake leads to incorrect calculations of user assets within any BakerFi Vault that utilizes\nStrategySupplyERC4626\n.\n\nWhen a user deposits a certain amount of asset (\ndeployedAmount\n) into a BakerFi vault, it is deployed into the vault\u2019s underlying strategies. In return, the user receives a corresponding number of\nshares\n:\n\nfunction\n_depositInternal\n(\nuint256\nassets\n,\naddress\nreceiver\n)\nprivate\nreturns\n(\nuint256\nshares\n) {\nif\n(\nreceiver\n==\naddress\n(\n0\n))\nrevert\nInvalidReceiver\n();\n// Fetch price options from settings\n// Get the total assets and total supply\nRebase\nmemory\ntotal\n=\nRebase\n(\ntotalAssets\n(),\ntotalSupply\n());\n// Check if the Rebase is uninitialized or both base and elastic are positive\nif\n(!((\ntotal\n.\nelastic\n==\n0\n&&\ntotal\n.\nbase\n==\n0\n) || (\ntotal\n.\nbase\n>\n0\n&&\ntotal\n.\nelastic\n>\n0\n))) {\nrevert\nInvalidAssetsState\n();\n}\n// Check if deposit exceeds the maximum allowed per wallet\nuint256\nmaxDepositLocal\n=\ngetMaxDeposit\n();\nif\n(\nmaxDepositLocal\n>\n0\n) {\nuint256\ndepositInAssets\n= (\nbalanceOf\n(\nmsg\n.\nsender\n) *\n_ONE\n) /\ntokenPerAsset\n();\nuint256\nnewBalance\n=\nassets\n+\ndepositInAssets\n;\nif\n(\nnewBalance\n>\nmaxDepositLocal\n)\nrevert\nMaxDepositReached\n();\n}\n@>\nuint256\ndeployedAmount\n=\n_deploy\n(\nassets\n);\n// Calculate shares to mint\n@>\nshares\n=\ntotal\n.\ntoBase\n(\ndeployedAmount\n,\nfalse\n);\n// Prevent inflation attack for the first deposit\nif\n(\ntotal\n.\nbase\n==\n0\n&&\nshares\n<\n_MINIMUM_SHARE_BALANCE\n) {\nrevert\nInvalidShareBalance\n();\n}\n// Mint shares to the receiver\n_mint\n(\nreceiver\n,\nshares\n);\n// Emit deposit event\nemit\nDeposit\n(\nmsg\n.\nsender\n,\nreceiver\n,\nassets\n,\nshares\n);\n}\n\nTo withdraw their deployed assets from a BakerFi vault, users must burn a corresponding number of shares to receive a certain amount of assets:\n\nfunction\n_redeemInternal\n(\nuint256\nshares\n,\naddress\nreceiver\n,\naddress\nholder\n,\nbool\nshouldRedeemETH\n)\nprivate\nreturns\n(\nuint256\nretAmount\n) {\nif\n(\nshares\n==\n0\n)\nrevert\nInvalidAmount\n();\nif\n(\nreceiver\n==\naddress\n(\n0\n))\nrevert\nInvalidReceiver\n();\nif\n(\nbalanceOf\n(\nholder\n) <\nshares\n)\nrevert\nNotEnoughBalanceToWithdraw\n();\n// Transfer shares to the contract if sender is not the holder\nif\n(\nmsg\n.\nsender\n!=\nholder\n) {\nif\n(\nallowance\n(\nholder\n,\nmsg\n.\nsender\n) <\nshares\n)\nrevert\nNoAllowance\n();\ntransferFrom\n(\nholder\n,\nmsg\n.\nsender\n,\nshares\n);\n}\n// Calculate the amount to withdraw based on shares\nuint256\nwithdrawAmount\n= (\nshares\n*\ntotalAssets\n()) /\ntotalSupply\n();\nif\n(\nwithdrawAmount\n==\n0\n)\nrevert\nNoAssetsToWithdraw\n();\n@>\nuint256\namount\n=\n_undeploy\n(\nwithdrawAmount\n);\nuint256\nfee\n=\n0\n;\nuint256\nremainingShares\n=\ntotalSupply\n() -\nshares\n;\n// Ensure a minimum number of shares are maintained to prevent ratio distortion\nif\n(\nremainingShares\n<\n_MINIMUM_SHARE_BALANCE\n&&\nremainingShares\n!=\n0\n) {\nrevert\nInvalidShareBalance\n();\n}\n@>\n_burn\n(\nmsg\n.\nsender\n,\nshares\n);\n// Calculate and handle withdrawal fees\nif\n(\ngetWithdrawalFee\n() !=\n0\n&&\ngetFeeReceiver\n() !=\naddress\n(\n0\n)) {\nfee\n=\namount\n.\nmulDivUp\n(\ngetWithdrawalFee\n(),\nPERCENTAGE_PRECISION\n);\nif\n(\nshouldRedeemETH\n&&\n_asset\n() ==\nwETHA\n()) {\nunwrapETH\n(\namount\n);\npayable\n(\nreceiver\n).\nsendValue\n(\namount\n-\nfee\n);\npayable\n(\ngetFeeReceiver\n()).\nsendValue\n(\nfee\n);\n}\nelse\n{\nIERC20Upgradeable\n(\n_asset\n()).\ntransfer\n(\nreceiver\n,\namount\n-\nfee\n);\nIERC20Upgradeable\n(\n_asset\n()).\ntransfer\n(\ngetFeeReceiver\n(),\nfee\n);\n}\n}\nelse\n{\nif\n(\nshouldRedeemETH\n) {\nunwrapETH\n(\namount\n);\npayable\n(\nreceiver\n).\nsendValue\n(\namount\n);\n}\nelse\n{\nIERC20Upgradeable\n(\n_asset\n()).\ntransfer\n(\nreceiver\n,\namount\n);\n}\n}\nemit\nWithdraw\n(\nmsg\n.\nsender\n,\nreceiver\n,\nholder\n,\namount\n-\nfee\n,\nshares\n);\nretAmount\n=\namount\n-\nfee\n;\n}\n\nAs we can see, the return values of\n_deploy()\nand\n_undeploy()\nshould represent the amount of asset. In addition,\n_totalAssets()\nshould also return the amount of asset.\nThe implementation of the above functions within the\nVault\ncontract is as follows:\n\nfunction\n_deploy\n(\nuint256\nassets\n)\ninternal\nvirtual\noverride\nreturns\n(\nuint256\ndeployedAmount\n) {\n// Approve the strategy to spend assets\nIERC20Upgradeable\n(\n_strategyAsset\n).\nsafeApprove\n(\naddress\n(\n_strategy\n),\nassets\n);\n// Deploy assets via the strategy\ndeployedAmount\n=\n_strategy\n.\ndeploy\n(\nassets\n);\n// Calls the deploy function of the strategy\n}\nfunction\n_undeploy\n(\nuint256\nassets\n)\ninternal\nvirtual\noverride\nreturns\n(\nuint256\nretAmount\n) {\nretAmount\n=\n_strategy\n.\nundeploy\n(\nassets\n);\n// Calls the undeploy function of the strategy\n}\nfunction\n_totalAssets\n()\ninternal\nview\nvirtual\noverride\nreturns\n(\nuint256\namount\n) {\namount\n=\n_strategy\n.\ntotalAssets\n();\n// Calls the totalAssets function of the strategy\n}\n\nIt is obvious that the return value should represent the amount of assets when\n_strategy.deploy()\n,\n_strategy.undeploy()\nor\n_strategy.totalAssets()\nis called.\n\nHowever, the functions in\nStrategySupplyERC4626\nmistakenly return the number of shares other than the amount of underlying asset:\n\n/**\n*\n@inheritdoc\nStrategySupplyBase\n*/\nfunction\n_deploy\n(\nuint256\namount\n)\ninternal\noverride\nreturns\n(\nuint256\n) {\nreturn\n_vault\n.\ndeposit\n(\namount\n,\naddress\n(\nthis\n));\n}\n/**\n*\n@inheritdoc\nStrategySupplyBase\n*/\nfunction\n_undeploy\n(\nuint256\namount\n)\ninternal\noverride\nreturns\n(\nuint256\n) {\nreturn\n_vault\n.\nwithdraw\n(\namount\n,\naddress\n(\nthis\n),\naddress\n(\nthis\n));\n}\n/**\n*\n@inheritdoc\nStrategySupplyBase\n*/\nfunction\n_getBalance\n()\ninternal\nview\noverride\nreturns\n(\nuint256\n) {\nreturn\n_vault\n.\nbalanceOf\n(\naddress\n(\nthis\n));\n}\n\nThis issue could lead to a scenario where a portion of user assets are permanently locked within the BakerFi vault.\nCreate\nERC4626Mock\ncontract with below codes:\n\n// SPDX-License-Identifier: MIT\npragma\nsolidity\n^\n0.8\n.\n24\n;\nimport\n{\nERC4626\n}\nfrom\n\"@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol\"\n;\nimport\n{\nIERC20\n}\nfrom\n\"@openzeppelin/contracts/token/ERC20/IERC20.sol\"\n;\nimport\n{\nERC20\n}\nfrom\n\"@openzeppelin/contracts/token/ERC20/ERC20.sol\"\n;\ncontract\nERC4626Mock\nis\nERC4626\n{\nconstructor\n(\nIERC20\nasset_\n)\nERC4626\n(\nasset_\n)\nERC20\n(\n\"Mock Vault\"\n,\n\"MV\"\n) {\n}\n}\n\nCreate\nStrategySupplyERC4626.ts\nwith below codes and run\nnpm run test\n:\n\nAs we can see that only 5e18 WETH can be withdrawn within 10e18 WETH deployed. The rest 5e18 WETH are permanently locked within the BakerFi vault. The amount of locked asset can be calculated as below:\n\nNote: please see scenario in warden\u2019s\noriginal submission\n.\n\nUpdate\nStrategySupplyERC4626\nto return correct value:\n\nfunction _deploy(uint256 amount) internal override returns (uint256) {\n-       return _vault.deposit(amount, address(this));\n+      _vault.deposit(amount, address(this));\n+      return amount;\n}\n/**\n* @inheritdoc StrategySupplyBase\n*/\nfunction _undeploy(uint256 amount) internal override returns (uint256) {\n-       return _vault.withdraw(amount, address(this), address(this));\n+       _vault.withdraw(amount, address(this), address(this));\n+       return amount;\n}\n/**\n* @inheritdoc StrategySupplyBase\n*/\nfunction _getBalance() internal view override returns (uint256) {\n-       return _vault.balanceOf(address(this));\n+       return _vault.convertToAssets(_vault.balanceOf(address(this)));\n}\n\nchefkenji (BakerFi) confirmed\n\nBakerFi mitigated\n:\n\nPR-17\n\nStatus:\nMitigation confirmed. Full details in reports from\nshaflow2\nand\n0xlemon\n.",
+      "severity": "high",
+      "reason": "Not found"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_expected_002",
+      "title": "_deployedAmountnot updated onStrategySupplyBase.undeploy, preventing performance fees from being collected",
+      "description": "Submitted by\nklau5\n, also found by\n0xlemon\n,\n0xpiken\n,\nMrPotatoMagic\n,\npfapostol\n, and\nshaflow2\n\nhttps://github.com/code-423n4/2024-12-bakerfi/blob/0daf8a0547b6245faed5b6cd3f5daf44d2ea7c9a/contracts/core/strategies/StrategySupplyBase.sol#L110\n\nStrategySupplyBase.undeploy\ndoes not update\n_deployedAmount\n. As a result, if a withdrawal occurs, even if interest is generated, the protocol cannot collect performance fees through\nrebalance\n.\n\nStrategySupplyBase.undeploy\ndoes not update\n_deployedAmount\n. It should subtract the amount of withdrawn asset tokens.\n\nfunction\nundeploy\n(\nuint256\namount\n)\nexternal\nnonReentrant\nonlyOwner\nreturns\n(\nuint256\nundeployedAmount\n) {\nif\n(\namount\n==\n0\n)\nrevert\nZeroAmount\n();\n// Get Balance\nuint256\nbalance\n=\ngetBalance\n();\nif\n(\namount\n>\nbalance\n)\nrevert\nInsufficientBalance\n();\n// Transfer assets back to caller\nuint256\nwithdrawalValue\n=\n_undeploy\n(\namount\n);\n// Check withdrawal value matches the initial amount\n// Transfer assets to user\nERC20\n(\n_asset\n).\nsafeTransfer\n(\nmsg\n.\nsender\n,\nwithdrawalValue\n);\nbalance\n-=\namount\n;\nemit\nStrategyUndeploy\n(\nmsg\n.\nsender\n,\nwithdrawalValue\n);\nemit\nStrategyAmountUpdate\n(\nbalance\n);\nreturn\namount\n;\n}\n\nAs a result, if a withdrawal occurs, even if interest is generated, the protocol cannot collect performance fees through\nrebalance\n. This is because if the withdrawal amount is greater than the interest earned, the Strategy is considered to have a loss and no fee is taken.\n\n_deployedAmount\n: A\nInterest generated,\ngetBalance\nreturns A + profit\nRequest to withdraw amount B\n_deployedAmount\nis still A\ngetBalance\nreturns A + profit - B\nDuring rebalance,\nbalanceChange\nis (A + profit - B) - A\nThat is, if\nprofit <= B\n, the Strategy is considered to have a loss.\n\nfunction\nharvest\n()\nexternal\nreturns\n(\nint256\nbalanceChange\n) {\n// Get Balance\nuint256\nnewBalance\n=\ngetBalance\n();\n@>\nbalanceChange\n=\nint256\n(\nnewBalance\n) -\nint256\n(\n_deployedAmount\n);\nif\n(\nbalanceChange\n>\n0\n) {\nemit\nStrategyProfit\n(\nuint256\n(\nbalanceChange\n));\n}\nelse\nif\n(\nbalanceChange\n<\n0\n) {\nemit\nStrategyLoss\n(\nuint256\n(-\nbalanceChange\n));\n}\nif\n(\nbalanceChange\n!=\n0\n) {\nemit\nStrategyAmountUpdate\n(\nnewBalance\n);\n}\n_deployedAmount\n=\nnewBalance\n;\n}\n\nThis is PoC.  This shows that when harvested after withdrawal, the Strategy is considered to have a loss. This can be executed by adding it to the\nStrategySupplyAAVEv3.ts\nfile.\n\nit('PoC - harvest returns loss after undeloy', async () => {\nconst { owner, strategySupply, stETH, aave3Pool, otherAccount } = await loadFixture(\ndeployStrategySupplyFixture,\n);\nconst deployAmount = ethers.parseEther('10');\nawait stETH.approve(await strategySupply.getAddress(), deployAmount);\nawait strategySupply.deploy(deployAmount);\n//artificial profit\nconst profit = ethers.parseEther('1');\nawait aave3Pool.mintAtokensArbitrarily(await strategySupply.getAddress(), profit);\n// Undeploy\nconst undeployAmount = ethers.parseEther('2');\nawait strategySupply.undeploy(undeployAmount);\nawait expect(strategySupply.harvest())\n.to.emit(strategySupply, 'StrategyLoss')\n.to.emit(strategySupply, 'StrategyAmountUpdate');\n});\n\nUpdate\n_deployedAmount\nby the withdrawal amount in\nStrategySupplyBase.undeploy\n.\n\nchefkenji (BakerFi) confirmed\n\nBakerFi mitigated\n:\n\nPR-12\n\nStatus:\nMitigation confirmed. Full details in reports from\nshaflow2\nand\n0xlemon\n.",
+      "severity": "high",
+      "reason": "Not found"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_expected_004",
+      "title": "The implementation ofpullTokensWithPermitposes a risk, allowing malicious actors to steal tokens",
+      "description": "Submitted by\nshaflow2\n, also found by\n0xlemon\nand\nMrPotatoMagic\n\nhttps://github.com/code-423n4/2024-12-bakerfi/blob/3873b82ae8b321473f3afaf08727e97be0635be9/contracts/core/hooks/UsePermitTransfers.sol#L31\n\nIn batch operations interacting with the router, users are allowed to input tokens into the router using the\npermit\nmethod. This approach may be vulnerable to frontrunning attacks, allowing malicious actors to steal the user\u2019s tokens.\n\nfunction\npullTokensWithPermit\n(\nIERC20Permit\ntoken\n,\nuint256\namount\n,\naddress\nowner\n,\nuint256\ndeadline\n,\nuint8\nv\n,\nbytes32\nr\n,\nbytes32\ns\n)\ninternal\nvirtual\n{\n// Permit the VaultRouter to spend tokens on behalf of the owner\nIERC20Permit\n(\ntoken\n).\npermit\n(\nowner\n,\naddress\n(\nthis\n),\namount\n,\ndeadline\n,\nv\n,\nr\n,\ns\n);\n// Transfer the tokens from the owner to this contract\nIERC20\n(\naddress\n(\ntoken\n)).\nsafeTransferFrom\n(\nowner\n,\naddress\n(\nthis\n),\namount\n);\n}\n\nUsers can deposit tokens into the router via the\npullTokensWithPermit\nfunction. However, the router contract does not validate the caller\u2019s information, making it possible for a malicious actor to frontrun the user and exploit their permit signature to steal tokens.\n\nConsider the following scenario:\n\nThe user interacts with the router contract:\nStep 1: Calls\npullTokensWithPermit\nto transfer 1000 tokens to the router.\nStep 2: Deposits the tokens into a designated vault.\nA malicious actor observes the user\u2019s transaction in the mempool and constructs a malicious transaction to steal the user\u2019s tokens:\nStep 1: The attacker calls\npullTokensWithPermit\nusing the user\u2019s permit signature, causing the user to transfer 1000 tokens to the router.\nStep 2: The attacker immediately calls sweepTokens to transfer the tokens to their own account.\nWhen the user\u2019s original transaction is executed:\nThe permit signature has already been used, causing the user\u2019s transaction to fail.\nAs a result, the user loses 1000 tokens.\n\nAdditionally, an attacker could frontrun the\npermit\nfunction without using the\nrouter\nand then call\npushTokenFrom\ndirectly to steal tokens.\n\nThe current\nrouter\nis not suitable for integrating\npermit\nto handle token input.\n\nchefkenji (BakerFi) confirmed\n\nBakerFi mitigated\n:\n\nPR-23\n\nStatus:\nMitigation confirmed. Full details in reports from\n0xlemon\nand\nshaflow2\n.",
+      "severity": "high",
+      "reason": "Not found"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_expected_005",
+      "title": "Malicious actors can exploit user-approved allowances onVaultRouterto drain their ERC20 tokens",
+      "description": "Submitted by\n0xpiken\n, also found by\n0xlemon\n,\nMrPotatoMagic\n, and\nshaflow2\n\nhttps://github.com/code-423n4/2024-12-bakerfi/blob/main/contracts/core/VaultRouter.sol#L186-L202\n\nhttps://github.com/code-423n4/2024-12-bakerfi/blob/main/contracts/core/VaultRouter.sol#L234-L252\n\nOnce a user approves\nVaultRouter\nto spend their ERC20 tokens, anyone could call\nVaultRouter#execute()\nto drain the user\u2019s ERC20 assets.\n\nThe\nVaultRouter#execute()\nfunction allows users to perform multiple commands within a single transaction. One such use case involves depositing ERC20 tokens into\nVaultRouter\nusing the\nPULL_TOKEN\ncommand. Subsequently, these tokens can be further processed within the same transaction through other commands, such as\nV3_UNISWAP_SWAP\nfor token swaps or\nERC4626_VAULT_DEPOSIT\nfor depositing into an ERC4626 vault.\nBefore depositing ERC20 tokens into\nVaultRouter\nusing the\nPULL_TOKEN\ncommand, the user must approve\nVaultRouter\nto spend their ERC20 token in advance.  However, a malicious actor can exploit this approval to drain the user\u2019s ERC20 token through\nVaultRouter\nwith\nPULL_TOKEN_FROM\nor\nPUSH_TOKEN_FROM\ncommands:\n\nA malicious actor can call\nPULL_TOKEN_FROM\nto transfer ERC20 token from the user into\nVaultRouter\n, then use\nPUSH_TOKEN\ncommand to transfer drained token from\nVaultRouter\nto specified address.\nA malicious actor can call\nPUSH_TOKEN_FROM\ncommand transfer ERC20 token from the user to any address directly.\n\nThe root cause is that either\nPULL_TOKEN_FROM\nor\nPUSH_TOKEN_FROM\ncommand allows anyone to transfer a user\u2019s ERC20 token as long as\nVaultRouter\nis approved to spend their assets:\nhttps://github.com/code-423n4/2024-12-bakerfi/blob/main/contracts/core/hooks/UseTokenActions.sol\n\nfunction\npullTokenFrom\n(\nIERC20\ntoken\n,\naddress\nfrom\n,\nuint256\namount\n)\ninternal\nvirtual\n{\n// Check if the token address is valid\nif\n(\naddress\n(\ntoken\n) ==\naddress\n(\n0\n))\nrevert\nInvalidToken\n();\nif\n(\ntoken\n.\nallowance\n(\nfrom\n,\naddress\n(\nthis\n)) <\namount\n)\nrevert\nNotEnoughAllowance\n();\n// Use SafeERC20 to transfer tokens from the specified address to this contract\n@>\nIERC20\n(\ntoken\n).\nsafeTransferFrom\n(\nfrom\n,\naddress\n(\nthis\n),\namount\n);\n}\nfunction\npushTokenFrom\n(\nIERC20\ntoken\n,\naddress\nfrom\n,\naddress\nto\n,\nuint256\namount\n)\ninternal\nvirtual\n{\n// Check if the token address is valid\nif\n(\naddress\n(\ntoken\n) ==\naddress\n(\n0\n))\nrevert\nInvalidToken\n();\n// Check if the recipient address is valid\nif\n(\naddress\n(\nto\n) ==\naddress\n(\n0\n))\nrevert\nInvalidRecipient\n();\nif\n(\ntoken\n.\nallowance\n(\nfrom\n,\naddress\n(\nthis\n)) <\namount\n)\nrevert\nNotEnoughAllowance\n();\n// Use SafeERC20 to transfer tokens from the specified address to another specified address\n@>\nIERC20\n(\ntoken\n).\nsafeTransferFrom\n(\nfrom\n,\nto\n,\namount\n);\n}\n\nCopy below codes to\nVaultRouter.ts\nand run\nnpm run test\n:\n\nit\n.\nonly\n(\n'Drain all WETH from owner'\n,\nasync\nfunction\n() {\nconst\n{\nvaultRouter\n,\nweth\n,\nowner\n,\notherAccount\n} =\nawait\ndeployFunction\n();\n//@audit-info owner has 10000e18 WETH\nexpect\n(\nawait\nweth\n.\nbalanceOf\n(\nowner\n.\naddress\n)).\nto\n.\nequal\n(\nethers\n.\nparseUnits\n(\n'10000'\n,\n18\n));\n//@audit-info owner approves vaultRouter to spend their WETH\nawait\nweth\n.\napprove\n(\nawait\nvaultRouter\n.\ngetAddress\n(),\nethers\n.\nparseUnits\n(\n'10000'\n,\n18\n));\nlet\niface\n=\nnew\nethers\n.\nInterface\n(\nVaultRouterABI\n);\nconst\ncommands\n= [\n[\nVAULT_ROUTER_COMMAND_ACTIONS\n.\nPUSH_TOKEN_FROM\n,\n'0x'\n+\niface\n.\nencodeFunctionData\n(\n'pushTokenFrom'\n, [\nawait\nweth\n.\ngetAddress\n(),\nowner\n.\naddress\n,\notherAccount\n.\naddress\n,\nethers\n.\nparseUnits\n(\n'10000'\n,\n18\n)])\n.\nslice\n(\n10\n),\n],\n];\n//@audit-info otherAccount drains owner's WETH\nawait\nvaultRouter\n.\nconnect\n(\notherAccount\n).\nexecute\n(\ncommands\n);\nexpect\n(\nawait\nweth\n.\nbalanceOf\n(\nowner\n.\naddress\n)).\nto\n.\nequal\n(\n0\n);\nexpect\n(\nawait\nweth\n.\nbalanceOf\n(\notherAccount\n.\naddress\n)).\nto\n.\nequal\n(\nethers\n.\nparseUnits\n(\n'10000'\n,\n18\n));\n});\n\nAs we can see, owner\u2019s all WETH was drained.\n\nTo protect users from potential exploitation, the\nPULL_TOKEN_FROM\nand\nPUSH_TOKEN_FROM\ncommands should be executed only when\nmsg.sender\nis\nfrom\n.\n\nchefkenji (BakerFi) confirmed\n\nBakerFi mitigated\n:\n\nPR-20\n\nStatus:\nMitigation confirmed. Full details in reports from\n0xlemon\nand\nshaflow2\n.",
+      "severity": "high",
+      "reason": "Not found"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_expected_006",
+      "title": "Malicious actors can exploit user-approved allowances onVaultRouterto drain their ERC4626 tokens",
+      "description": "Submitted by\n0xpiken\n, also found by\nMrPotatoMagic\n\nhttps://github.com/code-423n4/2024-12-bakerfi/blob/main/contracts/core/VaultRouter.sol#L120\n\nhttps://github.com/code-423n4/2024-12-bakerfi/blob/main/contracts/core/VaultRouter.sol#L122\n\nOnce a user approves\nVaultRouter\nto spend their ERC4626 shares, anyone could call\nVaultRouter#execute()\nto drain the user\u2019s ERC4626 shares.\n\nThe\nVaultRouter#execute()\nfunction allows users to perform multiple commands within a single transaction. A user can redeem their ERC4626 shares for underlying assets through\nVaultRouter\nusing the\nERC4626_VAULT_REDEEM\ncommand. Subsequently, the redeemed underlying assets can be further processed within the same transaction through other commands, such as\nV3_UNISWAP_SWAP\nfor token swaps or\nPUSH_TOKEN\nfor token transferrings.\nRedeem ERC4626 shares for underlying assets:\n\nfunction\n_handleVaultRedeem\n(\nbytes\ncalldata\ndata\n,\nuint256\n[]\nmemory\ncallStack\n,\nuint32\ninputMapping\n,\nuint32\noutputMapping\n)\nprivate\nreturns\n(\nbytes\nmemory\n) {\nIERC4626\nvault\n;\nuint256\nshares\n;\naddress\nreceiver\n;\naddress\nowner\n;\nassembly\n{\nvault :=\ncalldataload\n(\ndata\n.\noffset\n)\nshares :=\ncalldataload\n(\nadd\n(\ndata\n.\noffset\n,\n0x20\n))\nreceiver :=\ncalldataload\n(\nadd\n(\ndata\n.\noffset\n,\n0x40\n))\nowner :=\ncalldataload\n(\nadd\n(\ndata\n.\noffset\n,\n0x60\n))\n}\nshares\n=\nCommands\n.\npullInputParam\n(\ncallStack\n,\nshares\n,\ninputMapping\n,\n1\n);\nuint256\nassets\n=\nredeemVault\n(\nvault\n,\nshares\n,\nreceiver\n,\nowner\n);\nCommands\n.\npushOutputParam\n(\ncallStack\n,\nassets\n,\noutputMapping\n,\n1\n);\nreturn\nabi\n.\nencodePacked\n(\nassets\n);\n}\n\nWithdraw underlying assets by burning shares:\n\nfunction\n_handleVaultWithdraw\n(\nbytes\ncalldata\ndata\n,\nuint256\n[]\nmemory\ncallStack\n,\nuint32\ninputMapping\n,\nuint32\noutputMapping\n)\nprivate\nreturns\n(\nbytes\nmemory\n) {\nIERC4626\nvault\n;\nuint256\nassets\n;\naddress\nreceiver\n;\naddress\nowner\n;\nassembly\n{\nvault :=\ncalldataload\n(\ndata\n.\noffset\n)\nassets :=\ncalldataload\n(\nadd\n(\ndata\n.\noffset\n,\n0x20\n))\nreceiver :=\ncalldataload\n(\nadd\n(\ndata\n.\noffset\n,\n0x40\n))\nowner :=\ncalldataload\n(\nadd\n(\ndata\n.\noffset\n,\n0x60\n))\n}\nassets\n=\nCommands\n.\npullInputParam\n(\ncallStack\n,\nassets\n,\ninputMapping\n,\n1\n);\nuint256\nshares\n=\nwithdrawVault\n(\nvault\n,\nassets\n,\nreceiver\n,\nowner\n);\nCommands\n.\npushOutputParam\n(\ncallStack\n,\nshares\n,\noutputMapping\n,\n1\n);\nreturn\nabi\n.\nencodePacked\n(\nshares\n);\n}\n\nTo allow\nVaultRouter\nto redeem ERC4626 shares on behalf of a user, the user must approve\nVaultRouter\nto spend their shares in advance.  However, the caller can be anyone when handling ERC4626 shares redeeming / underlying asset withdrawing, a malicious actor can exploit this approval to drain the user\u2019s ERC4626 shares.\n\nCopy below codes to\nVaultRouter.ts\nand run\nnpm run test\n:\n\nit\n.\nonly\n(\n'Drain ERC4626 shares'\n,\nasync\nfunction\n() {\nconst\n{\nvaultRouter\n,\nweth\n,\nvault\n,\nowner\n,\notherAccount\n} =\nawait\ndeployFunction\n();\nawait\nweth\n.\napprove\n(\nawait\nvault\n.\ngetAddress\n(),\nethers\n.\nparseUnits\n(\n'10000'\n,\n18\n));\n//@audit-info deposit 10000e18 WETH into vault for 10000e18 shares\nawait\nvault\n.\ndeposit\n(\nethers\n.\nparseUnits\n(\n'10000'\n,\n18\n),\nowner\n.\naddress\n);\nexpect\n(\nawait\nvault\n.\nbalanceOf\n(\nowner\n.\naddress\n)).\nto\n.\nequal\n(\nethers\n.\nparseUnits\n(\n'10000'\n,\n18\n));\n// Approve the VaultRouter to spend vault shares from owner\nawait\nvault\n.\napprove\n(\nawait\nvaultRouter\n.\ngetAddress\n(),\nethers\n.\nparseUnits\n(\n'10000'\n,\n18\n));\nlet\niface\n=\nnew\nethers\n.\nInterface\n(\nVaultRouterABI\n);\nconst\ncommands\n= [\n[\nVAULT_ROUTER_COMMAND_ACTIONS\n.\nERC4626_VAULT_REDEEM\n,\n'0x'\n+\niface\n.\nencodeFunctionData\n(\n'redeemVault'\n, [\nawait\nvault\n.\ngetAddress\n(),\nethers\n.\nparseUnits\n(\n'10000'\n,\n18\n),\nawait\notherAccount\n.\ngetAddress\n(),\nowner\n.\naddress\n,\n])\n.\nslice\n(\n10\n),\n],\n];\n//@audit-info otherAccount crafts commands to drain owner's vault shares\nawait\nvaultRouter\n.\nconnect\n(\notherAccount\n).\nexecute\n(\ncommands\n);\n//@audit-info all shares are drained for 10000e18 WETH and transferred to the malicious user\nexpect\n(\nawait\nvault\n.\nbalanceOf\n(\nowner\n.\naddress\n)).\nto\n.\nequal\n(\n0\n);\nexpect\n(\nawait\nweth\n.\nbalanceOf\n(\notherAccount\n.\naddress\n)).\nto\n.\nequal\n(\nethers\n.\nparseUnits\n(\n'10000'\n,\n18\n));\n});\n\nAs we can see, all owner\u2019s vault shares were drained.\n\nBoth\nERC4626_VAULT_REDEEM\nand\nERC4626_VAULT_WITHDRAW\ncommands should only handle the caller\u2019s ERC4626 shares:\n\nfunction _handleVaultRedeem(\nbytes calldata data,\nuint256[] memory callStack,\nuint32 inputMapping,\nuint32 outputMapping\n) private returns (bytes memory) {\nIERC4626 vault;\nuint256 shares;\naddress receiver;\naddress owner;\nassembly {\nvault := calldataload(data.offset)\nshares := calldataload(add(data.offset, 0x20))\nreceiver := calldataload(add(data.offset, 0x40))\n-           owner := calldataload(add(data.offset, 0x60))\n}\n+       owner = msg.sender;\nshares = Commands.pullInputParam(callStack, shares, inputMapping, 1);\nuint256 assets = redeemVault(vault, shares, receiver, owner);\nCommands.pushOutputParam(callStack, assets, outputMapping, 1);\nreturn abi.encodePacked(assets);\n}\nfunction _handleVaultWithdraw(\nbytes calldata data,\nuint256[] memory callStack,\nuint32 inputMapping,\nuint32 outputMapping\n) private returns (bytes memory) {\nIERC4626 vault;\nuint256 assets;\naddress receiver;\naddress owner;\nassembly {\nvault := calldataload(data.offset)\nassets := calldataload(add(data.offset, 0x20))\nreceiver := calldataload(add(data.offset, 0x40))\n-           owner := calldataload(add(data.offset, 0x60))\n}\n+       owner = msg.sender;\nassets = Commands.pullInputParam(callStack, assets, inputMapping, 1);\nuint256 shares = withdrawVault(vault, assets, receiver, owner);\nCommands.pushOutputParam(callStack, shares, outputMapping, 1);\nreturn abi.encodePacked(shares);\n}\n\nchefkenji (BakerFi) confirmed\n\nBakerFi mitigated\n:\n\nPR-19\n\nStatus:\nMitigation confirmed. Full details in reports from\n0xlemon\nand\nshaflow2\n.",
+      "severity": "high",
+      "reason": "Closest candidate index=2 (title='Missing User Protection in Vault Operations') with confidence=0.60."
+    }
+  ],
+  "undecided_findings": [],
+  "extra_findings": [
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_000",
+      "title": "Missing Access Control on Vault Operations Allows Fee Manipulation",
+      "description": "The VaultRouter contract implements multiple vault operations (deposit, mint, redeem, withdraw, convertToShares, convertToAssets) that update state variables used in economic calculations but lack proper access control. Functions like _handleVaultDeposit, _handleVaultMint, _handleVaultRedeem, _handleVaultWithdraw, _handleVaultConvertToShares, and _handleVaultConvertToAssets all lack access control modifiers despite updating state variables that could affect fee calculations, interest accrual, or position tracking. An attacker can manipulate the timing of these operations to avoid fees or gain unfair advantages.",
+      "severity": "high",
+      "original_id": "a45b3e872a318387"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_001",
+      "title": "Missing Access Control on Critical Vault Operations",
+      "description": "The VaultRouter contract implements critical vault operations (deposit, mint, redeem, withdraw, convertToShares, convertToAssets) without proper access control. These functions can be called by any external account, allowing unauthorized manipulation of vault positions and potential theft of user funds.",
+      "severity": "critical",
+      "original_id": "f00a50ee1f994d5e"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_002",
+      "title": "Missing User Protection in Vault Operations",
+      "description": "The VaultRouter contract implements multiple vault operations (deposit, mint, redeem, withdraw) that reduce user positions or withdraw assets without allowing users to specify minimum acceptable outputs. This exposes users to unfavorable execution without protection mechanisms.",
+      "severity": "high",
+      "original_id": "VR-001"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_003",
+      "title": "Validation Timing Issue in Swap Operations",
+      "description": "The _handleSwap function executes swap operations and then validates parameters using pullInputParam, which retrieves values from the call stack. This validation occurs after the swap execution, allowing invalid operations to complete before validation checks.",
+      "severity": "high",
+      "original_id": "VR-002"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_004",
+      "title": "State Synchronization Issue in Vault Operations",
+      "description": "The _handleVaultDeposit function reads vault state (assets, receiver) from calldata, then calls depositVault, but does not ensure state synchronization between the read values and the values used in the deposit operation. If the vault state changes between read and deposit execution, the operation may use stale state values.",
+      "severity": "medium",
+      "original_id": "VR-003"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_005",
+      "title": "Return Value Unit Mismatch in Vault Operations",
+      "description": "The _handleVaultDeposit function returns shares value, but the caller (dispatch function) expects specific units. If the shares value has different units than expected, calculations will be incorrect. For example, if shares value is in wei but caller expects gwei, calculations will be off by 10^9 factor.",
+      "severity": "medium",
+      "original_id": "VR-004"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_006",
+      "title": "Assembly-based parameter extraction in `_handlePullToken` and similar functions uses incorrect offset calculations that lead to reading uninitialized memory",
+      "description": "The `_handlePullToken`, `_handlePullTokenFrom`, `_handlePushToken`, `_handlePushTokenFrom`, `_handleVaultDeposit`, `_handleVaultMint`, `_handleVaultRedeem`, `_handleVaultWithdraw`, `_handleVaultConvertToShares`, and `_handleVaultConvertToAssets` functions use inline assembly to extract parameters from `data` using fixed offsets (e.g., `data.offset`, `add(data.offset, 0x20)`, etc.). However, these functions are called with `data` that is passed as `bytes calldata`, and the assembly code does not account for the fact that `data` is already a pointer to the actual bytes data, not a struct pointer. This causes the assembly code to read from incorrect memory locations, potentially reading garbage data or uninitialized memory, leading to incorrect token addresses and amounts being used in the subsequent `pullToken`, `pullTokenFrom`, `pushToken`, `pushTokenFrom`, `depositVault`, `mintVault`, `redeemVault`, `withdrawVault`, `convertToVaultShares`, and `convertToVaultAssets` calls.",
+      "severity": "critical",
+      "original_id": "87abfddd206999f6"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_007",
+      "title": "Incorrect parameter extraction in `_handleVaultDeposit` and similar functions uses `pullInputParam` with wrong parameter index",
+      "description": "The `_handleVaultDeposit`, `_handleVaultMint`, `_handleVaultRedeem`, `_handleVaultWithdraw`, `_handleVaultConvertToShares`, and `_handleVaultConvertToAssets` functions call `Commands.pullInputParam(callStack, assets, inputMapping, 1)` to extract the `assets` parameter. However, the `pullInputParam` function expects the parameter index to be 0-based, but the code passes `1`, which means it reads from the wrong position in the `callStack`. This causes the wrong value to be used for `assets`, leading to incorrect vault operations.",
+      "severity": "high",
+      "original_id": "ad43dab226d38a3b"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_008",
+      "title": "Missing input validation in `_handleVaultDeposit` and similar functions does not validate that extracted values are within valid ranges",
+      "description": "The `_handleVaultDeposit`, `_handleVaultMint`, `_handleVaultRedeem`, `_handleVaultWithdraw`, `_handleVaultConvertToShares`, and `_handleVaultConvertToAssets` functions extract token addresses and amounts from `data` using assembly and then use these values directly in subsequent calls to `pullToken`, `pullTokenFrom`, `pushToken`, `pushTokenFrom`, `depositVault`, `mintVault`, `redeemVault`, `withdrawVault`, `convertToVaultShares`, and `convertToVaultAssets`. However, these functions do not validate that the extracted token addresses are non-zero (valid EOA or contract address) or that the extracted amounts are within valid ranges (e.g., not exceeding uint256 max). This allows an attacker to pass invalid token addresses (e.g., zero address) or invalid amounts (e.g., extremely large values that cause overflow in downstream operations), leading to failed transactions or unexpected behavior.",
+      "severity": "high",
+      "original_id": "70d3a2b9e383ee52"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_009",
+      "title": "Incorrect handling of `data` parameter in `_handleVaultDeposit` and similar functions does not account for the fact that `data` is `calldata`",
+      "description": "The `_handleVaultDeposit`, `_handleVaultMint`, `_handleVaultRedeem`, `_handleVaultVaultWithdraw`, `_handleVaultConvertToShares`, and `_handleVaultConvertToAssets` functions use inline assembly to extract parameters from `data` using `calldataload(data.offset)`, `calldataload(add(data.offset, 0x20))`, etc. However, these functions are called with `data` that is passed as `bytes calldata`, and the assembly code does not account for the fact that `data` is already a pointer to the actual bytes data, not a struct pointer. This causes the assembly code to read from incorrect memory locations, potentially reading garbage data or uninitialized memory, leading to incorrect token addresses and amounts being used in the subsequent `pullToken`, `pullTokenFrom`, `pushToken`, `pushTokenFrom`, `depositVault`, `mintVault`, `redeemVault`, `withdrawVault`, `convertToVaultShares`, and `convertToVaultAssets` calls.",
+      "severity": "high",
+      "original_id": "c579fabc3d329c72"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_010",
+      "title": "Incorrect handling of `data` parameter in `_handlePullToken` and similar functions does not account for the fact that `data` is `calldata`",
+      "description": "The `_handlePullToken`, `_handlePullTokenFrom`, `_handlePushToken`, `_handlePushTokenFrom`, `_handleVaultDeposit`, `_handleVaultMint`, `_handleVaultRedeem`, `_handleVaultVaultWithdraw`, `_handleVaultConvertToShares`, and `_handleVaultConvertToAssets` functions use inline assembly to extract parameters from `data` using `calldataload(data.offset)`, `calldataload(add(data.offset, 0x20))`, etc. However, these functions are called with `data` that is passed as `bytes calldata`, and the assembly code does not account for the fact that `data` is already a pointer to the actual bytes data, not a struct pointer. This causes the assembly code to read from incorrect memory locations, potentially reading garbage data or uninitialized memory, leading to incorrect token addresses and amounts being used in the subsequent `pullToken`, `pullTokenFrom`, `pushToken`, `pushTokenFrom`, `depositVault`, `mintVault`, `redeemVault`, `withdrawVault`, `convertToVaultShares`, and `convertToVaultAssets` calls.",
+      "severity": "high",
+      "original_id": "36587e4ac243d096"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_011",
+      "title": "Missing Access Control on Critical `_deploy` and `_undeploy` Functions",
+      "description": "The Vault contract exposes critical capital deployment and withdrawal functions `_deploy` and `_undeploy` as `internal virtual override` but lacks explicit access control modifiers. These functions directly interact with the strategy contract to deploy and undeploy assets. Without access control, any external actor can call these functions through the public `rebalance` function, bypassing intended whitelisting mechanisms and potentially draining the vault.",
+      "severity": "high",
+      "original_id": "b2b8d7111a7ea17d"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_012",
+      "title": "Missing Access Control on Vault.rebalance() Harvest Operations",
+      "description": "The Vault contract's `rebalance()` function allows the `VAULT_MANAGER_ROLE` to trigger harvest operations via `_harvestAndMintFees()` without proper access control on the underlying `_harvest()` function. The `_harvest()` function is declared as `internal virtual override` and directly calls `strategy.harvest()`, but there is no access control preventing the manager to call `rebalance()` with arbitrary commands that trigger harvests. Since `_harvest()` is internal and virtual, it can be overridden by malicious implementations that manipulate economic state before admin operations.",
+      "severity": "high",
+      "original_id": "b86562e247c83437"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_013",
+      "title": "Missing User Protection in Rebalance Function Allows Adversarial Execution",
+      "description": "The `rebalance` function in Vault.sol allows the vault manager to execute arbitrary harvest operations without providing users with mechanisms to specify acceptable execution bounds. This exposes users to unfavorable execution outcomes due to market manipulation or adversarial actions.",
+      "severity": "high",
+      "original_id": "a2f772c0c07e575d"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_014",
+      "title": "Missing Withdrawal Processing Logic in Vault Contract",
+      "description": "The Vault contract lacks complete withdrawal processing logic. While the contract defines _undeploy() function that calls strategy.undeploy(assets), there is no corresponding public function that users can call to withdraw their shares. The contract has _deploy() for deposits but no matching withdraw function that converts shares back to assets. This creates a critical gap where users cannot actually withdraw their funds even though the vault is designed to hold assets.",
+      "severity": "critical",
+      "original_id": "622a041aa9bfca19"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_015",
+      "title": "Rebalance Function Allows Unauthorized Harvesting",
+      "description": "The rebalance() function allows anyone with the VAULT_MANAGER_ROLE to execute harvest operations. The function iterates through commands and calls _harvestAndMintFees() for HARVEST_VAULT actions. However, there is no validation that the caller is authorized to perform harvest operations, and the function doesn't properly validate the command structure before execution. This could allow unauthorized harvesting of funds.",
+      "severity": "high",
+      "original_id": "de1e6e14064fed1d"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_016",
+      "title": "Missing Revert on Strategy Failure",
+      "description": "The _deploy() and _undeploy() functions call the strategy's deploy() and undeploy() functions but don't properly handle failures. When the strategy's deploy() or undeploy() functions fail, the Vault contract doesn't revert, which could lead to state inconsistencies. The functions should revert if the strategy operations fail, but the current implementation doesn't include proper error handling for failed strategy operations.",
+      "severity": "high",
+      "original_id": "90094a57f923599a"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_017",
+      "title": "Approval Race Condition in Deploy Function",
+      "description": "The _deploy() function uses safeApprove() to approve the strategy to spend assets, but this creates a race condition. The function approves the strategy to spend assets before calling strategy.deploy(assets). If an attacker can front-run this transaction, they could exploit the temporary approval state. The function should use safeTransferFrom() or approve(0) before setting new approval to prevent this race condition.",
+      "severity": "high",
+      "original_id": "9eae1a6a49f8dd1c"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_018",
+      "title": "Missing Reentrancy Protection in Harvest Operations",
+      "description": "The _harvest() function calls strategy.harvest() without proper reentrancy protection. The function is marked as nonReentrant but the reentrancy guard might not properly protect against reentrancy attacks during the harvest operation. If the strategy's harvest() function calls back into the vault contract, it could lead to reentrancy attacks. The function should use proper reentrancy guards and validate the strategy's behavior during the harvest operation.",
+      "severity": "high",
+      "original_id": "ce0f51408bd7eb1f"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_019",
+      "title": "Critical: State Synchronization Failure in _undeploy() and _payDebt() Functions",
+      "description": "The _undeploy() and _payDebt() functions have a critical state synchronization failure where the _pendingAmount state variable is updated after external calls that may fail, leading to permanent loss of funds. The _pendingAmount is set to _deployedAssets - undeployedAmount, but if the flash loan execution fails, the _pendingAmount remains incorrect, and the _deployedAssets is not properly decremented, allowing the same assets to be undeployed multiple times.",
+      "severity": "critical",
+      "original_id": "042e92b12e14e472"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_020",
+      "title": "Missing User Protection in _adjustDebt and _undeploy Functions",
+      "description": "The _adjustDebt and _undeploy functions reduce user positions or withdraw assets without allowing users to specify minimum acceptable outputs. This exposes users to unfavorable execution due to market manipulation or partial execution failures.",
+      "severity": "high",
+      "original_id": "2e728aec274eb34e"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_021",
+      "title": "Missing Reentrancy Protection on Strategy Operations",
+      "description": "The Vault contract implements critical operations (_deploy, _undeploy, _harvest) that interact with external strategy contracts without proper reentrancy guards. The _deploy function calls strategy.deploy() and _undeploy calls strategy.undeploy() without reentrancy protection, allowing attackers to exploit reentrancy patterns during deposit/withdrawal operations.",
+      "severity": "critical",
+      "original_id": "e2b82e70ef9144a0"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_022",
+      "title": "Missing Input Validation on Asset Amounts",
+      "description": "The Vault contract lacks proper input validation on asset amounts in deposit and withdrawal operations. The _deploy and _undeploy functions accept any uint256 value without validation, allowing potential integer overflow/underflow issues and invalid operations with zero or extremely large values.",
+      "severity": "high",
+      "original_id": "e461bfa2fcbae4f4"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_023",
+      "title": "Missing Approval Check Before Strategy Calls",
+      "description": "The Vault contract calls strategy.deploy() and strategy.undeploy() without verifying that the strategy contract is properly approved to spend the vault's assets. The _deploy function calls IERC20Upgradeable(_strategyAsset).safeApprove(address(_strategy), assets) but does not verify the approval was successful or check if the strategy has sufficient allowance before calling strategy.deploy().",
+      "severity": "high",
+      "original_id": "02803c3330a47b3f"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_024",
+      "title": "Missing Reentrancy Protection on Harvest Operations",
+      "description": "The Vault contract implements harvest operations (_harvest) that interact with external strategy contracts without proper reentrancy guards. The _harvest function calls strategy.harvest() without reentrancy protection, allowing attackers to exploit reentrancy patterns during harvest operations.",
+      "severity": "high",
+      "original_id": "72601aa0e87cee7a"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_025",
+      "title": "Missing Caller Verification in Automatic ETH Handling",
+      "description": "The VaultRouter contract has no explicit receive/fallback handler for ETH, but the dispatch() function processes commands including WRAP_ETH and UNWRAP_ETH. When ETH is sent directly to the contract, it will be processed by the default Solidity behavior (revert), but if any command execution path processes ETH, the caller verification is insufficient to prevent unauthorized operations.",
+      "severity": "high",
+      "original_id": "b2a1268a2f28bc24"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_026",
+      "title": "Flash Loan Handler Processes Unauthorized Funds",
+      "description": "The onFlashLoan handler processes flash loan repayments without verifying the flash loan initiator is the contract itself before executing operations. This allows an attacker to trigger the handler with a fake initiator address, causing the contract to execute operations with attacker-controlled data.",
+      "severity": "critical",
+      "original_id": "aab7a0110408da1b"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_027",
+      "title": "Missing Access Control on Flash Loan Execution Functions",
+      "description": "The contract contains critical functions that execute flash loans and update economic state variables without proper access control. Specifically, the `_supplyBorrow`, `_repayAndWithdraw`, `_payDebt`, and `_adjustDebt` functions can be called directly by any external account, allowing attackers to manipulate the contract's debt position and deployed assets.",
+      "severity": "critical",
+      "original_id": "ca6e8212dbf7e0a0"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_028",
+      "title": "Incorrect Unit Conversion in _toCollateral and _toDebt Functions",
+      "description": "The _toCollateral and _toDebt functions use mulDiv with incorrect parameter ordering. The oracle precision and price parameters are swapped in the mulDiv call, causing incorrect conversion between debt and collateral amounts. This leads to significant financial losses when converting between debt and collateral amounts.",
+      "severity": "critical",
+      "original_id": "5fd1959b6014c479"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_029",
+      "title": "Data Access Boundary Violation in harvest Function",
+      "description": "The harvest function accesses the deployedAssets state variable without proper synchronization with the actual AAVE position. The function reads deployedAssets but doesn't verify it matches the actual AAVE position, allowing the contract to report incorrect positions.",
+      "severity": "high",
+      "original_id": "653956b3ebb52519"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_030",
+      "title": "Critical: Missing Access Control on `_harvestAndMintFees` Allows Unauthorized Fee Minting",
+      "description": "The internal function `_harvestAndMintFees` mints performance fees without any access control, allowing any caller to trigger fee minting and potentially drain protocol revenue.",
+      "severity": "critical",
+      "original_id": "6813755fce706412"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_031",
+      "title": "Flash Loan Authorization Bypass via Unbound Authorization Hash",
+      "description": "The contract uses a flash loan authorization hash (_flashLoanArgsHash) to prevent reentrancy attacks, but this hash is not bound to the actual flash loan parameters (initiator, token, amount, callData). An attacker can replay a legitimate flash loan authorization with different parameters, consuming the nonce and causing the legitimate operation to fail.",
+      "severity": "critical",
+      "original_id": "8bbf9bc51f8396a9"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_033",
+      "title": "Incomplete State Restoration in _undeploy on Flash Loan Failure",
+      "description": "The _undeploy function initiates a flash loan to adjust the position, but if the flash loan fails after the state changes (e.g., after the flash loan approval), the state is not fully restored. Specifically, the _pendingAmount is set before the flash loan execution, and if the flash loan fails, the _pendingAmount is not reset, leaving the accounting inconsistent.",
+      "severity": "high",
+      "original_id": "4457e97035c1afd1"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_034",
+      "title": "Resource-Controlled Execution Failure in _adjustDebt",
+      "description": "The _adjustDebt function initiates a flash loan to adjust the debt position, but if the flash loan fails after the state changes (e.g., after the flash loan approval), the state is not fully restored. Specifically, the _flashLoanArgsHash is set before the flash loan execution, and if the flash loan fails, the _flashLoanArgsHash is not reset, leaving the authorization hash in an inconsistent state.",
+      "severity": "high",
+      "original_id": "4d5ba01384b9c732"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_035",
+      "title": "Authorization Context Binding Gap in deploy Function",
+      "description": "The deploy function uses a flash loan authorization hash (_flashLoanArgsHash) to prevent reentrancy attacks, but this hash is not bound to the actual flash loan parameters (initiator, token, amount, callData). An attacker can replay a legitimate flash loan authorization with different parameters, consuming the nonce and causing the legitimate operation to fail.",
+      "severity": "high",
+      "original_id": "e05b273f5476148d"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_036",
+      "title": "Mathematical Domain Validation Failure in getPosition Function",
+      "description": "The getPosition function calculates the loan-to-value (LTV) ratio, but does not validate that the totalCollateralInAsset is greater than zero before performing the division operation. If totalCollateralInAsset is zero, the division operation will result in a division by zero error, causing the transaction to revert.",
+      "severity": "high",
+      "original_id": "9c9accb57b4a280d"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_037",
+      "title": "Authorization Context Binding Gap in harvest Function",
+      "description": "The harvest function uses a flash loan authorization hash (_flashLoanArgsHash) to prevent reentrancy attacks, but this hash is not bound to the actual flash loan parameters (initiator, token, amount, callData). An attacker can replay a legitimate flash loan authorization with different parameters, consuming the nonce and causing the legitimate operation to fail.",
+      "severity": "high",
+      "original_id": "6d30152614f35e6f"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_039",
+      "title": "Missing Caller Verification in ETH Receive Handler Allows Unauthorized ETH Processing",
+      "description": "The VaultBase contract has a receive() function that accepts ETH transfers but lacks proper caller verification before processing. This allows attackers can send ETH directly to the contract, potentially bypassing deposit logic and causing accounting issues.",
+      "severity": "high",
+      "original_id": "5d2c8b6531d5d3e3"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_040",
+      "title": "Reentrancy in deposit operations via _depositInternal",
+      "description": "The deposit operations (deposit, depositNative, mint) call _depositInternal which performs token transfers and state updates without proper reentrancy protection around the critical section. The nonReentrant modifier is applied to the public functions but the internal _depositInternal function itself is not protected, and more critically, the function performs external calls (IERC20.safeTransferFrom) before the reentrancy guard is fully effective in preventing reentrant calls back into the same function.",
+      "severity": "critical",
+      "original_id": "29347bcd40458638"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_041",
+      "title": "Precision loss in share-to-asset conversion in convertToAssets",
+      "description": "The convertToAssets function uses Rebase.toElastic which performs division operations that can result in precision loss when the totalSupply is not a multiple of the assets being converted. This is particularly problematic for small values where the division truncation represents a significant percentage of the value being converted.",
+      "severity": "high",
+      "original_id": "cad2eab98e951683"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_042",
+      "title": "Missing validation of receiver address in deposit operations",
+      "description": "The deposit operations (deposit, depositNative, mint) do not validate that the receiver address is not the zero address before performing the deposit. While _depositInternal does check for receiver == address(0), this check is performed after the token transfer has been initiated, which could lead to permanent loss of funds if the receiver is the zero address.",
+      "severity": "high",
+      "original_id": "7d858bfe887797bc"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_043",
+      "title": "State inconsistency in deposit operations",
+      "description": "The deposit operations (deposit, depositNative, mint) perform token transfers before updating the state variables, which could lead to state inconsistency if the transaction fails after the token transfer but before the state update. This is particularly problematic for deposit operations where the token transfer is performed before the state update.",
+      "severity": "high",
+      "original_id": "f5bba09da4314942"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_044",
+      "title": "Missing authorization check in deposit operations",
+      "description": "The deposit operations (deposit, depositNative, mint) do not verify that the caller has sufficient allowance to transfer the tokens from the sender's balance before initiating the token transfer. This could allow an attacker to deposit tokens on behalf of other users if they can predict the sender's address and the token amount.",
+      "severity": "high",
+      "original_id": "2ed3406dfd67a7b5"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_045",
+      "title": "Reentrancy in redeem operations via _redeemInternal",
+      "description": "The redeem operations (redeem, redeemNative, withdraw, withdrawNative) call _redeemInternal which performs token transfers and state updates without proper reentrancy protection around the critical section. The nonReentrant modifier is applied to the public functions but the internal _redeemInternal function itself is not protected, and more critically, the function performs external calls (IERC20.safeTransfer, payable(receiver).sendValue) before the reentrancy guard is fully effective in preventing reentrant calls back into the same function.",
+      "severity": "critical",
+      "original_id": "d8afc752eaeea805"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_046",
+      "title": "Missing validation of receiver address in redeem operations",
+      "description": "The redeem operations (redeem, redeemNative, withdraw, withdrawNative) do not validate that the receiver address is not the zero address before performing the redemption. While _redeemInternal does check for receiver == address(0), this check is performed after the token transfer has been initiated, which could lead to permanent loss of funds if the receiver is the zero address.",
+      "severity": "high",
+      "original_id": "65f30a474614b888"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_047",
+      "title": "State inconsistency in redeem operations",
+      "description": "The redeem operations (redeem, redeemNative, withdraw, withdrawNative) perform token transfers before updating the state variables, which could lead to state inconsistency if the transaction fails after the token transfer but before the state update. This is particularly problematic for redeem operations where the token transfer is performed before the state update.",
+      "severity": "high",
+      "original_id": "78ce38803069430f"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_048",
+      "title": "Missing User Protection in Service Registration",
+      "description": "The registerService function allows the owner to register any address as a service without requiring users to specify minimum acceptable outputs or protection parameters. This exposes users to potential manipulation or unfavorable outcomes if the registered service behaves adversarially.",
+      "severity": "high",
+      "original_id": "379da2b7bee26f45"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_049",
+      "title": "Validation Timing Issue in registerService",
+      "description": "The registerService function checks if the service is already set AFTER assigning the new address. This allows a race condition where two calls could both see the service as unset and both succeed.",
+      "severity": "high",
+      "original_id": "56fb0ceb747df086"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_050",
+      "title": "Missing User Protection in Service Unregistration",
+      "description": "The unregisterService function allows the owner to unregister any service without requiring users to specify minimum acceptable outputs or protection parameters. This exposes users to potential manipulation or unfavorable outcomes if the unregistered service was critical.",
+      "severity": "high",
+      "original_id": "2652ff1587ff10ab"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_051",
+      "title": "Validation Timing Issue in unregisterService",
+      "description": "The unregisterService function checks if the service exists AFTER setting the address to address(0). This allows a race condition where two calls could both see the service as set and both succeed.",
+      "severity": "high",
+      "original_id": "026ed368a3685762"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_052",
+      "title": "Missing User Protection in getService",
+      "description": "The getService function retrieves service addresses without requiring users to specify minimum acceptable outputs or protection parameters. This exposes users to potential manipulation or unfavorable outcomes if the retrieved service behaves adversarially.",
+      "severity": "medium",
+      "original_id": "a4212297d60c1f5a"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_053",
+      "title": "Missing User Protection in getServiceFromHash",
+      "description": "The getServiceFromHash function retrieves service addresses without requiring users to specify minimum acceptable outputs or protection parameters. This exposes users to potential manipulation or unfavorable outcomes if the retrieved service behaves adversarially.",
+      "severity": "medium",
+      "original_id": "622930a49df0814a"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_054",
+      "title": "Missing User Protection in getServiceNameHash",
+      "description": "The getServiceNameHash function computes name hashes without requiring users to specify minimum acceptable outputs or protection parameters. This exposes users to potential manipulation or unfavorable outcomes if the computed hash is used adversarially.",
+      "severity": "low",
+      "original_id": "2f52020f29cfddda"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_055",
+      "title": "Missing Access Control on Service Registration Allows Service Hijacking",
+      "description": "The `registerService` function lacks validation to prevent re-registration of existing services. An attacker who knows a valid service name hash can register a malicious address, effectively hijacking the service. Since the function only checks if the service is already set to a non-zero address, if an attacker can predict or learn a service name hash (e.g., by observing events or front-running), they can register a malicious address before the legitimate service deployment.",
+      "severity": "high",
+      "original_id": "c2c8b4e9158f6364"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_056",
+      "title": "Unrestricted Service Registration Enables Denial of Service",
+      "description": "The `registerService` function lacks access control on who can register services. An attacker can register malicious addresses for any service name hash, effectively DoSing the legitimate service by registering a malicious address. Since the function only checks if the service is already set to a non-zero address, if an attacker can predict or learn a service name hash, they can register a malicious address before the legitimate service deployment.",
+      "severity": "high",
+      "original_id": "c2cbcba319b535d3"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_057",
+      "title": "Missing User Protection in Withdrawal Functions",
+      "description": "The redeem() and redeemNative() functions allow users to withdraw assets without providing mechanisms to specify minimum acceptable outputs, exposing users to unfavorable execution.",
+      "severity": "high",
+      "original_id": "7e7a6750e4ee6941"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_058",
+      "title": "Validation Timing Issue in deposit() and depositNative()",
+      "description": "The deposit() and depositNative() functions execute state changes before validation, allowing invalid operations to complete.",
+      "severity": "high",
+      "original_id": "b111b39c761282fb"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_059",
+      "title": "Execution Boundaries Inconsistency in _redeemInternal()",
+      "description": "The _redeemInternal() function may execute differently than requested without maintaining consistency between expected and actual execution, with validation, accounting, and state updates not aligning with what actually occurred.",
+      "severity": "high",
+      "original_id": "f96c72438ed2df0a"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_060",
+      "title": "Access Control Issue in depositNative()",
+      "description": "The depositNative() function lacks access control indicators for critical functions, with no modifiers or documentation indicating restrictions.",
+      "severity": "high",
+      "original_id": "c529aa4ba498e6eb"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_061",
+      "title": "Recipient Selection Logic Issue in _redeemInternal()",
+      "description": "The _redeemInternal() function may send value to recipients based on conditional logic without verifying all code paths correctly identify the intended recipient.",
+      "severity": "high",
+      "original_id": "2dac7ab5567a2a3e"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_062",
+      "title": "State Synchronization Issue in _depositInternal()",
+      "description": "The _depositInternal() function may call other internal functions without ensuring state modifications complete before dependent functions execute.",
+      "severity": "high",
+      "original_id": "e45895593ffb5129"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_063",
+      "title": "Missing Access Control on registerService Allows Unauthorized Service Registration",
+      "description": "The registerService function lacks access control verification before modifying the _services mapping. While the function has the onlyOwner modifier, the check for existing service is performed AFTER the function signature, meaning a re-entrant call could exploit this timing window. Additionally, the function does not validate that the serviceAddress parameter is not the zero address or the contract address itself, allowing registration of invalid addresses.",
+      "severity": "high",
+      "original_id": "f0335a71718bd27f"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_064",
+      "title": "Missing Access Control on unregisterService Allows Unauthorized Service Unregistration",
+      "description": "The unregisterService function lacks access control verification before modifying the _services mapping. While the function has the onlyOwner modifier, the check for existing service is performed AFTER the function signature, meaning a re-entrant call could exploit this timing window. Additionally, the function does not validate that the serviceNameHash parameter is not the zero hash, allowing unregistration of invalid entries.",
+      "severity": "high",
+      "original_id": "64a7e87c6f5a1c6f"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_065",
+      "title": "Missing Input Validation on getService getServiceFromHash",
+      "description": "The getService and getServiceFromHash functions lack input validation for the serviceName/serviceHash parameters. These functions do not verify that the requested service is registered before returning, allowing queries for non-existent services. This can lead to incorrect assumptions in calling contracts that the returned address is valid.",
+      "severity": "medium",
+      "original_id": "8138ad25d7bbe744"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_066",
+      "title": "Missing Input Validation on getServiceNameHash",
+      "description": "The getServiceNameHash function lacks input validation for the name parameter. While the function is pure and simply returns the keccak256 hash of the input, it does not validate that the input is within expected bounds or format. This could lead to unexpected behavior if the input is extremely large or malformed, though the impact is limited since the function is pure.",
+      "severity": "low",
+      "original_id": "ec2940f28c9adf18"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_067",
+      "title": "Missing Reentrancy Protection in Service Registration",
+      "description": "The VaultRegistry contract lacks reentrancy protection on critical state-modifying functions. While the registerService function checks if a service is already set, it does not prevent a malicious service contract from triggering reentrant calls during the registration process. This could allow an attacker to manipulate the service mapping through reentrant calls before the current transaction completes.",
+      "severity": "high",
+      "original_id": "c8e7cc648d39bcce"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_068",
+      "title": "Service Name Hash Collision Vulnerability",
+      "description": "The VaultRegistry contract uses keccak256(name) for service name hashing without any normalization or encoding standardization. This creates a critical vulnerability where different string representations of the same logical service name can hash to different values, or worse, collide with existing services.",
+      "severity": "critical",
+      "original_id": "9ca520cc11662f0c"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_069",
+      "title": "Missing Access Control on `rebalance()` Allows Fee Manipulation via Timing Attacks",
+      "description": "The `rebalance()` function in `MultiStrategyVault.sol` lacks access control on critical economic state updates. Specifically, the function allows any caller with the `VAULT_MANAGER_ROLE` to trigger `_harvestAndMintFees()` without proper synchronization with vault accounting. This enables fee manipulation by timing attacks where users can avoid fees by withdrawing before rebalancing operations.",
+      "severity": "high",
+      "original_id": "cf5a4ddc1b506013"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_070",
+      "title": "Missing Caller Verification in Rebalance Function Allows Unauthorized Strategy Rebalancing",
+      "description": "The `rebalance` function in `MultiStrategyVault.sol` lacks verification that the caller is authorized to execute rebalancing commands. While the function checks `onlyRole(VAULT_MANAGER_ROLE)`, it does not verify that the caller is the intended executor of the rebalancing operation. This allows any entity with the `VAULT_MANAGER_ROLE` to execute arbitrary rebalancing commands, including `REBALANCE_STRATEGIES` and `CHANGE_WEIGHTS`, potentially leading to unauthorized rebalancing of strategy allocations.",
+      "severity": "high",
+      "original_id": "vuln1"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_071",
+      "title": "Missing Verification in Rebalance Function Allows Unauthorized Strategy Rebalancing",
+      "description": "The `rebalance` function in `MultiStrategyVault.sol` lacks verification that the caller is authorized to execute rebalancing commands. While the function checks `onlyRole(VAULT_MANAGER_ROLE)`, it does not verify that the caller is the intended executor of the rebalancing operation. This allows any entity with the `VAULT_MANAGER_ROLE` to execute arbitrary rebalancing commands, including `REBALANCE_STRATEGIES` and `CHANGE_WEIGHTS`, potentially leading to unauthorized rebalancing of strategy allocations.",
+      "severity": "high",
+      "original_id": "vul2"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_072",
+      "title": "Missing Verification in Rebalance Function Allows Unauthorized Strategy Rebalancing",
+      "description": "The `rebalance` function in `MultiStrategyVault.sol` lacks verification that the caller is authorized to execute rebalancing commands. While the function checks `onlyRole(VAULT_MANAGER_ROLE)`, it does not verify that the caller is the intended executor of the rebalancing operation. This allows any entity with the `VAULT_MANAGER_ROLE` to execute arbitrary rebalancing commands, including `REBALANCE_STRATEGIES` and `CHANGE_WEIGHTS`, potentially leading to unauthorized rebalancing of strategy allocations.",
+      "severity": "high",
+      "original_id": "vul3"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_073",
+      "title": "Missing User Protection in Rebalance Function",
+      "description": "The rebalance function allows the vault manager to execute multiple commands that modify user positions and asset allocations without providing users with mechanisms to specify minimum acceptable outputs or execution bounds. This exposes users to unfavorable execution outcomes when execution differs from their expectations.",
+      "severity": "high",
+      "original_id": "f8f42be18868c022"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_074",
+      "title": "Critical: Repay Function Uses Stale Market State Leading to Under-Repayment and Permanent Debt Accumulation",
+      "description": "The _repay function reads Morpho market state (totalBorrowAssets and totalBorrowShares) BEFORE computing the maximum repayable amount, but then uses this stale state to bound the repayment amount. If the market state changes between the read and the actual repayment execution (e.g., due to external liquidations, interest accrual, or other operations), the function may allow repayment of less than the full available debt, causing permanent debt accumulation and loss of collateral value.",
+      "severity": "critical",
+      "original_id": "3eabe023a9f0e781"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_075",
+      "title": "Missing Authorization Context Binding in rebalance Function",
+      "description": "The rebalance function accepts commands from any caller with the VAULT_MANAGER_ROLE, but does not bind the execution context (e.g., caller, nonce, or parameters) to the authorization. This allows an attacker who observes or intercepts a legitimate rebalance command to front-run the transaction and execute the same command with hostile parameters, consuming the authorization nonce and leaving the intended operation incomplete.",
+      "severity": "high",
+      "original_id": "AUTH_CTX_001"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_076",
+      "title": "Missing Access Control on `_repay` Function Enables Fee Avoidance via Timing Manipulation",
+      "description": "The `_repay` function in StrategyLeverageMorphoBlue.sol lacks access control restrictions, allowing any user to trigger repayments at arbitrary times. This enables front-running of admin operations (e.g., fee accrual, rebalancing) by manipulating the timing of repayments to avoid fees or gain unfair advantages. Specifically, users can repay debt before admin-triggered fee calculations, reducing the debt balance used in fee computations and avoiding fees that would otherwise apply.",
+      "severity": "high",
+      "original_id": "2ed73c0b52b1f17f"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_077",
+      "title": "Missing User Protection in Repay Function",
+      "description": "The _repay function in StrategyLeverageMorphoBlue does not allow users to specify minimum acceptable output amounts, exposing them to unfavorable execution outcomes.",
+      "severity": "high",
+      "original_id": "152aa9da3adbda60"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_078",
+      "title": "Validation Timing Issue in Repay Function",
+      "description": "The _repay function performs state changes (reading Morpho balances) before validation, allowing invalid operations to complete.",
+      "severity": "high",
+      "original_id": "b4908bb7b4fc095e"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_079",
+      "title": "Execution Boundaries and Validation Consistency Issue",
+      "description": "The _repay function adjusts execution based on constraints (borrowed shares) but does not ensure validation boundaries are enforced at appropriate points relative to state changes.",
+      "severity": "high",
+      "original_id": "7a8c68abdb6a6aa8"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_080",
+      "title": "State Synchronization Issue in Repay Function",
+      "description": "The _repay function calls Morpho operations that depend on shared state (_marketParams) but does not ensure state modifications complete before dependent operations execute.",
+      "severity": "high",
+      "original_id": "b23dcda59ab4c191"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_081",
+      "title": "Return Value Unit Consistency Issue",
+      "description": "The _repay function implements an override of a base function but does not ensure return values use expected units (returns void but should return actual repaid amount).",
+      "severity": "medium",
+      "original_id": "84a1bd6eeaf2ca47"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_082",
+      "title": "Missing Caller Verification in Automatic Return Path",
+      "description": "The contract has no protection against funds being sent to the strategy contract during withdrawal processing. When funds are returned from Morpho Blue (e.g., from withdrawals, repayments, or other operations), the `_receive()` function is automatically triggered. However, the `_receive()` function does not verify the caller identity or transaction origin before executing operations. This allows funds meant for withdrawal to be processed through unintended paths, potentially mixing with new deposits.",
+      "severity": "high",
+      "original_id": "2faf5fbe42f4f1f7"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_083",
+      "title": "Missing Market ID Validation in initialize()",
+      "description": "The initialize() function validates that the market exists by checking if lltv == 0, but it does not validate that the returned market parameters match the requested parameters. This allows an attacker could initialize the strategy with a malicious market that has the same LTV but different tokens, leading to loss of funds.",
+      "severity": "critical",
+      "original_id": "02799ce7f78ca74e"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_084",
+      "title": "Critical: Division by Zero in _allocateAssets and _deallocateAssets",
+      "description": "The _allocateAssets and _deallocateAssets functions perform division operations where the denominator (_totalWeight and totalAssets respectively) can be zero, causing division by zero and transaction revert. This can be triggered by calling _allocateAssets(0) when _totalWeight is zero, or _deallocateAssets with amount > 0 when totalAssets is zero. The division operations are (amount * _weights[i]) / _totalWeight and (amount * currentAssets[i]) / totalAssets. When _totalWeight is zero (e.g., after initialization with zero weights or after removing all strategies), or totalAssets is zero (e.g., before any assets deployed), these divisions will revert. This can be exploited by calling _allocateAssets(0) or _deallocateAssets(amount) when the denominator is zero, causing the transaction to revert and preventing legitimate operations.",
+      "severity": "critical",
+      "original_id": "c5f22a9b3d3cbedb"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_085",
+      "title": "Critical: Missing Access Control on _allocateAssets and _deallocateAssets",
+      "description": "The _allocateAssets and _deallocateAssets functions are marked as internal but lack access control, allowing any internal caller to invoke them without authorization. This is especially dangerous because these functions perform critical economic operations: _allocateAssets deploys assets to strategies, and _deallocateAssets undeploys assets from strategies. Without access control, any internal caller (including malicious code that can call internal functions) can deploy or undeploy assets, causing unauthorized asset movement. The functions should be protected with access control modifiers like onlyRole(VAULT_MANAGER_ROLE) or onlyVaultManager. The vulnerability is in the lack of access control on internal functions that perform critical economic operations.",
+      "severity": "critical",
+      "original_id": "dc87ad860159dbda"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_086",
+      "title": "High: Division by Zero in _rebalanceStrategies",
+      "description": "The _rebalanceStrategies function performs division operations where the denominator can be zero, causing division by zero and transaction revert. Specifically, the division operations are uint256 amount = uint256(deltas[i]) > balanceOf(address(this)) ? balanceOf(address(this)) : uint256(deltas[i]); and IStrategy(_strategies[indexes[i]]).undeploy(uint256(-deltas[i]));. When balanceOf(address(this)) is zero (e.g., before any assets deployed to the strategy), or when IStrategy(_strategies[indexes[i]]).undeploy(uint256(-deltas[i])) is called with zero, these operations will revert. This can be exploited by calling _rebalanceStrategies with deltas that cause division by zero, causing the transaction to revert and preventing legitimate operations.",
+      "severity": "high",
+      "original_id": "b901d901b17e6fcd"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_087",
+      "title": "High: Missing Access Control on _rebalanceStrategies",
+      "description": "The _rebalanceStrategies function is marked as internal but lacks access control, allowing any internal caller to invoke it without authorization. This is especially dangerous because this function performs critical economic operations: it deploys and undeploys assets to/from strategies. Without access control, any internal caller (including malicious code that can call internal functions) can deploy or undeploy assets, causing unauthorized asset movement. The function should be protected with access control modifiers like onlyRole(VAULT_MANAGER_ROLE) or onlyVaultManager. The vulnerability is in the lack of access control on internal functions that perform critical economic operations.",
+      "severity": "high",
+      "original_id": "f8d921cb09a945ca"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_088",
+      "title": "High: Division by Zero in _totalAssets",
+      "description": "The _totalAssets function performs division operations where the denominator can be zero, causing division by zero and transaction revert. Specifically, the division operations are IStrategy(_strategies[i]).totalAssets(); and IStrategy(_strategies[i]).totalAssets();. When IStrategy(_strategies[i]).totalAssets() is zero (e.g., before any assets deployed to the strategy), or when IStrategy(_strategies[i]).totalAssets() is called with zero, these operations will revert. This can be exploited by calling _totalAssets with deltas that cause division by zero, causing the transaction to revert and preventing legitimate operations.",
+      "severity": "high",
+      "original_id": "def4c2c297c19a88"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_089",
+      "title": "High: Missing Access Control on _totalAssets",
+      "description": "The _totalAssets function is marked as internal but lacks access control, allowing any internal caller to invoke it without authorization. This is especially dangerous because this function performs critical economic operations: it calculates total assets managed by all strategies. Without access control, any internal caller (including malicious code that can call internal functions) can calculate total assets, causing unauthorized asset movement. The function should be protected with access control modifiers like onlyRole(VAULT_MANAGER_ROLE) or onlyVaultManager. The vulnerability is in the lack of access control on internal functions that perform critical economic operations.",
+      "severity": "high",
+      "original_id": "fefac8fa7ff03cfe"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_090",
+      "title": "High: Division by Zero in _harvestStrategies",
+      "description": "The _harvestStrategies function performs division operations where the denominator can be zero, causing division by zero and transaction revert. Specifically, the division operations are IStrategy(_strategies[i]).harvest(); and IStrategy(_strategies[i]).harvest();. When IStrategy(_strategies[i]).harvest() is zero (e.g., before any assets deployed to the strategy), or when IStrategy(_strategies[i]).harvest() is called with zero, these operations will revert. This can be exploited by calling _harvestStrategies with deltas that cause division by zero, causing the transaction to revert and preventing legitimate operations.",
+      "severity": "high",
+      "original_id": "185547d1a0710b73"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_091",
+      "title": "High: Missing Access Control on _harvestStrategies",
+      "description": "The _harvestStrategies function is marked as internal but lacks access control, allowing any internal caller to invoke it without authorization. This is especially dangerous because this function performs critical economic operations: it harvests assets from strategies. Without access control, any internal caller (including malicious code that can call internal functions) can harvest assets, causing unauthorized asset movement. The function should be protected with access control modifiers like onlyRole(VAULT_MANAGER_ROLE) or onlyVaultManager. The vulnerability is in the lack of access control on internal functions that perform critical economic operations.",
+      "severity": "high",
+      "original_id": "3d5e228508d72f5c"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_092",
+      "title": "Missing User Protection in _rebalanceStrategies Allows Adversarial Rebalancing",
+      "description": "The _rebalanceStrategies function performs multiple operations including deployments and undeployments without allowing users to specify minimum acceptable outputs. This enables attackers to manipulate the rebalancing process to their advantage.",
+      "severity": "high",
+      "original_id": "14021194a517405d"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_093",
+      "title": "Missing Access Control on `setWeights` Allows Weight Manipulation",
+      "description": "The `setWeights` function updates `_weights` and `_totalWeight` without verifying that the new weights sum to a valid total (other than checking it's non-zero and \u226410000). However, the more critical issue is that `setWeights` lacks access control on the `_weights` array update, allowing any caller with knowledge of the function signature to manipulate weights before admin operations, enabling fee avoidance or unfair advantage in allocation calculations.",
+      "severity": "high",
+      "original_id": "0e8170224f0b6c1a"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_094",
+      "title": "Inconsistent Weight Representation in `_allocateAssets` and `_deallocateAssets`",
+      "description": "The `_allocateAssets` function calculates `fractAmount = (amount * _weights[i]) / _totalWeight`, where `_weights[i]` is `uint16` and `_totalWeight` is `uint16`. However, `amount` is `uint256`. The multiplication `amount * _weights[i]` can overflow `uint256` if `amount` is large (e.g., 2^248), causing incorrect allocation amounts. Similarly, `_deallocateAssets` uses `currentAssets[i]` (from `totalAssets()` which returns `uint256`) but calculates `(amount * currentAssets[i]) / totalAssets`, where `amount` is `uint256` and `currentAssets[i]` is `uint256`. The multiplication `amount * currentAssets[i]` can overflow `uint256` if `amount` is large, causing incorrect deallocation amounts. This inconsistency in representation (using `uint16` weights with `uint256` amounts) can lead to incorrect allocation/deallocation amounts.",
+      "severity": "high",
+      "original_id": "ffe47e51573f8335"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_095",
+      "title": "Inconsistent Weight Representation in `_rebalanceStrategies` and `_allocateAssets`",
+      "description": "The `_rebalanceStrategies` function uses `deltas` (int256) and `indexes` (uint256) to adjust allocations, but `_allocateAssets` uses `_weights` (uint16) and `_totalWeight` (uint16). The inconsistency in weight representation (using `uint16` weights with `uint256` amounts) can lead to incorrect allocation/deallocation amounts.",
+      "severity": "high",
+      "original_id": "06a2a6e0674b6ebe"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_096",
+      "title": "Inconsistent Weight Representation in `setWeights` and `_allocateAssets`",
+      "description": "The `setWeights` function uses `iweights` (uint16) and `_weights` (uint16), but `_allocateAssets` uses `_weights` (uint16) and `_totalWeight` (uint16). The inconsistency in weight representation (using `uint16` weights with `uint256` amounts) can lead to incorrect allocation/deallocation amounts.",
+      "severity": "high",
+      "original_id": "cfd7c368bddd4ec0"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_097",
+      "title": "Inconsistent Weight Representation in `setWeights` and `_deallocateAssets`",
+      "description": "The `setWeights` function uses `iweights` (uint16) and `_weights` (uint16), but `_deallocateAssets` uses `currentAssets` (uint256) and `totalAssets` (uint256). The inconsistency in weight representation (using `uint16` weights with `uint256` amounts) can lead to incorrect allocation/deallocation amounts.",
+      "severity": "high",
+      "original_id": "67e4f4d67626870f"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_098",
+      "title": "Missing Access Control on Critical Rebalance Function",
+      "description": "The rebalance function lacks access control on the CHANGE_WEIGHTS command path, allowing unauthorized weight manipulation that can lead to protocol insolvency.",
+      "severity": "critical",
+      "original_id": "e447ea2e53d9ba78"
+    },
+    {
+      "id": "code4rena_bakerfi-invitational_2025_02_tool_099",
+      "title": "Missing Access Control on Governor Functions",
+      "description": "The BakerFiGovernor contract inherits from multiple OpenZeppelin Governor contracts but does not override or restrict critical functions like _execute, _cancel, propose, and state. While the base Governor contract has access control, the contract's constructor and override structure may not properly enforce these restrictions in all cases, particularly for functions that can be called by external entities.",
+      "severity": "high",
+      "original_id": "0708fd30f0256fbe"
+    }
+  ],
+  "input_tokens": 111087,
+  "output_tokens": 33948,
+  "cached_tokens": 13956
+}

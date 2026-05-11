@@ -1,0 +1,101 @@
+{
+  "project": "code4rena_pump-science_2025_02",
+  "agent": "agent794",
+  "status": "success",
+  "timestamp": "2026-04-09T11:42:59.902921",
+  "elapsed_seconds": 33.6,
+  "total_expected": 2,
+  "total_found": 9,
+  "true_positives": 0,
+  "false_negatives": 2,
+  "false_positives": 9,
+  "detection_rate": 0.0,
+  "precision": 0.0,
+  "f1_score": 0.0,
+  "matched_findings": [],
+  "missed_findings": [
+    {
+      "id": "code4rena_pump-science_2025_02_expected_000",
+      "title": "Thelock_pooloperation can be DoS",
+      "description": "Submitted by\nshaflow2\n, also found by\nSpearmint\n\nhttps://github.com/code-423n4/2025-01-pump-science/blob/768ef58478724bf6b464c9f0952e3e5a3b2a2613/programs/pump-science/src/instructions/migration/lock_pool.rs#L149\n\nThe\nlock_pool\noperation requires the creation of a\nlockEscrow\naccount. However, a malicious actor could preemptively create the\nlockEscrow\naccount, causing the\ncreate_lock_escrow\ntransaction to fail and resulting in a Denial of Service (DoS) for the\nlock_pool\noperation.\n\nDuring the\nlock_pool\nprocess, the\ncreate_lock_escrow\nfunction is called to create the\nlock_escrow\naccount.\n\n// Create Lock Escrow\nlet\nescrow_accounts =\nvec!\n[\nAccountMeta::\nnew\n(ctx.accounts.pool.\nkey\n(),\nfalse\n),\nAccountMeta::\nnew\n(ctx.accounts.lock_escrow.\nkey\n(),\nfalse\n),\nAccountMeta::\nnew_readonly\n(ctx.accounts.fee_receiver.\nkey\n(),\nfalse\n),\nAccountMeta::\nnew_readonly\n(ctx.accounts.lp_mint.\nkey\n(),\nfalse\n),\nAccountMeta::\nnew\n(ctx.accounts.bonding_curve_sol_escrow.\nkey\n(),\ntrue\n),\n// Bonding Curve Sol Escrow is the payer/signer\nAccountMeta::\nnew_readonly\n(ctx.accounts.system_program.\nkey\n(),\nfalse\n),\n];\nlet\nescrow_instruction = Instruction {\nprogram_id: meteora_program_id,\naccounts: escrow_accounts,\ndata:\nget_function_hash\n(\n\"global\"\n,\n\"create_lock_escrow\"\n).\ninto\n(),\n};\ninvoke_signed\n(\n&escrow_instruction,\n&[\nctx.accounts.pool.\nto_account_info\n(),\nctx.accounts.lock_escrow.\nto_account_info\n(),\nctx.accounts.fee_receiver.\nto_account_info\n(),\nctx.accounts.lp_mint.\nto_account_info\n(),\nctx.accounts.bonding_curve_sol_escrow.\nto_account_info\n(),\n// Bonding Curve Sol Escrow is the payer/signer\nctx.accounts.system_program.\nto_account_info\n(),\n],\nbonding_curve_sol_escrow_signer_seeds,\n)?;\n\nHowever, the\nlock_escrow\naccount is derived using the\npool\nand\nowner\nas seeds, and its creation does not require the owner\u2019s signature. This means that a malicious actor could preemptively create the\nlock_escrow\naccount to perform a DoS attack on the\nlock_pool\noperation.\n\n/// Accounts for create lock account instruction\n#[derive(Accounts)]\npub\nstruct\nCreateLockEscrow\n<\n'info\n> {\n/// CHECK:\npub\npool: UncheckedAccount<\n'info\n>,\n/// CHECK: Lock account\n#[account(\ninit,\nseeds = [\n\"lock_escrow\"\n.as_ref(),\npool.key().as_ref(),\nowner.key().as_ref(),\n],\nspace =\n8\n+ std::mem::\nsize_of\n::<LockEscrow>(),\nbump,\npayer = payer,\n)]\npub\nlock_escrow: UncheckedAccount<\n'info\n>,\n/// CHECK: Owner account\n@>\npub\nowner: UncheckedAccount<\n'info\n>,\n/// CHECK: LP token mint of the pool\npub\nlp_mint: UncheckedAccount<\n'info\n>,\n/// CHECK: Payer account\n#[account(mut)]\npub\npayer: Signer<\n'info\n>,\n/// CHECK: System program.\npub\nsystem_program: UncheckedAccount<\n'info\n>,\n}\n\nIn the\nlock_pool\nprocess, check if the\nlock_escrow\nexists. If it exists, skip the creation process.\n\nKulture (Pump Science) confirmed",
+      "severity": "high",
+      "reason": "Not found"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_expected_001",
+      "title": "Missing Update ofmigration_token_allocationonGlobalStruct",
+      "description": "Submitted by\nD1r3Wolf\n, also found by\n0x_kmr_\nand\nSpearmint\n\nhttps://github.com/code-423n4/2025-01-pump-science/blob/768ef58478724bf6b464c9f0952e3e5a3b2a2613/programs/pump-science/src/state/global.rs#L119-L132\n\nhttps://github.com/code-423n4/2025-01-pump-science/blob/768ef58478724bf6b464c9f0952e3e5a3b2a2613/programs/pump-science/src/state/global.rs#L66\n\nDuring the audit, it was identified that the\nmigration_token_allocation\nvariable on the\nGlobal\nstruct is not updated in the\nGlobal::update_settings\nfunction. This creates a critical issue as the\nmigration_token_allocation\nvalue, which is used during the migration process in the\ncreate_pool\ninstruction, will remain uninitialized or stuck at its default value indefinitely.\n\nThe\nupdate_settings\nfunction is executed within the\nset_params\ninstruction, making it a central mechanism for modifying key global settings. However, due to the missing update logic for\nmigration_token_allocation\n, any updates intended for this variable via\nGlobalSettingsInput\nare ignored. As a result, the\nmigration_token_allocation\non the\nGlobal\nstruct is never updated, leading to a persistent and incorrect value that could disrupt the migration process.\n\nNotes: Execute the test case in src/state/bonding_curve/tests.rs\n\n#[test]\nfn\ntest_global_update_settings\n() {\nuse\ncrate\n::GlobalSettingsInput;\nlet\nmut\nglobal = Global::\ndefault\n();\nlet\nnew_mint_decimals =\n8\n;\nlet\nnew_migration_token_allocation =\n123_000_000\n;\nlet\nmut\nparams = GlobalSettingsInput {\ninitial_virtual_token_reserves:\n0\n,\ninitial_virtual_sol_reserves:\n0\n,\ninitial_real_token_reserves:\n0\n,\ntoken_total_supply:\n0\n,\nmint_decimals: new_mint_decimals,\nmigrate_fee_amount:\n0\n,\nmigration_token_allocation: new_migration_token_allocation,\nfee_receiver: Pubkey::\ndefault\n(),\nwhitelist_enabled:\nfalse\n,\nmeteora_config: Pubkey::\ndefault\n(),\n};\nglobal.\nupdate_settings\n(params,\n0\n);\nassert_eq!\n(global.mint_decimals, new_mint_decimals);\n// Passes\nassert_eq!\n(global.migration_token_allocation, new_migration_token_allocation);\n// Fails as the variables not updated\n}\n\nImpact:\n\nThe\nmigration_token_allocation\nwill retain its default value indefinitely, regardless of any intended updates.\n\nTo resolve this issue, we recommend the following steps:\n\nImplement the logic to update\nmigration_token_allocation\nin the\nGlobal::update_settings\nfunction.\nThis should retrieve the value from the\nGlobalSettingsInput\nparameter provided to the\nupdate_settings\nfunction.\nTest and Validate the Fix:\nEnsure unit tests are added to confirm the successful update of Global struct with the values from the\nGlobalSettingsInput\n.\n\nKulture (Pump Science) confirmed",
+      "severity": "high",
+      "reason": "Not found"
+    }
+  ],
+  "undecided_findings": [],
+  "extra_findings": [
+    {
+      "id": "code4rena_pump-science_2025_02_tool_000",
+      "title": "Missing Access Control on Pool Creation Allows Front-Running and Fee Manipulation",
+      "description": "The create_pool instruction is publicly callable without any access control checks on critical state variables that govern fee distribution and liquidity provisioning. An attacker can create a pool with manipulated parameters (e.g., setting fee_receiver to their own address) before the legitimate admin initializes the pool, thereby capturing all protocol fees. The instruction updates state variables such as fee_receiver, bonding_curve, and protocol_token_a_fee/b_fee, which are used in all subsequent fee calculations. Since these are set during pool creation and never re-validated, an attacker can front-run the legitimate pool creation and permanently redirect fees. This is a classic access control boundary violation where economic state variables are set by unauthenticated users.",
+      "severity": "critical",
+      "original_id": "a951dd144d216aaf"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_001",
+      "title": "Representation Boundary Violation: Token Amounts Passed Without Scaling Conversion in CPI",
+      "description": "The CPI functions (CreatePoolCpi and CreatePoolCpiBuilder) pass raw token amounts directly to the Meteora program without any scaling or unit conversion. The Meteora program expects token amounts in native units (e.g., 6-decimal USDC = 1,000,000 for 1 USDC), but the Rust client code assumes the caller has already provided correctly scaled values. However, the client code does not enforce or document this requirement. If a caller passes unscaled values (e.g., 1 instead of 1,000,000 for 1 USDC), the pool will be initialized with 1 million times less liquidity than intended, breaking all subsequent share calculations. This creates a representation boundary violation: the client function returns raw values to the program, but the program expects normalized values. The failure propagates: LP shares are minted based on incorrect liquidity, fee accruals are miscalculated, and users receive fractional or zero returns.",
+      "severity": "high",
+      "original_id": "49283c559e335c0e"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_002",
+      "title": "Data Access Integrity Failure: Assumption of Contiguous Account Ordering in CPI",
+      "description": "The CPI instruction builder assumes that the 33 accounts are always passed in the exact same order as defined in the struct. However, the add_remaining_accounts method allows arbitrary accounts to be appended, and the instruction construction code does not validate that the core 33 accounts are in their expected positions. If a caller inserts an extra account before account #24 (payer), the payer account index shifts, causing the program to interpret a non-signer account as the payer. This breaks the Solana program's account parsing logic, which relies on strict positional indexing. For example, if an attacker inserts a dummy account at index 23, the payer account moves to index 25, and the program reads the wrong account as the payer \u2014 potentially allowing unauthorized pool creation. This is a data access integrity failure: the code assumes contiguous, ordered access but does not validate the structure of the account list.",
+      "severity": "high",
+      "original_id": "894698f5d88f4b14"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_003",
+      "title": "Missing Caller Verification in CreatePool Instruction Allows Unauthorized Pool Creation",
+      "description": "The CreatePool instruction does not verify that the payer (account #24) is authorized to create pools or that the pool address being created is derived from a valid derivation path. This allows any user to create a pool by providing arbitrary addresses for the pool, lp_mint, and other accounts, potentially leading to spoofed pools, stolen fees, or denial of service by exhausting system resources.",
+      "severity": "high",
+      "original_id": "d7161dc1c8020559"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_004",
+      "title": "Missing User Protection in CreatePool: No Minimum Output Bounds for User Asset Contributions",
+      "description": "The CreatePool instruction allows a user to deposit two tokens (token_a and token_b) to create a liquidity pool, but provides no mechanism for the user to specify minimum acceptable output amounts (e.g., minimum LP tokens received). This violates Pattern 1 (User Control Over Execution Outcomes). An attacker can front-run the transaction by manipulating the price of either token via a flash loan or sandwich attack, causing the user to receive far fewer LP tokens than expected, while the attacker captures the arbitrage profit. Since the user has no way to set a slippage tolerance or minimum output, their assets are exposed to malicious price manipulation.",
+      "severity": "critical",
+      "original_id": "0c36dcee9ef13725"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_005",
+      "title": "Critical Access Control Violation: CreatePool Allows Any User to Create Pools Without Authorization",
+      "description": "The CreatePool instruction requires only the payer to be a signer (account #24), but does not enforce any authorization checks on the pool, bonding curve, or fee receiver addresses. This means any user can create a pool using any arbitrary addresses for critical system accounts (e.g., setting the fee_receiver to their own wallet, or the bonding_curve to a malicious contract). This violates Pattern 4 (Access Control in Interfaces) and Dimension 1 (Access Control). The interface declares no access modifiers or restrictions, and the instruction logic performs no ownership or permission validation. An attacker can create fake pools that mimic legitimate ones, tricking users into depositing funds into malicious pools controlled by the attacker.",
+      "severity": "critical",
+      "original_id": "eae0f8436413d660"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_006",
+      "title": "State Synchronization Failure: Pool Creation State Updated Before External Program Invocations",
+      "description": "The CreatePool instruction modifies multiple state accounts (e.g., lp_mint, a_vault_lp, b_vault_lp, bonding_curve, global) before invoking external programs (vault_program, metadata_program, token_program). If any of these external calls fail (e.g., due to insufficient funds, invalid metadata, or reentrancy), the state changes already committed are not rolled back. This violates Pattern 6 (State Synchronization in Function Chains) and Pattern 7 (State Commitment Timing). For example, if the metadata_program fails to create the NFT for the LP token, the LP mint is still created and the bonding curve is still initialized, leaving the protocol in an inconsistent state where users can mint LP tokens but cannot properly identify or trade them. This results in permanent asset locking and protocol insolvency.",
+      "severity": "high",
+      "original_id": "e7c98c7e632a9d08"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_007",
+      "title": "External System Assumption Violation: Hardcoded Program IDs Assume Fixed External Contract Behavior",
+      "description": "The instruction uses hardcoded program IDs (e.g., crate::PUMP_SCIENCE_ID) and assumes that external programs (vault_program, metadata_program, token_program) behave exactly as expected. However, if any of these programs are upgraded, forked, or replaced (e.g., a malicious fork of the token program), the instruction will still invoke them with the same ABI, but the behavior may differ. For example, if the token_program is replaced with a version that does not emit Transfer events or has modified minting logic, the pool creation may appear successful but fail to properly track token balances. This violates Pattern 8 (External System Assumptions). The protocol assumes deterministic behavior from external systems without dynamic verification or version checks, leading to silent failures and fund loss.",
+      "severity": "high",
+      "original_id": "93005dc0d160bb1b"
+    },
+    {
+      "id": "code4rena_pump-science_2025_02_tool_008",
+      "title": "Partial Execution Risk: No Atomicity Guarantee Across Multiple External Program Calls",
+      "description": "The CreatePool instruction performs multiple external calls (to vault_program, metadata_program, token_program, system_program) in sequence. If any call after the first succeeds, but a later one fails (e.g., metadata_program fails after LP mint is created), the transaction does not revert. Solana transactions are atomic at the instruction level, but if the instruction is called from a higher-level program that does not check return values, partial state changes may persist. This violates Pattern 7 (State Commitment Timing) and Dimension 7 (Edge Cases). For example: LP mint is created, vaults are initialized, but metadata creation fails. The pool exists but is unrecognizable, users cannot trade, and funds are locked. No mechanism exists to clean up or revert partial state, leading to permanent asset locking.",
+      "severity": "high",
+      "original_id": "521f22a04169d0f3"
+    }
+  ],
+  "input_tokens": 4731,
+  "output_tokens": 145,
+  "cached_tokens": 6
+}

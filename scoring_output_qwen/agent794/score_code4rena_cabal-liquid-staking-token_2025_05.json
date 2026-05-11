@@ -1,0 +1,731 @@
+{
+  "project": "code4rena_cabal-liquid-staking-token_2025_05",
+  "agent": "agent794",
+  "status": "success",
+  "timestamp": "2026-04-09T11:36:12.473531",
+  "elapsed_seconds": 81.7,
+  "total_expected": 1,
+  "total_found": 100,
+  "true_positives": 0,
+  "false_negatives": 1,
+  "false_positives": 100,
+  "detection_rate": 0.0,
+  "precision": 0.0,
+  "f1_score": 0.0,
+  "matched_findings": [],
+  "missed_findings": [
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_expected_000",
+      "title": "LP unstaking only burns the shares but leaves the underlying tokens in the system, which distorts the shares-to-tokens ratio and leads to incorrect amounts being calculated during staking and unstaking",
+      "description": "Submitted by\nTheSchnilch\n, also found by\nret2basic\n\nhttps://github.com/code-423n4/2025-04-cabal/blob/5b5f92ab4f95e5f9f405bbfa252860472d164705/sources/cabal.move#L1051-L1054\n\nWhen a user unstakes LP tokens, the corresponding shares (Cabal tokens) are burned. However, the actual undelegation from the validator will occur only after a delay of up to 3 days. During this period, the shares are already burned, but the underlying tokens are still included in shares-to-token conversions.\nThis is a problem because, in\nprocess_lp_unstake\n, the amount of tokens to unbond is calculated as follows:\nhttps://github.com/code-423n4/2025-04-cabal/blob/5b5f92ab4f95e5f9f405bbfa252860472d164705/sources/cabal.move#L1051-L1054\n\nThe\nlp_amount\nis calculated based on the amount of tokens actually staked on the validator. This includes tokens that are pending to be undelegated (\nunstaked_pending_amounts\n), for which the Cabal tokens have already been burned.\n\nThis means that the\nunbonding_amount\nis also calculated incorrectly because the\nlp_amount\nis too high. As a result, the\nunbonding_amount\nwill also be too high, and the unstaker will receive too many tokens that are actually belonging to other users.\n\nSince the Cabal tokens a user receives are also calculated this way in\nprocess_lp_stake\n, users will receive too few shares when there are pending undelegations. As a result, they will have fewer tokens after the next\nbatch_undelegate_pending_lps\n:\nhttps://github.com/code-423n4/2025-04-cabal/blob/5b5f92ab4f95e5f9f405bbfa252860472d164705/sources/cabal.move#L946-L953\n\nBecause users receive too many tokens that actually belong to other users, and since this issue occurs during normal unstaking and staking, it is high severity.\n\nThe\nunstaked_pending_amounts\nshould be subtracted from the\nlp_amount\nto correctly account for the pending tokens to be undelegated, for which the Cabal tokens have already been burned.\n\n#[test(\nc = @staking_addr, user_a = @0xAAA, user_b = @0xBBB, user_c = @0xCCC\n)]\nfun test_poc(\nc: &signer,\nuser_a: &signer,\nuser_b: &signer,\nuser_c: &signer\n) {\ntest_setup(c, string::utf8(b\"initvaloper1test\"));\n//gets the metadata for all tokens\nlet ulp_metadata = coin::metadata(@initia_std, string::utf8(b\"ulp\"));\nlet init_metadata = coin::metadata(@initia_std, string::utf8(b\"uinit\"));\nlet cabal_lp_metadata = cabal::get_cabal_token_metadata(1);\nlet x_init_metadata = cabal::get_xinit_metadata();\nlet sx_init_metadata = cabal::get_sxinit_metadata();\nlet initia_signer = &account::create_signer_for_test(@initia_std);\nlet ulp_decimals = 1_000_000; //ulp has 6 decimals\nlet deposit_amount_a = 100 * ulp_decimals; //the amount user a deposits\nprimary_fungible_store::transfer( //user a must first be funded\ninitia_signer,\nulp_metadata,\nsigner::address_of(user_a),\ndeposit_amount_a\n);\nutils::increase_block(1, 1);\ncabal::mock_stake(user_a, 1, deposit_amount_a); //user a stakes 100 ulp\nutils::increase_block(1, 1);\nlet deposit_amount_b = 50 * ulp_decimals; //the amount user b stakes\nprimary_fungible_store::transfer(\ninitia_signer,\nulp_metadata,\nsigner::address_of(user_b),\ndeposit_amount_b\n);\nutils::increase_block(1, 1);\ncabal::mock_stake(user_b, 1, deposit_amount_b); //user b stakes 50 ulp\nutils::increase_block(1, 1000);\ncabal::mock_unstake(user_b, 1, deposit_amount_b); //user b unstakes 50 ulp this means the cabal tokens are now 100 and the underlying tokens 150\n//This mock unstaking uses the pool balances instead of querying the validator because Cosmos is not supported during testing.\n//However, this is not a problem, since the pools are only modified after the undelegation, not during the unstaking\nutils::increase_block(1, 1000);\ncabal::mock_unstake(user_a, 1, 50 * ulp_decimals); //user a unstakes half of his cabal lp tokens for which 50 ulp tokens should be unstaked but actually 75 are getting unstaked\n}\n\nYou can also add\ndebug::print(&unbonding_amount);\nto line 1334 in cabal.move to verify that 75 ULP tokens are being unstaked instead of 50.\n\nTo run the POC, paste it into the file\ntests/core_staking_test.move\nand run the command\ninitiad move test -f test_poc",
+      "severity": "high",
+      "reason": "Not found"
+    }
+  ],
+  "undecided_findings": [],
+  "extra_findings": [
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_000",
+      "title": "Reward Distribution Miscalculation Due to Unchecked BigDecimal Multiplication Truncation",
+      "description": "The function split_reward_with_share_internal uses bigdecimal::mul_by_u64_truncate to calculate reward shares, which truncates fractional parts. This truncation is not accounted for in the total reward distribution, leading to unclaimed reward tokens that are permanently lost. The sum of all distributed shares (operator + user) across all bridges can be less than the total initial reward amount due to repeated truncation, resulting in protocol insolvency over time. This is a critical economic flaw because the lost funds are irrecoverable and accumulate with each stage.",
+      "severity": "critical",
+      "original_id": "bfed51d42a18ffca"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_001",
+      "title": "Automatic Processing of Withdrawal Funds Triggers Unintended LockStaking",
+      "description": "The contract automatically processes any incoming ESINIT tokens (reward tokens) through the lock_stake and stableswap_lock_stake functions when users call batch_lock_stake_script or batch_stableswap_lock_stake_script. These functions withdraw ESINIT from the user's vesting balance and immediately lock it as liquidity. However, if an external system (like a bridge or validator) returns ESINIT tokens to the VIP contract address (e.g., as a refund, reward, or misrouted payment), the contract's automatic handling of these tokens triggers the same lock_stake logic, effectively converting system-returned funds into locked liquidity without user consent. This creates a scenario where withdrawal funds or system rewards are permanently locked and cannot be collected by their rightful owners.",
+      "severity": "critical",
+      "original_id": "629d0e6f6b797b18"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_002",
+      "title": "Unchecked Snapshot Submission Allows Reward Manipulation via Stage Skipping",
+      "description": "The submit_snapshot function allows any agent to submit L2 score snapshots for any previous stage without verifying that the snapshot corresponds to the actual state of the bridge at that time. This enables an attacker to submit a fabricated snapshot with an artificially low total_l2_score for a prior stage, causing the reward distribution for that stage to be drastically reduced. Since reward distribution is based on the ratio of a bridge's L2 score to the total L2 score across all bridges, a manipulated low total_l2_score inflates the bridge's share of the reward pool. The attacker can then claim disproportionately high rewards for that stage. This is a critical access control boundary violation because the agent (who is supposed to be a trusted entity) can be compromised or maliciously collude to manipulate economic state variables used in reward calculations.",
+      "severity": "critical",
+      "original_id": "354a1555a1e32176"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_003",
+      "title": "Inconsistent Reward Calculation Units in split_reward_with_share_internal",
+      "description": "The function split_reward_with_share_internal receives a total_reward_amount in raw units (u64) and a share_ratio as a BigDecimal, then returns a reward amount in raw units. However, the share_ratio is calculated in calculate_share using TVL and VIP weight, which are both in raw units (u64) and BigDecimal respectively. The issue arises because bigdecimal::mul_by_u64_truncate is used to multiply a BigDecimal share ratio by a raw u64 reward amount, but the share_ratio itself is derived from a ratio of raw TVL values (u64) divided by total TVL (u64), which should be normalized to a 0-1 scale. However, the TVL values are not scaled to a consistent decimal precision before division, leading to truncation errors that compound across stages. This causes the calculated share to be systematically underestimated, resulting in users receiving less reward than they are entitled to. The financial impact is a permanent loss of rewards for users, with funds being redistributed to other bridges or retained by the protocol.",
+      "severity": "high",
+      "original_id": "ca952d752f1bef2a"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_004",
+      "title": "Desynchronized Iteration in get_last_submitted_stage Causes Reward Omission",
+      "description": "The get_last_submitted_stage function iterates over all stage_data entries to find the latest stage where a specific bridge submitted a snapshot. However, it uses a table iterator that does not guarantee ordering of keys. Since table keys are encoded u64 stage numbers, and the table is not sorted by key during iteration, the function may return an arbitrary stage number instead of the maximum stage. This means that when batch_claim_user_reward_script or batch_claim_operator_reward_script calls get_last_submitted_stage, it may receive a stage number that is not the latest, causing the claim function to skip valid stages. For example, if snapshots exist for stages 1, 2, 3, 4, 5, but the iterator returns stage 2 as the last submitted, then stages 3, 4, and 5 will be permanently unclaimable. This results in users and operators losing all rewards for those stages. The financial impact is permanent loss of funds: for a bridge with 100,000,000 total reward over 5 stages, if 3 stages are omitted, 60,000,000 units are permanently lost.",
+      "severity": "high",
+      "original_id": "fa9d759e3ab3df87"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_005",
+      "title": "Unrestricted Parameter Updates Enable Protocol Insolvency via Pool Split Ratio Manipulation",
+      "description": "The update_params function allows governance (via chain signer) to update the pool_split_ratio without any bounds checking beyond a maximum of 1.0. An attacker who gains governance control can set pool_split_ratio to 0.999, meaning 99.9% of rewards go to the balance pool and only 0.1% to the voting weight pool. Since the balance pool is based on TVL, and TVL is controlled by the protocol's own bridges, this effectively redirects nearly all rewards to the protocol's own controlled addresses. This causes the operator reward pool to be starved, making it impossible for operators to claim meaningful rewards. This breaks the incentive structure of the protocol and leads to insolvency of the operator reward system. The mathematical proof: if total reward per stage is 100,000,000 and pool_split_ratio = 0.999, then user_funded_reward = 99,900,000 and operator_funded_reward = 100,000. With a 50% operator commission, the operator receives only 50,000 per stage \u2014 insufficient to incentivize participation. This is a critical access control boundary violation because governance is the only entity that can change this parameter, and if compromised, the entire economic model collapses.",
+      "severity": "critical",
+      "original_id": "8178918dce543dc5"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_006",
+      "title": "Merkle Proof Validation Bypass via Zero L2 Score Exploit",
+      "description": "In batch_claim_user_reward_script, the code checks: if (*l2_score != 0) { assert_merkle_proofs(...) }. This means if an attacker sets l2_score = 0, the Merkle proof validation is completely skipped. The attacker can then claim rewards for a stage where they have zero L2 score by submitting arbitrary merkle_proofs and a zero l2_score. The reward claimed is get_user_funded_reward_internal(...) which is the actual reward allocated to that bridge for that stage, regardless of the user's score. This allows an attacker to claim the full reward allocated to a bridge without having any L2 score. For example, if a bridge has 1,000,000 user_funded_reward in stage 1, an attacker can claim all 1,000,000 by submitting a zero l2_score and any fake merkle proof. This is a representation boundary violation because the function assumes that a zero l2_score implies zero reward eligibility, but the reward amount is pulled from a separate table (user_funded_rewards) that is not validated against the user's actual score.",
+      "severity": "critical",
+      "original_id": "4da00d97ac9f9792"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_007",
+      "title": "State Commitment Before External Call in execute_challenge Allows Replay Attacks",
+      "description": "The execute_challenge function commits state changes (updating the agent, snapshot, and challenge record) before verifying that the challenge period has expired. This allows an attacker to submit multiple challenges for the same stage with different parameters, consuming the challenge ID and agent update state even if subsequent challenges fail. The state commitment occurs before the challenge period validation, creating a replay vulnerability where an attacker can exhaust challenge IDs or force unwanted agent changes.",
+      "severity": "high",
+      "original_id": "edda14b5dd2dc401"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_008",
+      "title": "Insufficient Validation in batch_claim_user_reward_script Allows Claiming Non-Existent Rewards",
+      "description": "The batch_claim_user_reward_script function validates that the provided merkle proofs match the snapshot's merkle root, but it does not validate that the claimed l2_score is actually present in the merkle tree. An attacker can submit a valid merkle proof for a different account's score or a zero score, and the function will still accept it as long as the proof hashes correctly to the root. This allows claiming rewards for non-existent or zero scores, effectively stealing rewards from other users.",
+      "severity": "high",
+      "original_id": "bad1c4cb213e45b7"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_009",
+      "title": "Mathematical Underflow in Reward Splitting Allows Reward Theft via Invalid Weight Ratios",
+      "description": "The split_reward_with_share_internal function uses bigdecimal::mul_by_u64_truncate to calculate reward shares. If the share_ratio is very small (e.g., 1e-18) and the total_reward_amount is small (e.g., 100), the result can truncate to zero. However, the function does not validate that the share_ratio is above a minimum threshold. An attacker can register a bridge with an extremely small vip_weight (e.g., 1e-18), causing their reward share to always truncate to zero, while the remaining reward is distributed to other bridges. This allows an attacker to effectively steal rewards by manipulating the weight distribution.",
+      "severity": "high",
+      "original_id": "b2b8c701942458c0"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_010",
+      "title": "Missing Access Control in update_agent_by_chain Allows Unauthorized Agent Changes",
+      "description": "The update_agent_by_chain function allows any account with chain permission to change the agent address, but there is no verification that the new agent is authorized or that the change is intended. This function is accessible to any chain operator, and since the agent controls reward distribution and snapshot submission, an attacker with chain permission can change the agent to a malicious address, effectively taking control of the entire reward system.",
+      "severity": "critical",
+      "original_id": "a9dd17e4de1e76aa"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_011",
+      "title": "Inconsistent State Update in fund_reward_script Allows Double Reward Claiming",
+      "description": "The fund_reward_script function updates the stage and then calls add_tvl_snapshot_internal twice: once before and once after updating the stage. This means that the TVL snapshot for the new stage is taken after the stage has been incremented, but the reward distribution is calculated for the new stage using the TVL snapshot of the previous stage. This creates a window where an attacker can submit a snapshot for the previous stage after the reward has been distributed, and then claim rewards for that stage again using the same snapshot data, effectively claiming the same reward twice.",
+      "severity": "high",
+      "original_id": "a6a7fc1e4e38305c"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_012",
+      "title": "Validation Timing Violation in submit_snapshot Allows Invalid Snapshots to be Accepted",
+      "description": "The submit_snapshot function validates that the stage is less than the current stage and that the previous stage snapshot exists, but it does not validate that the provided merkle_root and total_l2_score are consistent with the actual L2 state. The function accepts any merkle_root and total_l2_score as long as the stage is valid, allowing an attacker to submit a snapshot with a fabricated merkle_root and total_l2_score, effectively inflating the L2 score and claiming more rewards than deserved.",
+      "severity": "high",
+      "original_id": "c51d141b3ebeef00"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_013",
+      "title": "Insufficient Input Validation in update_vip_weights Allows Invalid Weight Distribution",
+      "description": "The update_vip_weights function validates that the length of bridge_ids and weights vectors are equal, but it does not validate that the sum of all vip_weight values is less than or equal to 1.0. An attacker can submit a set of weights that sum to more than 1.0 (e.g., 1.5), causing the validate_vip_weights function to abort, but the weights are already updated in the bridges table. This creates a denial-of-service condition where the protocol cannot distribute rewards until the weights are manually corrected, and the attacker can repeatedly submit invalid weights to disrupt the system.",
+      "severity": "high",
+      "original_id": "ebea491a177732bc"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_014",
+      "title": "Race Condition in get_last_submitted_stage Allows Reward Claiming for Non-Existent Stages",
+      "description": "The get_last_submitted_stage function iterates through all stage_data entries to find the last submitted snapshot for a bridge. However, if a new stage is added while the function is iterating, it may return an incorrect stage number. An attacker can submit a snapshot for a future stage and then claim rewards for that stage before it is officially recognized, effectively claiming rewards for a non-existent stage.",
+      "severity": "medium",
+      "original_id": "d24df45e7068d368"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_015",
+      "title": "LP Unstake Reward Compounding Inconsistency Leads to Understaked Rewards and User Fund Loss",
+      "description": "In process_lp_unstake, the unstaking calculation uses pool_router::get_total_stakes() instead of get_real_total_stakes(), causing the unbonding amount to be miscalculated. This results in users receiving less underlying LP than they are entitled to, while the protocol retains the difference as an implicit fee. The error occurs because get_total_stakes() does not include pending rewards, while compound_lp_pool_rewards() adds them to staked_amounts. This creates a mismatch between the LP supply used for ratio calculation and the actual staked + reward pool balance, leading to permanent loss of user funds.",
+      "severity": "critical",
+      "original_id": "e6266d11f5dde62d"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_016",
+      "title": "Merkle Proof Validation Ignores Zero L2 Score Edge Case",
+      "description": "The `assert_merkle_proofs` function skips Merkle proof validation when `l2_score == 0`, but still uses the zero score in the hash computation. This creates a discrepancy where a malicious actor can submit a snapshot with zero L2 score and an invalid Merkle proof, and the system will accept it because the proof validation is skipped. However, the zero score is still used in the hash, meaning the Merkle root is computed as if the score were valid. This allows an attacker to forge valid-looking proofs for zero-score entries, potentially manipulating reward distribution.",
+      "severity": "high",
+      "original_id": "bfc762eb3def6fd5"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_017",
+      "title": "BigDecimal Multiplication Truncation Causes Reward Underpayment",
+      "description": "The `bigdecimal::mul_by_u64_truncate` function is used to calculate operator and user rewards. This function truncates fractional results, meaning that when a reward amount is split between operator and user, the sum of the two parts may be less than the original amount due to truncation. For example, if a reward of 1000 is split 50/50, and the BigDecimal multiplication truncates 0.5, the operator gets 499 and the user gets 499, leaving 2 tokens unclaimed. These tokens are permanently lost from the system, reducing total rewards distributed.",
+      "severity": "high",
+      "original_id": "a5039b44795b9952"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_018",
+      "title": "State Commitment Before Challenge Period Validation in execute_challenge",
+      "description": "In `execute_challenge`, the agent and Merkle root are updated before validating that the challenge period has expired. If the transaction reverts after the agent update but before the challenge period check (e.g., due to gas exhaustion or external call failure), the agent is permanently changed and the challenge is rejected. This allows an attacker to force a state change (agent replacement) without completing the challenge, effectively hijacking governance control by repeatedly triggering failed challenges.",
+      "severity": "critical",
+      "original_id": "43c58ede7d747404"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_019",
+      "title": "Vesting Claim Validation Allows Stage Skipping via Deregistration/Re-registration",
+      "description": "The `check_user_reward_claimable` function assumes that if a user has claimed stage N, they must have claimed all prior stages. However, if a bridge is deregistered and then re-registered with a new version, the `init_stage` resets. A user who claimed rewards under the old version can claim rewards under the new version starting from the new `init_stage`, skipping all intermediate stages. This allows users to claim rewards for stages they never submitted valid snapshots for, effectively double-spending rewards.",
+      "severity": "high",
+      "original_id": "68f3edd1898b78df"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_020",
+      "title": "Merkle Root Hash Computation Uses Uninitialized Data for Zero Scores",
+      "description": "The `score_hash` function computes a hash using `l2_score` and `total_l2_score` even when `l2_score == 0`. However, if the `l2_score` is zero, the user's contribution is zero, and the hash should be computed differently (e.g., using a zero-padding scheme). The current implementation uses the raw integer value 0, which may be encoded differently than a null or absent value in BCS serialization. This creates a potential for hash collision: two different users with zero scores could have different hash representations, or a malicious actor could submit a non-zero score with a forged proof that hashes to the same value as a zero score.",
+      "severity": "high",
+      "original_id": "1965b080c470d9d9"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_021",
+      "title": "Operator Reward Claiming Does Not Validate Finalized Vesting Period",
+      "description": "The `batch_claim_operator_reward_script` function claims operator rewards for all stages from `last_claimed_stage + 1` to `last_submitted_stage` without checking if the vesting period for each stage has completed. This means an operator can claim rewards for a stage immediately after it is submitted, even if the challenge period (which is part of the vesting period) has not expired. This allows operators to front-run the challenge period and claim rewards before they are legitimately claimable, undermining the security model.",
+      "severity": "high",
+      "original_id": "12ae9e0fcaab817b"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_022",
+      "title": "BigDecimal Comparison Allows Weight Overallocation via Precision Loss",
+      "description": "The `validate_vip_weights` function checks that the sum of all VIP weights is <= 1. However, `bigdecimal::add` and `bigdecimal::mul` operations can lose precision due to internal fixed-point representation. If multiple bridges have very small weights (e.g., 0.0000001), repeated addition may truncate the sum to exactly 1.0 even if the true sum is 1.0000001. This allows an attacker to register many bridges with tiny weights that sum to just over 1, but due to truncation, the system accepts it as valid, allowing them to claim more than 100% of the reward pool.",
+      "severity": "high",
+      "original_id": "2e91bd54d8b1f4d4"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_023",
+      "title": "Snapshot Submission Allows Replay via Version Mismatch",
+      "description": "The `submit_snapshot` function checks that the snapshot does not already exist for the given bridge_id and version, but does not validate that the version corresponds to the current registered version of the bridge. An attacker can submit a snapshot from an old version of a bridge (e.g., version 1) after the bridge has been upgraded to version 2. Since the version is part of the key, the system accepts it as a new snapshot, even though it is a replay of old data. This allows an attacker to manipulate the Merkle root and total_l2_score for a current stage by replaying old, potentially invalid snapshots.",
+      "severity": "high",
+      "original_id": "436d85a9fd54491f"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_024",
+      "title": "Unstake LP Token Calculation Uses Stale Pool State Leading to Underpayment and Fund Loss",
+      "description": "The process_lp_unstake function calculates the amount of underlying LP tokens to unbond using the current total staked amount (lp_amount = reward_amount + pool_router::get_real_total_stakes(...)), but this value is computed after claiming rewards and before updating the staked_amounts state. This creates a timing window where the calculation uses an outdated pool state, causing users to receive less than their proportional share. The discrepancy compounds over time as multiple users unstake, leading to permanent loss of user funds.",
+      "severity": "critical",
+      "original_id": "1898fb6101c1ed7b"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_025",
+      "title": "Automatic Processing of Withdrawal Funds Triggers Unintended Staking via move_execute",
+      "description": "The protocol uses move_execute to asynchronously process staking and unstaking operations. When external systems (like pool_router) return staking rewards or withdrawn assets to the protocol's resource account (@staking_addr), these funds are automatically processed by process_xinit_stake and process_lp_stake functions. These functions do not verify the origin of the funds, treating all incoming assets as new user deposits. This allows an attacker to trigger staking logic by sending funds to the resource account, effectively converting withdrawal returns into new staked assets, inflating the protocol's total staked value and diluting user rewards.",
+      "severity": "high",
+      "original_id": "3dbf165b6ca36f3b"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_026",
+      "title": "Redelegation Hook Uses Stale Share Before for Destination Validator, Leading to Incorrect Locked Share Accounting and Permanent Fund Loss",
+      "description": "In the redelegate_hook_v2 function, the destination validator's share_before value is passed as a parameter from the caller, but it is not validated against the actual current share of the destination validator after the redelegate operation. This allows an attacker to manipulate the share_before value to cause incorrect locked share calculations during the delegate_hook_internal call, resulting in permanent loss of locked shares and associated funds. The bug occurs because the system assumes the passed dst_share_before is accurate, but it can be arbitrarily set by the caller, leading to a mismatch between the actual staking shares and the locked share accounting in the contract's internal state. This breaks the invariant that locked shares must accurately reflect the underlying staking shares, causing funds to be permanently misaccounted.",
+      "severity": "critical",
+      "original_id": "9799a7eb1ef4a206"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_027",
+      "title": "Unprotected State Update in process_xinit_stake Allows Fee Manipulation",
+      "description": "The process_xinit_stake function updates critical economic state variables (staked_amounts) without validating that the reward compounding has been completed by the admin via compound_xinit_pool_rewards. An attacker can call stake_asset to trigger process_xinit_stake before the admin has claimed and compounded rewards, causing the staked_amounts to be updated with stale (zero or low) values. This allows the attacker to mint sxINIT tokens at an inflated ratio, effectively stealing future staking rewards from legitimate users. The vulnerability exists because process_xinit_stake is called via move_execute from stake_asset, and there is no access control or state synchronization check to ensure rewards have been claimed before processing the stake.",
+      "severity": "critical",
+      "original_id": "c0ea918bf7ddc97c"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_028",
+      "title": "Unit Mismatch in LP Unstake Calculation Causes Understaked Asset Drain",
+      "description": "In process_lp_unstake, the unstaking calculation uses the total LP amount (reward_amount + pool_router::get_real_total_stakes) as the denominator for the ratio, but the reward_amount is not added to the staked_amounts until after the calculation. This creates a representation boundary violation: the function expects the total pool liquidity to include the just-claimed rewards, but the state variable staked_amounts has not yet been updated to reflect them. As a result, the ratio used to calculate the unbonding amount is artificially inflated, causing users to receive more underlying assets than they are entitled to. This drains the pool's liquidity over time. For example, if a pool has 1000 LP staked and 100 LP in rewards, the function calculates unstaking based on 1100 LP, but staked_amounts remains 1000. A user unstaking 100 Cabal LP tokens receives 100 * (1100/100) = 110 underlying LP, but only 100 LP was actually staked \u2014 a 10% theft per unstake.",
+      "severity": "high",
+      "original_id": "b6b9ab5fe682d98c"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_029",
+      "title": "Desynchronized Iteration in batch_undelegate_pending_lps Causes Partial Reward Loss",
+      "description": "The batch_undelegate_pending_lps function iterates over unbond_period to process pending unstakes, but the unstaked_pending_amounts vector is updated independently. If a new pool is added via config_stake_token after the last batch_undelegate_pending_lps call, the vector lengths become desynchronized. The function will only process indices up to the original length, leaving pending amounts in new pools unprocessed indefinitely. For example, if 3 pools exist and batch_undelegate_pending_lps is called, then a 4th pool is added with 1000 LP pending, the 4th pool's pending amount will never be processed because the loop runs only for i in 0..3. This results in permanent loss of staking rewards for users who staked in the new pool, as rewards are locked in the router and never distributed.",
+      "severity": "high",
+      "original_id": "d334ea8b14ae416b"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_030",
+      "title": "Inconsistent Reward Calculation in process_lp_stake Leads to Reward Inflation",
+      "description": "In process_lp_stake, the function calculates the mint amount using the formula: ratio = stake_amount / (reward_amount + staked_amounts). However, the reward_amount is added to staked_amounts after the calculation. This means the denominator includes the reward that has not yet been added to the pool's total staked amount. As a result, the minted Cabal LP tokens are inflated relative to the actual staked value. For example: if staked_amounts = 1000, reward_amount = 100, and a user stakes 100 LP, the ratio becomes 100 / (100 + 1000) = 100/1100. But after minting, staked_amounts becomes 1100. The user receives 100 * (100/1100) = 9.09 Cabal LP tokens, but the pool now has 1100 staked LP and 9.09 Cabal LP tokens \u2014 meaning 1100 LP is now represented by only 9.09 Cabal LP, whereas it should be 100 Cabal LP (1:10 ratio). This inflation compounds over time, diluting all existing Cabal LP holders.",
+      "severity": "high",
+      "original_id": "827d7d33b75aa5df"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_031",
+      "title": "Unverified External Call in get_voting_power_weight Causes Incorrect Voting Weight Mapping",
+      "description": "The get_voting_power_weight function calls convert_to_cabal_token to map stake tokens to Cabal LP tokens, but does not verify that the returned Cabal token metadata is valid or exists in the system. If an attacker deploys a malicious token with the same metadata hash as a legitimate stake token (e.g., via a forked contract), and the mapping is corrupted, get_voting_power_weight will return a mapping to a non-existent or malicious Cabal token. This breaks the voting_reward module's snapshotting logic, causing it to ignore or misattribute voting power. For example, if a legitimate LP token is mapped to a zero-balance Cabal token, the voting power of that pool is lost. This can lead to governance attacks where an attacker manipulates voting power distribution by injecting fake mappings.",
+      "severity": "high",
+      "original_id": "eb8262b3f55e0017"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_032",
+      "title": "Unbonding Entry State Inconsistency Due to Partial State Restoration in LP Unstake",
+      "description": "In the LP unstaking flow, when a user initiates an unstake, the system updates both the pending unstaked amount (m_store.unstaked_pending_amounts) and creates an unbonding entry. However, if the user calls claim_unbonded_assets before batch_undelegate_pending_lps is executed, the unbonding entry is removed and tokens are transferred, but the unstaked_pending_amounts is never decremented. This creates a double-spend vulnerability where the same LP tokens are counted twice: once in the pending amount and once as claimed.",
+      "severity": "critical",
+      "original_id": "d10dec9620fb120a"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_033",
+      "title": "Precision Loss in Ratio Calculations Leading to Under-Minting of Cabal LP Tokens",
+      "description": "The function process_lp_stake calculates the mint amount of Cabal LP tokens using bigdecimal::mul_by_u128_truncate, which truncates fractional parts. When stake_amount is small relative to lp_amount, this can result in minting 0 tokens even when the user has deposited a non-zero amount. This silently under-mints tokens, causing users to lose proportional ownership of the pool without error.",
+      "severity": "high",
+      "original_id": "dce2960f99bf8eec"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_034",
+      "title": "Mathematical Domain Violation in BigDecimal Division by Zero",
+      "description": "The function process_xinit_unstake and process_lp_unstake use bigdecimal::from_ratio_u128(unstake_amount as u128, sx_init_amount) where sx_init_amount is extracted from fungible_asset::supply(). If sx_init_amount is 0 (e.g., pool just initialized), this results in division by zero. In Move, bigdecimal::from_ratio_u128(0, 0) or (n, 0) for n>0 causes a panic, but the code does not validate this case, leading to transaction reverts and user funds being stuck in unbonding state.",
+      "severity": "high",
+      "original_id": "8cced4a56ba0b109"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_035",
+      "title": "State Commitment Before External Call Completion in Stake Asset Flow",
+      "description": "In stake_asset, the system first transfers the underlying asset to the pool (state change) and then triggers an async move_execute to process the staking. If the move_execute fails (e.g., due to gas limit or reentrancy), the asset is already transferred and burned from the user's balance, but the sxINIT/Cabal LP tokens are never minted. The user loses their asset with no corresponding token credit.",
+      "severity": "critical",
+      "original_id": "e3c951ecc8ade656"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_036",
+      "title": "Authorization Context Not Bound in vote_using_bribe_weights",
+      "description": "The vote_using_bribe_weights function allows any authorized manager to submit votes using bribe weights calculated by bribe::calculate_bribe_weights_for_cycle. However, the weights are computed off-chain and passed as a vector. An attacker can front-run by calling vote_using_bribe_weights with a different cycle or manipulated weights, consuming the manager's authorization and submitting malicious votes without being bound to the original intent.",
+      "severity": "high",
+      "original_id": "7f8e2b5a373c737b"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_037",
+      "title": "Fork Behavioral Divergence in pool_router::get_real_total_stakes",
+      "description": "The code assumes pool_router::get_real_total_stakes returns the total staked amount in the underlying token. However, if the underlying DEX (e.g., InitiaSwap) has forked and moved reward accumulation to a separate distributor contract, get_real_total_stakes may return only the base liquidity and exclude accumulated fees. This causes all reward calculations (compound_xinit_pool_rewards, compound_lp_pool_rewards) to be based on incomplete data, leading to underpayment of rewards and permanent loss of user earnings.",
+      "severity": "high",
+      "original_id": "55cbaf38258cc5a0"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_038",
+      "title": "Automatic Processing of Withdrawal Funds Triggers Unintended Investment via Hook Execution",
+      "description": "The contract automatically processes any funds received by the staking account via the withdraw_asset_for_staking_account function, which is called by multiple hook functions (delegate_hook, redelegate_hook_v2, undelegate_hook). These hooks are triggered after stargate operations (e.g., delegation, redelegate, undelegate) and unconditionally withdraw uinit from the staking account. However, if an attacker sends funds directly to the staking account (e.g., via a malicious validator or external contract), the contract has no mechanism to distinguish between legitimate system returns and malicious deposits. When the next legitimate hook executes (e.g., during a user's delegation), it will withdraw all uinit from the staking account \u2014 including the attacker's injected funds \u2014 and transfer them to the staking account owner, effectively stealing those funds. This creates a scenario where system-returned funds (e.g., rewards, unbonding proceeds) are mixed with attacker-injected funds, and the hook logic treats all funds as legitimate to be claimed.",
+      "severity": "critical",
+      "original_id": "b03e185e2d48a03a"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_039",
+      "title": "Precision Loss in Share-to-LockedShare Conversion Due to Division Truncation",
+      "description": "The share_to_locked_share and locked_share_to_share functions perform division operations (share * total_locked_share / total_share) without ensuring exact divisibility, leading to silent precision loss. This causes the locked share representation to drift from the actual staking share over time, resulting in incorrect delegation amounts during withdrawals or redelegations. The issue is exacerbated because BigDecimal arithmetic in Move uses fixed-point precision and truncates rather than rounds, and the contract does not validate that the division results in an exact value.",
+      "severity": "high",
+      "original_id": "478900ee7bb196e6"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_040",
+      "title": "State Inconsistency in Redelegation Hook Due to Unbound Share Before State",
+      "description": "In redelegate_hook_v2, the dst_share_before parameter is passed from the caller and used to compute the new locked share after redelegation. However, this value is not validated against the actual current state of the destination validator's delegation shares. An attacker can front-run the redelegation by delegating to the destination validator before the hook executes, causing dst_share_before to be outdated. The hook then incorrectly computes the share difference, leading to over-issuance of locked shares and inflation of the user's staked balance without corresponding asset backing.",
+      "severity": "high",
+      "original_id": "c79283bf21ec07b5"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_041",
+      "title": "Incomplete State Restoration in Extend Operation",
+      "description": "The extend_internal function withdraws a delegation and then deposits it under a new release time. However, it does not restore the validator's delegation count (validators table) during the withdrawal phase before re-depositing. If the withdrawal removes the last delegation for a validator (count drops to 0 and the entry is removed), and the new deposit re-adds it, the validator count is correctly restored. But if the extend operation fails after withdrawal but before deposit (e.g., due to gas limit or reentrancy), the validator entry is permanently removed from the validators table, breaking future delegation tracking for that validator while the locked share remains in delegations table \u2014 creating a dangling, untrackable delegation.",
+      "severity": "high",
+      "original_id": "a759349608c926b0"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_042",
+      "title": "Mathematical Domain Violation in BigDecimal Division Without Zero Check",
+      "description": "The functions share_to_locked_share and locked_share_to_share perform division: (share * total_locked_share) / total_share. However, they only check if total_share is zero to return early, but do not validate that total_locked_share is non-zero before division. If total_locked_share is zero (e.g., due to prior slashing or incorrect state), the division becomes 0/0, which is mathematically undefined. In Move's BigDecimal implementation, this results in undefined behavior \u2014 potentially returning NaN or a garbage value \u2014 which is then stored as a valid locked share. This corrupts the entire accounting system for that validator/metadata pair.",
+      "severity": "critical",
+      "original_id": "fe4f18b9a2f0e607"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_043",
+      "title": "Fork Behavioral Divergence: UnbondingDelegation Query Response Mismatch",
+      "description": "The contract queries /initia.mstaking.v1.Query/UnbondingDelegation expecting a response with UnbondingDelegationEntry containing initial_balance and balance fields. However, in the Initia v1.2+ fork, the UnbondingDelegationEntry structure was changed to use a single balance field without initial_balance. The contract still expects initial_balance to be populated, causing unmarshal to fail and the undelegate_hook to abort with ECREATION_HEIGHT_MISMATCH. This breaks all undelegation for users on newer chain forks, locking funds indefinitely because the hook never completes and the delegation is not removed from the local state.",
+      "severity": "critical",
+      "original_id": "8fe1db0ab6398494"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_044",
+      "title": "Unrestricted Reward Withdrawal Allows Arbitrary Fund Extraction",
+      "description": "The withdraw function allows any caller to withdraw any amount of funds from the vault as long as reward_per_stage > 0, with no validation against deposited balance or caller authorization. This enables an attacker to drain the entire vault balance by repeatedly calling withdraw() with large amounts, even if they never deposited any funds. The function uses the vault's signer to withdraw from the primary_fungible_store, but does not check if the requested amount exceeds the available balance or if the caller is authorized. This is a critical logic flaw in the economic model.",
+      "severity": "critical",
+      "original_id": "8a5ffac1546bff1d"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_045",
+      "title": "Representation Boundary Violation in Locked Share to Amount Conversion Causes Underpayment on Slashing",
+      "description": "The function locked_share_to_amount() incorrectly assumes that the total_share and total_locked_share used in the conversion ratio are always consistent with the current staking state after slashing events. When a validator is slashed, the underlying mstaking module reduces the balance (amount) but preserves the shares. However, locked_share_to_amount() uses the pre-slash total_share from the delegation response to convert locked_share back to amount, leading to overstatement of the user's locked amount. This causes the protocol to underpay users during withdrawal or undelegation because the locked_share is correctly tracked but the amount is miscalculated. The error propagates through all functions that rely on locked_share_to_amount() for amount display or withdrawal calculations, including get_locked_delegations(), withdraw_asset(), and undelegate(). This results in users losing funds equivalent to the slashing percentage on their locked positions.",
+      "severity": "critical",
+      "original_id": "05be1fea9be18e47"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_046",
+      "title": "Data Access Integrity Failure in get_locked_delegations() Loop Skips Delegations After Table Modifications",
+      "description": "The get_locked_delegations() function iterates over delegations using a table iterator but caches delegation responses and metadata in SimpleMap structures during iteration. If a delegation is removed or modified during the iteration (e.g., via redelegate or undelegate triggered by a concurrent transaction), the SimpleMap cache becomes desynchronized from the actual table state. The iterator continues to yield keys, but the cached delegation responses may be stale or missing, causing the function to return incomplete or incorrect delegation data. This can cause users to see phantom delegations or miss real ones, leading to incorrect withdrawal amounts or failed extension operations. In extreme cases, users may be unable to withdraw funds because the system believes their delegation does not exist when it does.",
+      "severity": "high",
+      "original_id": "c286fc4c88016d2b"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_047",
+      "title": "Access Control Violation in update_params() Allows Admin to Set Invalid Lock Periods",
+      "description": "The update_params() function is only protected by check_chain_permission(), which assumes the chain signer is trusted. However, if the chain signer is compromised or misconfigured, an attacker can call update_params() to set max_lock_period to 0 or min_lock_period to a value greater than max_lock_period. Although the function has an assertion (assert!(max_lock_period > min_lock_period)), this only triggers a revert and does not prevent the initial state change. If the assertion is bypassed (e.g., via a fork or oracle manipulation), the protocol can be rendered unusable: users cannot delegate (if min_lock_period > current time) or are forced into instant unlock (if max_lock_period = 0). This breaks the core economic invariant of locked staking and enables mass withdrawal attacks.",
+      "severity": "high",
+      "original_id": "5ea06ddf0b3c7e49"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_048",
+      "title": "Representation Boundary Violation in share_to_locked_share() Causes Double-Spending on Redelegation",
+      "description": "The share_to_locked_share() function converts shares to locked_share using the formula: share * total_locked_share / total_share. However, during redelegate(), the function uses the pre-redelegate dst_share_before (from the destination validator's state) to calculate the new locked_share. If the destination validator has been slashed between the time the redelegate() call is initiated and when the hook executes, dst_share_before is outdated. The function then calculates a locked_share based on an inflated total_share, leading to an overstatement of the locked_share being deposited. This allows an attacker to effectively mint new locked shares by triggering a redelegate() immediately after a slashing event, then withdrawing the inflated amount. The protocol loses funds equal to the slashing percentage multiplied by the redelegate amount.",
+      "severity": "critical",
+      "original_id": "806e64f0a6fe2dbd"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_049",
+      "title": "Data Access Integrity Failure in undelegate_hook() Relies on Unbonding Entry Ordering Assumption",
+      "description": "The undelegate_hook() function assumes that the last entry in unbond.entries is the most recent unbonding event and matches the current block height. However, if multiple undelegations occur in the same block (e.g., via batch operations or parallel transactions), the Cosmos query may return unbonding entries in non-deterministic order. The function then pops the last entry and asserts creation_height == current_height. If the last entry is not the most recent (due to query ordering or race conditions), the assertion ECREATION_HEIGHT_MISMATCH triggers, reverting the entire undelegation. This prevents legitimate users from withdrawing funds and can be exploited by an attacker to clog the system by triggering concurrent undelegations, causing denial-of-service on withdrawal functionality.",
+      "severity": "high",
+      "original_id": "8b36e90a4ad59ff7"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_050",
+      "title": "Unrestricted Reward Per Stage Update Allows Fee Manipulation",
+      "description": "The update_reward_per_stage function is accessible to any address that passes the chain permission check, but there is no restriction on who can call it or when. This allows an attacker to manipulate the reward_per_stage state variable at critical times to reduce or eliminate rewards owed to users. Since reward_per_stage is used as a multiplier in reward calculations (implicitly via withdrawal logic), an attacker can set it to 0 after users deposit but before withdrawals, effectively stealing future rewards. The economic impact is direct theft of user rewards through state manipulation.",
+      "severity": "critical",
+      "original_id": "da1a7a3e7fba16c7"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_051",
+      "title": "Reward Per Stage Used Without Unit Consistency in Withdrawal Logic",
+      "description": "The withdraw function uses reward_per_stage (a raw uint64) as if it were a proportional reward rate, but no unit conversion or scaling is applied. The reward_per_stage is set to 1000 in the test, and 500 is withdrawn from a 1000 deposit \u2014 implying a 50% reward rate. However, there is no indication that reward_per_stage is meant to represent a percentage, basis points, or any normalized unit. Callers (like the test) assume reward_per_stage is a direct multiplier, but the system lacks any definition of its unit. This creates a representation boundary violation: the function returns a raw uint64 value that is used in economic calculations without any documented or enforced scaling, leading to unpredictable and exploitable reward distributions.",
+      "severity": "high",
+      "original_id": "72d5e1bfb03716ae"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_052",
+      "title": "Withdrawal Logic Ignores Deposit Timing and Allows Free Withdrawals",
+      "description": "The withdraw function does not track individual user deposits or time-based accrual. It simply reads the global reward_per_stage and withdraws a fixed amount from the vault. This means any user can withdraw any amount up to the vault balance, regardless of when they deposited or how much they deposited. There is no accounting for user-specific shares or time-weighted rewards. An attacker can deposit 1 uinit, wait for another user to deposit 1000 uinit and update reward_per_stage to 1000, then withdraw 1000 uinit \u2014 effectively stealing all rewards generated by others. The system lacks any share-based or time-based reward distribution mechanism, turning it into a free-for-all withdrawal pool.",
+      "severity": "critical",
+      "original_id": "f954aa06e8ff2d50"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_053",
+      "title": "Reward Metadata Hardcoded and Incompatible with External Systems",
+      "description": "The reward_metadata function returns metadata for 'uinit' hardcoded from @initia_std, but the system does not verify compatibility with external protocols or allow configuration. If the external protocol (e.g., a DEX or gauge) expects a different token symbol, decimal precision, or metadata structure, this will cause integration failures. Furthermore, the metadata is returned as a static Object<Metadata> without any versioning or upgrade path. This creates a boundary inconsistency: the contract assumes external systems will accept 'uinit' metadata, but no verification or flexibility is provided, risking broken integrations or failed reward distributions.",
+      "severity": "high",
+      "original_id": "97e3032e078c8f55"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_054",
+      "title": "Automatic Processing of Withdrawal Funds Triggers Unintended Deposit Behavior",
+      "description": "The vault contract's withdrawal function returns FungibleAsset tokens to the caller, but the contract has no mechanism to distinguish between user-initiated withdrawals and system-generated returns. When a user withdraws funds, those tokens are returned to the user's address, but if an external system (e.g., a reward distributor or validator) sends funds back to the vault's store address (vault_store_addr), the contract treats them as new deposits. This creates a critical vulnerability where an attacker can trigger the contract to re-process returned withdrawal funds as new deposits, inflating the total deposit balance and enabling double-spending or reward inflation attacks.",
+      "severity": "critical",
+      "original_id": "a5a390a59ad34276"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_055",
+      "title": "State Commitment Before External Call in Redelegate and Undelegate Allows Reentrancy and Fund Loss",
+      "description": "The redelegate and undelegate functions commit state changes (last_height update) before executing external stargate calls, which can fail. If the external call reverts, the state change (last_height) is still committed, preventing future operations on the same account while funds may be partially or fully lost. This creates a denial-of-service and potential fund locking condition. The reentry_check() function updates staking_account.last_height before the stargate call, but if the stargate call fails (e.g., due to insufficient gas, validator downtime, or malicious reversion), the account is permanently locked out from future delegation operations even though the original transaction did not complete successfully.",
+      "severity": "critical",
+      "original_id": "c54606c42d7acc59"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_056",
+      "title": "Inconsistent Share-to-Amount Conversion in Redelegation Hook Leads to Slashing Exploitation",
+      "description": "In redelegate_hook_v2, the function calls undelegate_hook_internal and delegate_hook_internal to adjust locked shares based on pre-redelegate share values. However, when a slashing event occurs between the MsgBeginRedelegate execution and the hook execution, the share_before values passed to the hook are stale. The hook recalculates locked shares using these outdated values, causing the protocol to incorrectly account for the slashed amount. This allows an attacker to manipulate the timing of slashing events to steal value from the protocol by redelegating just before a slash, causing the hook to over-credit the destination validator with unslashed shares while the source validator's balance is reduced by the slash.",
+      "severity": "high",
+      "original_id": "ccbd5fa65234e66b"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_057",
+      "title": "Missing Minimum Output Protection in provide_delegate and single_asset_provide_delegate",
+      "description": "The provide_delegate and single_asset_provide_delegate functions allow users to provide liquidity to a DEX pool and immediately stake the resulting LP tokens. However, these functions do not accept a minimum_liquidity_out parameter to protect users from impermanent loss or slippage during the liquidity provision. If the DEX pool has low liquidity or is manipulated by a frontrunner, the user may receive far fewer LP tokens than expected, but the protocol still locks their entire input amount. This exposes users to significant loss without any mechanism to reject unfavorable execution.",
+      "severity": "high",
+      "original_id": "1f5e20cc357db610"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_058",
+      "title": "Mathematical Precision Loss in share_to_locked_share and locked_share_to_share Causes Systemic Underpayment",
+      "description": "The functions share_to_locked_share and locked_share_to_share perform division operations (bigdecimal::div) that truncate fractional results. When a user has a small delegation relative to the total pool, the division can round down to zero, causing the user's locked share to be recorded as zero even though they hold a non-zero amount of LP tokens. This results in the user being unable to withdraw their funds because the protocol believes they have no locked shares, effectively locking their assets permanently. For example, if total_share = 1000, total_locked_share = 1000000, and share = 1, then locked_share = (1 * 1000000) / 1000 = 1000, but if total_share = 1000000, total_locked_share = 1000, and share = 1, then locked_share = (1 * 1000) / 1000000 = 0 (truncated).",
+      "severity": "high",
+      "original_id": "1786b7eeb70563b9"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_059",
+      "title": "Validation After State Change in extend_internal Allows Double-Withdrawal",
+      "description": "In extend_internal, the function first calls withdraw_delegation, which removes the delegation from the table and emits a WithdrawDelegationEvent. Only after this state change does it validate that new_release_time > release_time. If an attacker calls extend with new_release_time <= release_time, the withdrawal still occurs, and the new deposit is rejected. However, the withdrawn amount is already removed from the locked shares and the user has received a withdrawal event, but the new delegation fails. This allows an attacker to repeatedly call extend with invalid new_release_time to drain locked shares without being able to redeposit, effectively stealing the locked assets.",
+      "severity": "high",
+      "original_id": "807ae969a7949c27"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_060",
+      "title": "Unbounded Delegation Slot Count Enables DoS via Max Slot Exhaustion",
+      "description": "The max_delegation_slot parameter is set to u64::MAX by default, but can be lowered by admin via update_params. However, the batch_extend function allows users to extend multiple delegations in one call, and each delegation entry consumes one slot. An attacker can create a large number of small delegations with different release times and validators, then call batch_extend to exhaust the max_delegation_slot limit. Once exhausted, no other user can create new delegations, effectively DoSing the entire staking protocol. The function does not validate that the total number of delegations after batch_extend will not exceed max_delegation_slot before performing any state changes.",
+      "severity": "high",
+      "original_id": "9279011978200f38"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_061",
+      "title": "Unit Mismatch in LockedDelegationResponse.amount Causes Incorrect Withdrawal Calculations",
+      "description": "The get_locked_delegations function returns LockedDelegationResponse with an 'amount' field that is calculated via locked_share_to_amount, which internally calls staking::share_to_amount. However, staking::share_to_amount returns the amount in the native token unit (e.g., uusdc), while the user's input to withdraw_asset is in the same unit. The problem arises when the staking module's share_to_amount function uses a different scaling factor than the coin module's balance function. If the staking module uses 18 decimals and the coin module uses 6, then the amount returned in LockedDelegationResponse is 10^12 times larger than the actual balance. When a user calls withdraw_asset with this amount, they attempt to withdraw 10^12 times more than they own, which will revert \u2014 but if the user is unaware and uses the displayed amount, they cannot withdraw correctly, leading to permanent asset locking.",
+      "severity": "high",
+      "original_id": "d932e6e4f193014d"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_062",
+      "title": "Missing User Protection in Withdraw Function Allows Full Asset Drain",
+      "description": "The withdraw function allows any entity to withdraw any amount of funds from the vault without requiring the user to specify a minimum acceptable output or validating against available balance. This enables an attacker to drain the entire vault balance in a single call, as there is no mechanism for users to protect against unfavorable execution or partial withdrawal.",
+      "severity": "critical",
+      "original_id": "ee57c045e9efc4fe"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_063",
+      "title": "Validation Timing Violation: Reward Per Stage Check Occurs After Withdrawal Execution",
+      "description": "The withdraw function performs the reward_per_stage > 0 validation after initiating the withdrawal via primary_fungible_store::withdraw. This violates Pattern 2: validation must occur before state changes. An attacker can trigger a withdrawal when reward_per_stage is zero, and if the withdrawal succeeds (e.g., due to prior state), the validation fails only after funds have been transferred, leaving the protocol in an inconsistent state with no recourse.",
+      "severity": "high",
+      "original_id": "e3ea8b4077bda6a0"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_064",
+      "title": "State Synchronization Failure in Withdraw Function Chain",
+      "description": "The withdraw function calls primary_fungible_store::withdraw to transfer funds, but does not update or validate the vault's internal balance state. The balance is only tracked externally via primary_fungible_store::balance, while the reward_per_stage is the only internal state. This creates a synchronization gap: if an external actor manipulates the vault store's balance directly (e.g., via another contract), the vault's logic remains unaware. The withdraw function assumes the balance is correct, but no internal accounting is maintained, leading to potential double-spending or over-withdrawal if the underlying store is compromised.",
+      "severity": "high",
+      "original_id": "25585c23902668ce"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_065",
+      "title": "Insufficient Access Control on update_reward_per_stage Allows Unauthorized Parameter Manipulation",
+      "description": "The update_reward_per_stage function is marked as public entry and relies solely on utils::check_chain_permission(chain) for access control. However, the chain parameter is a signer, and there is no verification that the signer is an authorized admin or governance entity. If an attacker gains control of any signer (e.g., via compromised key or front-running), they can set reward_per_stage to any value, including arbitrarily high values that could trigger inflation or drain funds from dependent systems (e.g., vesting contracts). This function lacks explicit access control modifiers or role-based restrictions.",
+      "severity": "high",
+      "original_id": "800ce3b67dd0a4d7"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_066",
+      "title": "No Balance Check in Withdraw Leads to Underflow and Fund Drain",
+      "description": "The withdraw function does not validate that the requested amount is less than or equal to the available balance in the vault store. An attacker can call withdraw(1000000) even if the vault holds only 100 coins. The primary_fungible_store::withdraw function may revert if insufficient balance exists, but this is not guaranteed across all implementations. Even if it reverts, the validation occurs after the function call, and the attacker can attempt multiple withdrawals in a single transaction batch, potentially draining the vault if any withdrawal succeeds. This creates a risk of partial execution and fund loss.",
+      "severity": "high",
+      "original_id": "5a0555e73386a4b3"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_067",
+      "title": "Reward Metadata Hardcoded and Not Verifiable, Leading to Interface Compatibility Risk",
+      "description": "The reward_metadata() function returns a hardcoded metadata object for 'uinit' from @initia_std. If the external coin contract at @initia_std changes its metadata structure, renames the token, or forks (e.g., to 'uINIT' or different decimals), the vault will continue to reference the old metadata, causing primary_fungible_store::withdraw and deposit to fail or interact with the wrong asset. This violates Pattern 8: external system assumptions. No dynamic lookup or version check is performed, creating a silent failure risk that could lock funds or cause accounting mismatches.",
+      "severity": "medium",
+      "original_id": "befced8a73bbaba7"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_068",
+      "title": "No Replay Protection or Nonce Mechanism for Withdrawals Enables Reentrancy and Double-Withdrawal",
+      "description": "The withdraw function has no nonce, timestamp, or state flag to prevent multiple withdrawals in rapid succession or reentrancy. An attacker could call withdraw in a loop or via a malicious contract that re-enters the vault during the withdrawal, potentially withdrawing the same funds multiple times if the underlying primary_fungible_store does not enforce atomicity. Even if the store prevents double-spending, the lack of internal state tracking (e.g., last_withdrawal_time or withdrawal_nonce) means the vault cannot detect or prevent abuse.",
+      "severity": "high",
+      "original_id": "358c778260364531"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_069",
+      "title": "Snapshot State Inconsistency Due to Lazy Write Logic Flaw",
+      "description": "The snapshot system incorrectly tracks user balances due to a flawed lazy-write mechanism in `check_snapshot` and `get_snapshot_balance_internal`. When a snapshot is taken at block N, and a user's balance changes after N, the system only records the balance at block N if the user performs a subsequent mint/burn. Users who do not interact after the snapshot never have their balance recorded, causing `get_snapshot_balance` to return the current balance instead of the snapshot balance. This breaks the core economic invariant of snapshot-based reward distribution, allowing users to claim rewards based on inflated balances they never had at the snapshot time. The flaw stems from treating the current balance as a fallback for missing snapshot entries, when it should only be used if the user had no prior activity before the snapshot.",
+      "severity": "critical",
+      "original_id": "c16bb416e0708710"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_070",
+      "title": "Reward Withdrawal Bypass via Zero Reward Per Stage",
+      "description": "The withdraw function requires reward_per_stage > 0 to proceed, but does not validate that the vault store has sufficient balance to cover the withdrawal amount. An attacker can set reward_per_stage to a positive value, deposit a small amount, then withdraw any arbitrary amount (even exceeding the vault balance) because the fungible asset store allows overdrawing when the signer has authority. This leads to unauthorized minting of tokens.",
+      "severity": "critical",
+      "original_id": "2926ef51d1e60d8c"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_071",
+      "title": "Reward Per Stage Update Allows Arbitrary Value Setting Without Bounds",
+      "description": "The update_reward_per_stage function accepts any u64 value > 0 without upper bounds or sanity checks. This allows setting reward_per_stage to an astronomically high value (e.g., 2^64 - 1), which when combined with deposit/withdraw logic, enables attackers to withdraw exponentially more tokens than deposited, effectively minting tokens out of thin air.",
+      "severity": "critical",
+      "original_id": "62dc449a76f84c89"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_072",
+      "title": "Missing Balance Check in Withdraw Leads to Token Inflation",
+      "description": "The withdraw function calls primary_fungible_store::withdraw with a signer and amount, but does not verify that the vault's balance >= amount. Since the signer is generated from the extend_ref (which has full control over the store), the underlying fungible store implementation allows withdrawals exceeding the balance, effectively creating new tokens. This is a fundamental flaw in operation lifecycle integrity.",
+      "severity": "critical",
+      "original_id": "928339b5ca599636"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_073",
+      "title": "Reward Metadata Hardcoded to uinit Without Chain Context",
+      "description": "The reward_metadata() function always returns metadata for 'uinit' regardless of chain or context. If the vault is deployed on a chain where 'uinit' is not the native token or is not mintable by the signer, the deposit and withdraw operations will fail silently or revert unexpectedly. This creates interface incompatibility with external systems expecting context-aware token metadata.",
+      "severity": "high",
+      "original_id": "a4984b1dee596017"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_074",
+      "title": "No Authorization Binding in Withdraw Operation",
+      "description": "The withdraw function uses a signer generated from extend_ref, which is fixed at initialization. Any entity with knowledge of the vault's address can trigger withdraw() via a malicious actor who has obtained the extend_ref (e.g., via a compromised node or front-end). The operation is not bound to any caller authorization or context \u2014 it is a global capability. This allows anyone to drain the vault after reward_per_stage is set.",
+      "severity": "high",
+      "original_id": "16acfe687041d86c"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_075",
+      "title": "Automatic Deposit Trigger on Withdrawal Returns Creates Double Funding",
+      "description": "The cabal_token module's deposit() function is registered as a dispatchable function and is automatically triggered when FungibleAsset is returned to the contract's object store during a withdrawal. Since the deposit() function has no caller verification and automatically adds returned funds to the holder's CabalBalance, an attacker can exploit this by withdrawing funds and having them automatically redeposited, effectively creating a double-funding loop where the same tokens are counted twice in snapshot balances and supply calculations.",
+      "severity": "critical",
+      "original_id": "0b866cb7bfd5aa3c"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_076",
+      "title": "Snapshot Balance Lookup Uses Incomplete Iteration Logic Leading to Incorrect Historical Balance Read",
+      "description": "The get_snapshot_balance_internal function uses table::iter with a limit of 2 entries to find the most recent snapshot before or at block_height, but does not properly iterate to find the largest key <= block_height. Instead, it returns the first entry found in the iteration, which may be a later snapshot if the table is not sorted by key order. This causes historical balance queries to return incorrect values, leading to miscomputed rewards and staking claims.",
+      "severity": "high",
+      "original_id": "5d4171a62485a977"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_077",
+      "title": "Snapshot State Commitment Occurs Before Validation in update_l2_data, Enabling Double-Spend of Snapshot Balances",
+      "description": "In update_l2_data, the function reads l2_snapshot_value and user_snapshot_value, then performs arithmetic (l2_snapshot_value -= amounts[i], user_snapshot_value += amounts[i]) before validating that l2_snapshot_value >= amounts[i]. The assertion occurs after the subtraction, meaning if the assertion fails, the state has already been mutated. This allows an attacker to trigger a revert after partially consuming L2 buffer, leaving the system in an inconsistent state where funds are deducted from L2 but not credited to users.",
+      "severity": "critical",
+      "original_id": "8c97222215d23ff8"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_078",
+      "title": "Lazy Snapshot Write in check_snapshot Does Not Handle Concurrent Snapshot Triggers, Leading to Missing Snapshot Entries",
+      "description": "The check_snapshot function only writes a snapshot entry if current_block_height > snapshot_block and the snapshot key does not exist. However, if two transactions trigger snapshot writes for the same address and snapshot_block concurrently, both may read the same state (balance) and write the same snapshot value, or one may overwrite the other. This results in missing or duplicated snapshot entries, corrupting historical balance tracking and causing reward miscalculations.",
+      "severity": "high",
+      "original_id": "a6898132e493c477"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_079",
+      "title": "Snapshot Supply Tracking Uses Coin Supply Without Validation, Permitting Negative or Invalid Supply Values",
+      "description": "The snapshot() function reads coin::supply(metadata) and stores it directly into supply_snapshots without validating that the supply is non-negative or within bounds. If coin::supply returns an invalid value (e.g., due to a bug in the underlying fungible asset implementation or a malicious mint/burn), the snapshot will record an invalid supply. Subsequent reward calculations based on this supply will be mathematically invalid, leading to incorrect or negative reward distributions.",
+      "severity": "high",
+      "original_id": "41d4787ac6e69856"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_080",
+      "title": "Authorization in deposit/withdraw Not Bound to Caller, Enabling Authorization Reuse and Front-Running",
+      "description": "The deposit and withdraw functions accept a TransferRef as a parameter, but do not verify that the caller is the owner of the Object<T> store. This means any actor can call deposit/withdraw with a valid TransferRef (e.g., obtained from a previous transaction) and execute the operation on behalf of another user. An attacker can front-run a legitimate user's deposit by calling deposit with the same TransferRef before the user's transaction is mined, consuming the transfer and stealing the funds.",
+      "severity": "critical",
+      "original_id": "7bfec692d9ae77d0"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_081",
+      "title": "Snapshot State Inconsistency Due to Lazy Write and Missing Balance Update in update_l2_data",
+      "description": "The update_l2_data function updates snapshot balances for users and an L2 address but fails to update the actual on-chain CabalBalance state. This creates a critical inconsistency: snapshot balances are decremented for the L2 address and incremented for users, but the live balances (used in mint_to, withdraw, etc.) remain unchanged. This allows an attacker to drain the L2 address's real balance by repeatedly calling update_l2_data to inflate snapshot balances of malicious addresses, while the L2 address's actual balance remains untouched and can be withdrawn by legitimate users, leading to double-spending and protocol insolvency.",
+      "severity": "critical",
+      "original_id": "761e3f7498306ef7"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_082",
+      "title": "Missing User Protection in mint_to and update_l2_data Allows Arbitrary Balance Manipulation",
+      "description": "The mint_to function allows anyone holding a MintCapability to mint arbitrary amounts to any address without user consent or approval bounds. Combined with update_l2_data, which can arbitrarily shift snapshot balances from an L2 address to any user, this enables an attacker with minting rights to inflate snapshot balances of malicious addresses while draining the L2 address's real balance. Users have no mechanism to set minimum acceptable output bounds or reject unfavorable state shifts, violating Pattern 1 (User Control Over Execution Outcomes). This allows targeted manipulation of staking rewards and voting power based on manipulated snapshot balances.",
+      "severity": "high",
+      "original_id": "d17059645ed6db88"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_083",
+      "title": "Validation After State Change in update_l2_data Enables Invalid Snapshot Transfers",
+      "description": "In update_l2_data, the function first reads the L2 snapshot balance and then performs the subtraction and addition operations on snapshot values before validating that l2_snapshot_value >= amounts[i]. However, the validation occurs after the subtraction has already been performed on the local variable l2_snapshot_value, and the final state update is done via table::upsert. This creates a race condition: if the L2 balance is insufficient, the subtraction still occurs in memory and the state is updated inconsistently. The validation check is performed on a local variable after mutation, not on the actual state before modification, violating Pattern 2 (Validation Timing). This allows an attacker to trigger partial state updates that leave the system in an inconsistent state.",
+      "severity": "high",
+      "original_id": "ae42795c6ce2fb89"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_084",
+      "title": "Snapshot Supply Mismatch Due to Inconsistent Supply Tracking in snapshot()",
+      "description": "The snapshot() function updates supply_snapshots using coin::supply(metadata), but the mint_to function updates the CabalBalance.balance directly without updating the underlying fungible asset supply. This creates a divergence: the on-chain supply tracked by primary_fungible_store (via mint_ref) is correct, but the snapshot_supply is updated from coin::supply, which may not reflect the actual minted amount if the fungible asset is not properly synchronized. This leads to incorrect reward calculations during snapshot-based reward distribution, where users receive rewards based on a supply value that does not match the real circulating supply, causing protocol insolvency or unfair distribution.",
+      "severity": "high",
+      "original_id": "1e0aece41b899009"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_085",
+      "title": "Inconsistent Balance Updates in get_mut_cabal_balance and get_snapshot_balance_internal",
+      "description": "The get_mut_cabal_balance function initializes a new CabalBalance with start_block = current_block_height, but get_snapshot_balance_internal returns 0 if block_height < start_block. However, during snapshot() and update_l2_data, balances are copied into snapshot tables without updating start_block. This creates a scenario where a user who never interacted before a snapshot has a start_block set to the snapshot block, but their snapshot balance is recorded as 0. Later, if they mint tokens, their live balance increases, but their snapshot balance remains 0, and get_snapshot_balance_internal returns 0 even if the snapshot block is >= start_block. This breaks reward distribution logic for new users who joined after the last snapshot, leading to permanent loss of rewards.",
+      "severity": "high",
+      "original_id": "500a0cdc450c47d8"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_086",
+      "title": "Merkle Proof Generation Allows Replay Attacks Due to Predictable Dummy Hash",
+      "description": "The get_merkle_root_and_proof function generates Merkle proofs using a deterministic dummy hash based on a fixed address (@0xff) and the difference between total and user score. This allows an attacker to precompute valid Merkle proofs for any user's score by crafting a dummy entry with the same total score and a different user address. Since the Merkle root is computed by concatenating the user hash and dummy hash in a fixed order based on lexicographic comparison, an attacker can submit a snapshot with a maliciously crafted dummy hash that matches the expected structure, enabling them to claim rewards for other users' scores without authorization. This bypasses the intended proof-of-inclusion mechanism and allows unauthorized reward claims.",
+      "severity": "critical",
+      "original_id": "b46e8c6e66b36936"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_087",
+      "title": "Reward Distribution Logic Ignores Minimum Eligible TVL After Bridge Re-registration",
+      "description": "The protocol enforces a minimum eligible TVL (TEST_MIN_ELIGIBLE_TVL = 1) to qualify for reward distribution. However, after a bridge is deregistered and re-registered, the TVL balance is not reset or re-validated against the minimum threshold. The function vip::get_user_funded_reward and vip::get_operator_funded_reward rely on the current TVL state, but the re-registration does not trigger a reset of the TVL tracking. An attacker can deregister a bridge with zero TVL, re-register it, and immediately claim rewards for the next stage even if the TVL is below the minimum threshold, because the system uses the pre-deregistration TVL state or assumes the bridge is eligible without re-validation. This allows reward theft by exploiting the state inconsistency between registration status and TVL eligibility.",
+      "severity": "high",
+      "original_id": "ed0dffb1e5246348"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_088",
+      "title": "Batch Claim Functions Allow Claiming Rewards for Non-Existent or Deregistered Stages",
+      "description": "The batch_claim_user_reward_script and batch_claim_operator_reward_script functions accept arbitrary stage numbers and Merkle proofs without validating that the stage corresponds to a currently registered bridge or that the bridge was active during that stage. An attacker can submit Merkle proofs for stages from a previously deregistered bridge (e.g., stage 1-3) and claim rewards for those stages even after the bridge has been re-registered with a new version. The vesting system tracks vesting positions by bridge_id and stage, but does not validate the bridge's active status at the time of the snapshot. This allows an attacker to claim rewards for stages that were never eligible under current protocol rules, effectively stealing funds from the vault by claiming rewards for invalid historical stages.",
+      "severity": "high",
+      "original_id": "f2aa2ba1c24cbf13"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_089",
+      "title": "Lock Stake Function Allows Claiming Rewards for Future Stages Using Incorrect Vesting Position References",
+      "description": "The lock_stake_script function allows users to lock stake using the remaining reward from a vesting position, but it does not validate that the requested stage corresponds to the most recently claimed stage. An attacker can claim rewards for stage 1, then immediately lock stake using the remaining reward from stage 5 (which has not been claimed yet) by manipulating the stage parameter. The vesting system stores vesting positions per (user, bridge_id, version, stage), but the lock_stake_script does not verify that the stage being locked is the most recently claimed one. This allows an attacker to lock stake against future or non-existent vesting positions, causing the vault to burn reward tokens that were never distributed, resulting in permanent loss of protocol funds.",
+      "severity": "high",
+      "original_id": "917add21312af5bb"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_090",
+      "title": "Operator Reward Claiming Allows Unauthorized Reward Transfer via Update Operator",
+      "description": "The update_operator function allows the current operator to transfer operator rights to a new address. However, after the update, the new operator can claim rewards for all previous stages (including those claimed by the old operator) because the vesting system does not reset or invalidate the old operator's claimed positions. The function batch_claim_operator_reward_script does not check the operator's identity against the current operator record at the time of the snapshot. An attacker can become operator, claim all past rewards, then transfer operator rights back to the original operator, leaving the original operator with no claimable rewards but the attacker having claimed everything. This results in complete theft of operator rewards for all prior stages.",
+      "severity": "high",
+      "original_id": "b88b802988ce6f32"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_091",
+      "title": "Division by Vesting Period Can Round to Zero, Leading to Permanent Reward Loss",
+      "description": "The vesting logic divides the initial reward by the vesting period (e.g., 10) to compute per-stage vesting amounts. If the initial reward is less than the vesting period (e.g., 5 tokens over 10 stages), the division (5 / 10) results in 0 due to integer truncation. The protocol then distributes 0 per stage, and the remaining reward is never claimed because the vesting position is considered 'fully vested' when the remaining amount reaches zero. This causes permanent loss of user and operator rewards. For example, if a user earns 5 tokens in a stage and the vesting period is 10, they receive 0 per stage for 10 stages, and the 5 tokens are permanently locked in the vesting contract with no way to claim them.",
+      "severity": "high",
+      "original_id": "7bddaf931a979f33"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_092",
+      "title": "Merkle Proof Validation Uses Fixed Dummy Address, Enabling Collusion Attacks",
+      "description": "The get_merkle_root_and_proof function uses a fixed dummy address (@0xff) to generate the second leaf in the Merkle tree. This allows two colluding users to generate valid Merkle proofs for each other's scores by swapping their user addresses and total scores. For example, User A with score 100 and total 1000 can generate a proof using dummy hash based on @0xff and 900. User B can then submit a snapshot with user = @0xff, l2_score = 900, total = 1000, and claim User A's reward by using the same proof. Since the proof only validates the hash structure and not the actual user identity, the protocol cannot distinguish between legitimate and collusive submissions. This enables a 1:1 reward theft scheme between colluding parties.",
+      "severity": "high",
+      "original_id": "ff57070ac2bc2b94"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_093",
+      "title": "Reward Distribution Uses Unvalidated TVL Ratio, Allowing Manipulation of Reward Allocation",
+      "description": "The reward distribution formula combines bridge weight and TVL ratio to determine allocation, but the TVL ratio is not validated against the actual TVL in the vault. The function vip::get_user_funded_reward uses a TVL ratio derived from the pool ratio (TEST_POOL_RATIO = 5/10), but this is hardcoded and not dynamically updated based on actual token balances. An attacker can manipulate the TVL by transferring tokens to one bridge's address and not the other, causing the protocol to use an incorrect TVL ratio (e.g., 100% for one bridge) while the actual TVL is skewed. This allows an attacker to claim disproportionate rewards by artificially inflating the TVL ratio for one bridge, leading to unfair reward distribution and theft from other users.",
+      "severity": "high",
+      "original_id": "d2e825ba33638ff0"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_094",
+      "title": "Snapshot State Manipulation via Unrestricted update_l2_data",
+      "description": "The update_l2_data function allows any authorized manager to arbitrarily transfer snapshot balances between addresses without validating the source balance or enforcing atomicity. This enables an attacker to manipulate snapshot balances before a snapshot is taken, effectively stealing future rewards by artificially inflating their own snapshot balance while draining others. The function reads from and updates snapshot balances stored in Table, which are later used by get_snapshot_balance and get_snapshot_supply to calculate staking rewards. Since the function is only guarded by manager::is_authorized (which may be compromised or misconfigured), an attacker with access can manipulate snapshot state at will, breaking the economic invariant that snapshot balances must reflect actual holdings at the time of snapshot.",
+      "severity": "critical",
+      "original_id": "92a83533694d1976"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_095",
+      "title": "Snapshot Balance Representation Mismatch in get_snapshot_balance_internal",
+      "description": "The get_snapshot_balance_internal function returns a balance value that is assumed to represent the user's balance at a past block height, but it does not validate whether the snapshot entry corresponds to the requested block height. Instead, it uses a table iterator with a start key and retrieves the first entry <= block_height, which may be an older snapshot or even a future one if gaps exist. This causes the function to return incorrect historical balances \u2014 for example, if a user had 1000 at block 100, then 1500 at block 150, and the system queries for block 120, it returns 1500 instead of 1000. This breaks reward calculations in voting_reward and cabal modules that rely on accurate historical snapshots. The caller expects a true snapshot value at the exact block height, but receives the most recent snapshot <= requested height, creating a representation boundary violation.",
+      "severity": "high",
+      "original_id": "66ecda5e47b14783"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_096",
+      "title": "Desynchronized Supply Snapshot Update in snapshot()",
+      "description": "The snapshot() function updates supply_snapshots using coin::supply(metadata) at the time of snapshot, but does not ensure that all holder balances have been snapshotted before this update. If a user mints tokens between the time snapshot() is called and when the supply is read, the supply snapshot becomes inconsistent with individual holder snapshots. For example, if the total supply is 10,000 and 5,000 is held by user A, and user B mints 1,000 after snapshot() starts but before coin::supply() is called, the supply snapshot becomes 11,000 while user A's snapshot remains 5,000 \u2014 creating a 1,000 discrepancy. This breaks the invariant that sum(holder snapshots) == supply snapshot. The result is that reward distributions based on proportional shares become mathematically invalid, causing under- or over-distribution of rewards to users.",
+      "severity": "high",
+      "original_id": "31a10557f2bb1d8b"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_097",
+      "title": "Lazy Snapshot Write Can Miss Balances Due to Non-Contiguous Block Gaps",
+      "description": "The check_snapshot function only writes a snapshot entry if the current block height > snapshot_block and no entry exists for snapshot_block. However, if blocks are skipped (e.g., due to L2 finality delays or reorgs), and a user's balance changes during the gap, the system never records the balance at the intended snapshot block. For example, if snapshot_block = 100, and the next block is 105, and the user's balance changes from 1000 to 1200 between blocks 101-104, check_snapshot will not write a snapshot at block 100 because current_block_height (105) > 100, but it also won't write a snapshot for block 100 because it only writes when the key is missing \u2014 and the key for block 100 was never created. Thus, get_snapshot_balance will fall back to current balance (1200) instead of the true snapshot (1000), causing reward miscalculations. This violates the assumption that snapshot entries are written for every snapshot block, leading to data loss.",
+      "severity": "high",
+      "original_id": "2c13b143cb3066e9"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_098",
+      "title": "Incorrect Snapshot Balance Fallback in get_snapshot_balance_internal with Empty Table",
+      "description": "When get_snapshot_balance_internal encounters an empty snapshot table, it returns the current balance (cabal_balance.balance) as the snapshot value. However, this is only valid if the user has never had a prior snapshot. If the user had a snapshot at block 50, then their balance changed, and the snapshot table was cleared (e.g., via bug or malicious action), the function incorrectly returns the current balance as the historical snapshot. This allows an attacker to clear their snapshot table (e.g., via a bug in another module) and then claim a higher historical balance than they ever had. For example, if a user had 1000 at block 50, then 2000 at block 100, and the snapshot table is cleared, get_snapshot_balance(..., 50) returns 2000 instead of 1000 \u2014 inflating their reward share by 100%.",
+      "severity": "high",
+      "original_id": "80797ff7c457b4c7"
+    },
+    {
+      "id": "code4rena_cabal-liquid-staking-token_2025_05_tool_099",
+      "title": "Automatic Processing of Withdrawal Funds via Reward Metadata Transfer Triggers Unintended Reward Distribution",
+      "description": "The contract automatically processes any transfer of reward tokens (vault::reward_metadata()) to the VIP contract address as a signal to distribute rewards, even when the transfer originates from system operations (e.g., bridge deposits or external fund returns). This allows an attacker to trigger reward distribution to arbitrary users by sending reward tokens to the VIP contract, effectively creating a mechanism where system-initiated fund returns are misinterpreted as user-eligible deposits. This leads to unauthorized reward claims and protocol loss.",
+      "severity": "critical",
+      "original_id": "059163b994f692b6"
+    }
+  ],
+  "input_tokens": 24695,
+  "output_tokens": 811,
+  "cached_tokens": 743
+}

@@ -1,0 +1,729 @@
+{
+  "project": "code4rena_fenix-finance-invitational_2024_10",
+  "agent": "agent317",
+  "status": "success",
+  "timestamp": "2026-04-09T12:53:53.662176",
+  "elapsed_seconds": 60.5,
+  "total_expected": 1,
+  "total_found": 100,
+  "true_positives": 1,
+  "false_negatives": 0,
+  "false_positives": 99,
+  "detection_rate": 1.0,
+  "precision": 0.01,
+  "f1_score": 0.019801980198019802,
+  "matched_findings": [
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_expected_000",
+      "expected": "killGauge()will lead to wrong calculation of emission",
+      "matched": "Inconsistent Gauge State Handling in killGauge",
+      "confidence": 0.9,
+      "justification": "Finding 0 correctly identifies the killGauge function in VoterUpgradeableV2.sol and describes the issue of state desynchronization where killed gauges continue to accumulate claimable rewards. This matches the expected vulnerability description about incorrect emission calculations after killGauge is called.",
+      "severity": "high",
+      "expected_description": "Submitted by\nCh_301\n, also found by\nKupiaSec\n\nhttps://github.com/code-423n4/2024-09-fenix-finance/blob/main/contracts/core/VoterUpgradeableV2.sol#L239\n\nhttps://github.com/code-423n4/2024-09-fenix-finance/blob/main/contracts/core/VoterUpgradeableV2.sol#L630-L639\n\nThe\nVoterUpgradeableV2.sol\ncontract has\nkillGauge()\nthat disables the gauge to prevent it from further rewards distribution, only the address with\nGOVERNANCE_ROLE\nrole can call it.\nthe\nkillGauge()\nonly updates three state variables.\n\nFile:\nVoterUpgradeableV2\n.\nsol\n227\n:\nfunction\nkillGauge\n(\naddress\ngauge_\n)\nexternal\nonlyRole\n(\n_GOVERNANCE_ROLE\n) {\n...\n232\n:\ndelete\ngaugesState\n[\ngauge_\n].\nisAlive\n;\n...\n236\n:\ndelete\ngaugesState\n[\ngauge_\n].\nclaimable\n;\n...\n240\n:\ntotalWeightsPerEpoch\n[\nepochTimestamp\n] -=\nweightsPerEpoch\n[\nepochTimestamp\n][\nstate\n.\npool\n];\n\nThe\ndistribute()\nfunction will distribute rewards to pools managed by the\nVoterUpgradeableV2.sol\ncontract and it will call the Minter contract by triggering\nupdate_period()\nfunction before distributing rewards.\n\nThe timeline looks like this:\n\nEpoch_x                      Epoch_x+1\n|-----------x-------------------|-x---------------------\ncall `killGauge()`             call `distribute()`\n\nWhen\ndistribute()\ngets invoked in the timeline it will distribute the rewards of\nEpoch_x\n, The killed gauge has no weight in this epoch because its weight gets subtracted from\ntotalWeightsPerEpoch[]\nin\nkillGauge()\n.\n\nWhen the Minter invokes\nVoterUpgradeableV2.sol#notifyRewardAmount()\nto notify the contract of the reward amount to be distributed for\nEpoch_x\n, we can also find in the same function how the\nindex\nvalue gets increased.\n\nFile:\nVoterUpgradeableV2\n.\nsol\n382\n:\nfunction\nnotifyRewardAmount\n(\nuint256\namount_\n)\nexternal\n{\n...\n387\n:\nuint256\nweightAt\n=\ntotalWeightsPerEpoch\n[\n_epochTimestamp\n() -\n_WEEK\n];\n388\n:\nif\n(\nweightAt\n>\n0\n) {\n389\n:\nindex\n+= (\namount_\n*\n1e18\n) /\nweightAt\n;\n390\n:         }\n\nThe\nindex\nis updated as the reward amount divided by the total weights of\nEpoch_x,\nwe know the weight of the disabled gauge is not included in\ntotalWeightsPerEpoch[Epoch_x]\n.\n\nBack to\n_distribute()\n:\n\nFile:\nVoterUpgradeableV2\n.\nsol\n671\n:\nfunction\n_distribute\n(\naddress\ngauge_\n)\ninternal\n{\n...\n677\n:\nuint256\ntotalVotesWeight\n=\nweightsPerEpoch\n[\ncurrentTimestamp\n-\n_WEEK\n][\nstate\n.\npool\n];\n678\n:\n679\n:\nif\n(\ntotalVotesWeight\n>\n0\n) {\n...\n684\n:\nif\n(\nstate\n.\nisAlive\n) {\n685\n:\ngaugesState\n[\ngauge_\n].\nclaimable\n+=\namount\n;\n686\n:                     }\nelse\n{\n687\n:\nIERC20Upgradeable\n(\ntoken\n).\nsafeTransfer\n(\nminter\n,\namount\n);\n}\n\nBecause\nkillGauge()\ndoesn\u2019t delete the values of\nweightsPerEpoch[]\n, it will send back\namount\nof emissions back to Minter, which actually should get distributed between the existing pools.\n\nTo summarize, the\nindex\nis directly related by the value of\ntotalWeightsPerEpoch[Epoch_x]\n, and the\nkillGauge()\nis subtracted from the\nweightsPerEpoch\nof the disabled gauge. Therefore, the\nindex\ndidn\u2019t include the weight of the killed gauge, but\n_distribute\ncalculates its emission and sends it back to Minter.\n\nTo understand the impact, in case the total emissions for\nEpoch_x\nis\n80e18\nwith three active gauges (with the same amount of votes), each pool will receive\n26.5e18\ntokens.\n\nBut in case one gauge gets killed, one scenario is the 1st gauge will receive\n40e18\nand the other\n40e18\nwill get transferred back to Minter. This will leave the last gauge with 0 emissions (from here, the impact is related to how\ngauge.sol#.notifyRewardAmount()\nwill handle this situation which is out of scope in this audit).\n\nAnother scenario is to send\n40e18\nto the two gauges but the disabled gauge gets revived in the next epoch and will be able to receive his\n40e18\ntokens because the\ngaugesState[gauge_].index\nis not updated (this will loop us to the above scenario again because the\n40e18\ntokens do not exist in the first time).\n\nOne or more gauges will not receive their emissions.\nWrong calculation of\ngaugesState[gauge_].claimable\n.\nThe distribution system will be broken if the killed gauge gets revived again.\n\nThe impact depends on the order of the gauges array that passed to\ndistribute()\nfunction.\n\nLet\u2019s say now is\nEpoch_x\n+1:\n\nWe have three pools with the same vote weight (500e18) for each of them.\nindex = 10e18\n.\nTotal emission is:\namount_ = 80e18\n.\nThe\ntotalWeightsPerEpoch\nof\nEpoch_x\nis:\nweightAt = 1500e18\n.\n\nScenario 1:\n\nNo gauge gets disabled and each gauge will receive\n26.5e18\ntokens as emission.\n\nThis is how we calculate it:\n\nHow `notifyRewardAmount()` increase the `index`\nuint256 weightAt = 1500e18\nuint256 amount_ = 80e18\nindex += (amount_ * 1e18) / weightAt;\n= (80e18 * 1e18)/1500e18\n= 5.3e16\nNow, index = 10.053e18\nHow `distribute()` calcul the `amount` for the 3 pools\nuint256 delta = index - state.index;\n=  10.053 e18- 10e18\n= 0.053e18\nuint256 amount = (totalVotesWeight * delta) / 1e18;\n= (500e18 * 0.053e18)/1e18\n= 26.5e18\n\nScenario 2:\n\nOne gauge gets disabled, so the\ntotalWeightsPerEpoch\nof\nEpoch_x\nis now\nweightAt = 1000e18\n.\nWith the current logic, two gauges each will receive\n40e18\ntokens as emission and\n40e18\nshould be sent back to Minter; which is larger than the total emission which is\n80e18\n.\n\nThis is how we calculate it:\n\nHow `notifyRewardAmount()` increase the `index`\nuint256 weightAt = 1000e18\nuint256 amount_ = 80e18\nindex += (amount_ * 1e18) / weightAt;\n= (80e18 * 1e18)/1000e18\n= 8e16\nNow, index = 10.08e18\nHow `distribute()` calcul the `amount` for the 3 pools\nuint256 delta = index - state.index;\n=  10.08 e18- 10e18\n= 0.08e18\nuint256 amount = (totalVotesWeight * delta) / 1e18;\n= (500e18 * 0.08e18)/1e18\n= 40e18\n\nOne fix is to delete the\nweightsPerEpoch[][]\nin\nkillGauge()\n:\n\nfunction killGauge(address gauge_) external onlyRole(_GOVERNANCE_ROLE) {\n...\nuint256 epochTimestamp = _epochTimestamp();\ntotalWeightsPerEpoch[epochTimestamp] -= weightsPerEpoch[epochTimestamp][state.pool];\n+      delete  weightsPerEpoch[epochTimestamp][state.pool];\nemit GaugeKilled(gauge_);\n}\n\nHowever, the fix should take into consideration how the Minter calculates the emissions for every epoch (is it a fixed value every time or depending on how many gauges are active).\n\nInvalid Validation\n\nb-hrytsak (Fenix) confirmed\n\nalcueca (judge) commented\n:\n\nKilling gauges can be considered normal operation,; therefore, the finding and severity are valid.",
+      "found_description": "The killGauge function subtracts weights from totalWeightsPerEpoch but doesn't update the gauge's supplyIndex. This creates state desynchronization where killed gauges continue to accumulate claimable rewards in _updateForAfterDistribution until someone calls distribute on them.",
+      "found_id": "f00b3d06417cefee",
+      "tool_finding_index": 37
+    }
+  ],
+  "missed_findings": [],
+  "undecided_findings": [],
+  "extra_findings": [
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_000",
+      "title": "Unauthorized Implementation Upgrade via Fallback Function",
+      "description": "The fallback function allows any caller to update the implementation address when the current implementation differs from the factory's implementation, but it only checks that msg.sender != address(0). This means any non-zero address can trigger an implementation update, not just authorized parties. While the implementation is fetched from the bribeFactory, the update logic is accessible to anyone. This could allow attackers to force implementation updates at will, potentially disrupting protocol operations or enabling more sophisticated attacks if combined with other vulnerabilities.",
+      "severity": "high",
+      "original_id": "927e69121657e6af"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_001",
+      "title": "Incorrect Access Control in createBribe Function Allows Unauthorized Bribe Creation",
+      "description": "The createBribe function has incorrect access control logic that allows unauthorized users to create bribes. The require statement checks if msg.sender is either voter OR owner(), but the error message incorrectly states 'only voter or voter' instead of 'only voter or owner'. More critically, the function allows the owner to create bribes, which may violate the intended protocol design where only the voter contract should be able to create bribes. This could allow the contract owner to create unauthorized bribe contracts and potentially manipulate the bribe system.",
+      "severity": "high",
+      "original_id": "e106263ba59b0d96"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_002",
+      "title": "Missing Implementation Address Validation in createBribe Function",
+      "description": "The createBribe function deploys a new BribeProxy contract but does not validate that bribeImplementation is set to a valid, non-zero address. If bribeImplementation is address(0) (which could happen if not properly initialized or if changed to zero by owner), the contract deployment will fail or deploy to an invalid address. This would cause the entire bribe creation process to fail, preventing new bribes from being created and disrupting protocol functionality.",
+      "severity": "high",
+      "original_id": "102a7a0c0c90a815"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_003",
+      "title": "Incorrect Array Length Validation in addRewards Function",
+      "description": "The addRewards function that accepts address[][] memory _token and address[] memory _bribes has incorrect validation. The require statement checks that _token.length == _bribes.length, but this validation is insufficient. Each inner array in _token[i] should correspond to a specific bribe at _bribes[i], but there's no validation that the inner arrays have appropriate lengths or contain valid token addresses. An attacker could pass arrays with mismatched inner dimensions or containing invalid tokens, potentially causing the function to revert or add invalid reward tokens to bribes.",
+      "severity": "medium",
+      "original_id": "dacb923062c8d91d"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_004",
+      "title": "Inconsistent Access Control Between addRewards Functions",
+      "description": "There are two overloaded addRewards functions with different access controls. The first addRewards (with single token) is onlyOwner, while the second addRewards (with 2D token array) allows both voter and owner. This inconsistency could lead to confusion and potential security issues if the voter is expected to have different permissions than the owner. The voter might be able to add rewards to arbitrary bribes without proper authorization checks.",
+      "severity": "medium",
+      "original_id": "a71f8effa9e2683f"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_005",
+      "title": "Potential Front-Running in BribeProxy Deployment",
+      "description": "The createBribe function deploys a new BribeProxy contract using address(new BribeProxy()) which creates a deterministic address based on the factory's nonce. An attacker could front-run this transaction by deploying a malicious contract at the predicted address before the legitimate bribe is created. When the factory tries to initialize the bribe, it would instead interact with the attacker's malicious contract, potentially leading to fund loss or protocol manipulation.",
+      "severity": "medium",
+      "original_id": "ed3ad55367a22feb"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_006",
+      "title": "Incorrect Reward Distribution Due to Epoch Boundary Mismatch",
+      "description": "The contract uses different timestamps for reward distribution (next epoch) and balance tracking (current epoch), leading to incorrect reward calculations. When rewards are notified, they are stored for the current epoch's timestamp, but balances are tracked for the next epoch. This creates a fundamental mismatch where rewards are calculated using balances from a different epoch than the rewards were intended for.\n\nMathematical Proof:\n- Let current epoch start = T\n- Rewards notified at T are stored in rewardData[token][T]\n- Balances are tracked at T (current epoch) for voting\n- But reward calculations use balanceOfOwnerAt(owner, T) for rewards at T\n- However, rewards notified at T should apply to votes cast during epoch T, which would be reflected in balances at T+WEEK\n\nExploitation Scenario:\n1. Attacker deposits votes at epoch T\n2. Rewards are notified for epoch T\n3. At epoch T+WEEK, attacker's votes are still active\n4. Reward calculation uses balance from epoch T instead of T+WEEK\n5. If votes change between epochs, rewards are incorrectly distributed\n\nFinancial Impact: Users receive incorrect reward amounts based on outdated balance snapshots, leading to either overpayment or underpayment of rewards.",
+      "severity": "high",
+      "original_id": "1b8d95bce4e69446"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_007",
+      "title": "Reward Calculation Loop Limited to 50 Epochs Causing Permanent Fund Loss",
+      "description": "The earned() functions have a hardcoded limit of 50 iterations when calculating rewards. If a user fails to claim rewards for more than 50 epochs (350 days), any rewards beyond the 50-epoch window become permanently inaccessible.\n\nMathematical Proof:\n- Loop condition: for (k; k < 50; k++)\n- If userLastTime is more than 50 weeks behind endTimestamp, loop exits early\n- Remaining rewards are never calculated or claimed\n- Example: User last claimed at epoch 100, current epoch is 155\n- Loop processes epochs 100-149 (50 epochs), epochs 150-154 rewards are lost\n\nExploitation Scenario:\n1. User deposits votes and accumulates rewards\n2. User doesn't claim for 51+ weeks (intentionally or accidentally)\n3. When user finally claims, only last 50 weeks of rewards are paid\n4. Rewards from earlier epochs are permanently locked in contract\n\nFinancial Impact: Users permanently lose access to rewards accumulated beyond the 50-epoch window. The locked funds remain in the contract but cannot be claimed by anyone.",
+      "severity": "high",
+      "original_id": "454112181a35beac"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_008",
+      "title": "Incorrect Reward Per Token Calculation with Division Precision Loss",
+      "description": "The rewardPerToken function performs division that can lead to significant precision loss, especially when total supply is large relative to rewards. The calculation (rewardsPerEpoch * 1e18) / totalSupply can round down to zero for small reward amounts.\n\nMathematical Proof:\n- rewardPerToken = (rewardsPerEpoch * 1e18) / totalSupply\n- If rewardsPerEpoch = 1000 (small bribe) and totalSupply = 1,000,000,000,000,000\n- Calculation: (1000 * 1e18) / 1,000,000,000,000,000 = 1,000,000,000,000,000,000 / 1,000,000,000,000,000 = 1000\n- But if totalSupply = 1,000,000,000,000,000,000 (larger), result = 1 (rounded down from 1.0)\n- With even larger totalSupply, result rounds to 0\n\nExploitation Scenario:\n1. Attacker monitors bribe notifications\n2. When small bribes are added to pools with large total supply\n3. rewardPerToken calculates to 0 due to rounding\n4. All users receive 0 rewards for that epoch\n5. Attacker can claim the rewards through other means or let them be locked\n\nFinancial Impact: Small bribes become effectively worthless as rewardPerToken rounds to zero, allowing attackers to exploit the precision loss to deny rewards to legitimate users.",
+      "severity": "high",
+      "original_id": "3a1e22a966b06542"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_009",
+      "title": "Balance Tracking Vulnerability During Token Transfers",
+      "description": "The contract tracks balances by owner address rather than tokenId, but comments indicate 'Owner must reset before transferring token'. However, there's no enforcement mechanism to ensure users reset their balances before transferring voting tokens, leading to incorrect reward attribution.\n\nMathematical Proof:\n- Balances stored as: _balances[owner][timestamp]\n- When tokenId is transferred, new owner can claim rewards earned by previous owner\n- Example: Alice has tokenId 123 with 1000 votes at epoch T\n- Alice earns rewards based on 1000 votes\n- Alice transfers token to Bob without resetting\n- Bob can claim Alice's earned rewards\n\nExploitation Scenario:\n1. User accumulates significant rewards with their voting token\n2. User transfers token to another address without first resetting/withdrawing\n3. New token owner claims all accumulated rewards\n4. Original user loses their rightful rewards\n\nFinancial Impact: Users can lose their earned rewards if they transfer voting tokens without first claiming or resetting their position. The new token owner can steal all accumulated rewards.",
+      "severity": "high",
+      "original_id": "1a55d84bf05ce72c"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_010",
+      "title": "Precision Loss in Token Conversion Leads to Permanent Token Loss",
+      "description": "The _convert function calculates toTokenAmount as (amount_ * _TO_TOKEN_PERCENTAGE) / _PRECISION, which can round down to zero for small amounts. When toTokenAmount rounds to zero, the entire conversion amount is allocated to veFNX creation, but if toVeNFTAmount also becomes zero due to precision loss, all tokens are burned without any tokens being minted or transferred, resulting in permanent loss of user funds.",
+      "severity": "high",
+      "original_id": "df128d62795e5840"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_011",
+      "title": "Missing Approval Reset Before SafeTransfer Creates Reentrancy Risk",
+      "description": "The _convert function sets approval to zero for the veCache address after creating a lock, but if toVeNFTAmount is zero (due to precision loss or user input), the approval is never set or reset. If the contract previously had a non-zero approval for veCache, a malicious votingEscrow contract could potentially drain FNX tokens from the RFenix contract through a reentrancy attack during the subsequent safeTransfer call.",
+      "severity": "high",
+      "original_id": "0c9a0c77242b61d1"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_012",
+      "title": "Insufficient Validation of VotingEscrow Contract Behavior",
+      "description": "The contract trusts the votingEscrow contract to properly handle create_lock_for_without_boost calls and return a valid tokenId, but there's no validation of the votingEscrow's implementation. A malicious or compromised votingEscrow could return an invalid tokenId, fail to properly create the lock, or behave unexpectedly during the approval process, potentially leading to loss of user funds.",
+      "severity": "medium",
+      "original_id": "b9daa2f226075ae3"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_013",
+      "title": "Incorrect Reward Token Balance Calculation in withdrawExcessiveRewardTokens",
+      "description": "The withdrawExcessiveRewardTokens function incorrectly calculates unclaimed rewards by subtracting (toRewardTokenAmount + toVeNftAmount - totalClaimed) from the current reward token balance. This formula is mathematically flawed because it doesn't account for the fact that totalClaimed represents rewards already distributed to users, while toRewardTokenAmount and toVeNftAmount represent potential future claims. The calculation should be: unclaimedRewards = current_balance - (total_potential_rewards - totalClaimed), but the current implementation incorrectly uses the contract's token balance instead of total_potential_rewards.\n\nMathematical Proof:\nLet:\n- Current reward token balance (B) = 1000 tokens\n- Total deposited tokens (D) = 500 tokens\n- Reward rate (R) = 2 reward tokens per deposit token\n- Total potential rewards (P) = D * R = 500 * 2 = 1000 tokens\n- Total claimed (C) = 300 tokens\n- toVeNftPercentage = 0.5 (50%)\n\nCorrect calculation:\nUnclaimed rewards = B - (P - C) = 1000 - (1000 - 300) = 1000 - 700 = 300 tokens\n\nCurrent flawed calculation:\ntoRewardTokenAmount + toVeNftAmount = getRewardsAmountOut(token.balanceOf(this)) = getRewardsAmountOut(500) = (500 * 2) = 1000 tokens\nUnclaimed rewards = 1000 - (1000 - 300) = 300 tokens (appears correct in this case)\n\nBut if the contract receives additional reward tokens (e.g., from yield or airdrops):\nB = 1500 tokens (500 extra tokens received)\nCorrect: Unclaimed rewards = 1500 - (1000 - 300) = 1500 - 700 = 800 tokens\nFlawed: Unclaimed rewards = 1500 - (1000 - 300) = 800 tokens (still appears correct)\n\nThe real issue emerges when deposit tokens are withdrawn:\nAfter withdrawDeposits() is called, token.balanceOf(this) = 0\ntoRewardTokenAmount + toVeNftAmount = getRewardsAmountOut(0) = 0\nUnclaimed rewards = B - (0 - C) = 1500 - (0 - 300) = 1500 - (-300) = 1800 tokens (arithmetic underflow)\n\nThis causes the contract to attempt to transfer more tokens than it holds, or if using SafeMath, will revert due to underflow.",
+      "severity": "high",
+      "original_id": "35ea610f671e93a7"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_014",
+      "title": "Inconsistent Phase Cap Calculation Allows Whitelist Phase Deposits to Bypass Public Phase Cap",
+      "description": "The deposit function calculates userDepositedCache differently for whitelist vs public phases, creating an inconsistency that allows users to deposit more than intended during the public phase. During whitelist phase, it uses the full userDeposited amount, but during public phase, it subtracts userDepositsWhitelistPhase. This creates a vulnerability where users can deposit up to (whitelistPhaseUserCap + publicPhaseUserCap) total, rather than being limited to the lower of the two caps.\n\nMathematical Proof:\nLet:\n- Whitelist phase user cap = 1000 tokens\n- Public phase user cap = 500 tokens\n- User deposits 1000 tokens during whitelist phase\n- During public phase: userDepositedCache = 1000 - 1000 = 0\n- User can now deposit up to 500 more tokens (public phase cap)\n- Total user deposits = 1000 + 500 = 1500 tokens\n\nThis violates the intended design where users should be limited to the maximum of either phase cap (1000 tokens), not the sum of both caps (1500 tokens). The protocol likely intends for users to have separate caps per phase, but the current implementation allows accumulation across phases.\n\nExploitation Scenario:\n1. Attacker deposits maximum during whitelist phase (1000 tokens)\n2. Attacker deposits maximum during public phase (500 tokens)  \n3. Attacker ends with 1500 tokens deposited, exceeding the intended per-user limit\n4. Attacker claims more rewards than intended, diluting other participants\n\nFinancial Impact: Users can deposit more than intended, claiming excessive rewards at the expense of other participants and the protocol's token distribution plan.",
+      "severity": "high",
+      "original_id": "48a257eb08616d01"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_015",
+      "title": "Incorrect Timestamp Validation Allows Overlapping Phases",
+      "description": "The setTimestamps function validates that timestamps are strictly increasing (startWhitelist < startPublic < endPublic < startClaim), but it doesn't prevent phases from overlapping or having gaps. More importantly, the phase checking functions use inconsistent comparison operators that can create edge cases where multiple phases are active simultaneously or no phase is active.\n\nMathematical Proof of Edge Cases:\n1. Multiple phases active simultaneously:\n   - If block.timestamp = startPublicPhaseTimestamp exactly\n   - isWhitelistPhase() uses: block.timestamp < startPublicPhaseTimestamp = false\n   - isPublicPhase() uses: block.timestamp >= startPublicPhaseTimestamp = true\n   - Result: Both functions return false and true respectively, but the deposit function logic treats them as mutually exclusive\n\n2. Gap between phases:\n   - If whitelist ends at time 1000, public starts at time 1002\n   - At time 1001: isWhitelistPhase() = false, isPublicPhase() = false\n   - Deposit function will revert with DepositClosed(), creating a 2-second gap where deposits are impossible\n\n3. Boundary condition at endPublicPhaseTimestamp:\n   - isPublicPhase() uses: block.timestamp <= endPublicPhaseTimestamp\n   - At exactly endPublicPhaseTimestamp: deposits are still allowed\n   - But claim phase starts only when block.timestamp > startClaimPhaseTimestamp\n   - If startClaimPhaseTimestamp = endPublicPhaseTimestamp + 1, there's a 1-second gap\n\nThe inconsistent comparison operators (< vs <=, > vs >=) across different phase checks create potential for phase boundary exploits and unexpected protocol behavior.",
+      "severity": "medium",
+      "original_id": "d8d4fedc43475840"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_016",
+      "title": "Division Precision Loss in getRewardsAmountOut with Small Deposits",
+      "description": "The getRewardsAmountOut function performs division operations that can round down to zero for small deposit amounts, particularly when the deposit token has high decimals. This can lead to users receiving zero rewards for small but valid deposits.\n\nMathematical Proof:\nLet:\n- Deposit token decimals = 18 (typical ERC20)\n- Deposit amount = 1 wei (1e-18 tokens)\n- Reward rate = 1 reward token per deposit token\n- toVeNftPercentage = 0.5 (50%)\n\nCalculation:\n1. totalAmount = (1 * 1) / (10^18) = 0 (rounds down to zero due to integer division)\n2. toVeNftAmount = (0 * 0.5e18) / 1e18 = 0\n3. toRewardTokenAmount = 0 - 0 = 0\n\nUser receives zero rewards for a non-zero deposit. While each individual loss is small, attackers could exploit this by making many small deposits to waste gas or test the system, and legitimate users with small deposits would lose their funds without compensation.\n\nFinancial Impact: Users making small deposits (below 10^decimals) will receive zero rewards, effectively losing their deposited tokens without compensation.",
+      "severity": "medium",
+      "original_id": "d10f9836ce2a5ba1"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_017",
+      "title": "Incorrect Reward Distribution Formula Allows Theft of All Reward Tokens",
+      "description": "The reward distribution formula in beforeFNXBoostPaid() uses an incorrect ratio calculation that allows an attacker to drain all reward tokens from the contract with minimal FNX boost payment. The formula calculates fnxBoostToBalanceRation as (paidBoostFNXAmount_ * _FNX_PREICSION) / IERC20Upgradeable(fenix).balanceOf(address(this)), which incorrectly treats the FNX balance as the denominator for reward token distribution. This means that when the contract has a large FNX balance, a small boost payment can claim a disproportionately large share of reward tokens. An attacker can exploit this by making a minimal boost payment when the contract has maximum FNX balance to drain all reward tokens.",
+      "severity": "critical",
+      "original_id": "5773440e3d2aa76b"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_018",
+      "title": "Missing Access Control on Critical Function Allows Unauthorized Reward Distribution",
+      "description": "The beforeFNXBoostPaid() function only checks that msg.sender == votingEscrow, but does not verify that the parameters (tokenOwner_, tokenId_, depositedFNXAmount_, paidBoostFNXAmount_) are valid or correspond to actual boost operations. An attacker who gains control of the votingEscrow address (or if votingEscrow is compromised) can call this function with arbitrary parameters to distribute reward tokens to any address without requiring actual FNX locking or boost payments. This allows complete theft of all reward tokens from the contract.",
+      "severity": "critical",
+      "original_id": "73ebb9184c3d9ca9"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_019",
+      "title": "Division Rounding Error Allows Zero-Cost Reward Extraction",
+      "description": "The reward distribution calculation uses integer division that rounds down, allowing attackers to extract rewards without paying the full proportional FNX amount. When fnxBoostToBalanceRation is calculated as (paidBoostFNXAmount_ * _FNX_PREICSION) / IERC20Upgradeable(fenix).balanceOf(address(this)), if paidBoostFNXAmount_ is small relative to the FNX balance, the ratio can round down to zero, but the subsequent reward calculation (fnxBoostToBalanceRation * rewardToken.balanceOf(address(this))) / _FNX_PREICSION may still produce a non-zero result due to the multiplication order. This allows attackers to pay minimal FNX amounts to extract substantial rewards.",
+      "severity": "high",
+      "original_id": "6deb65967b8a74e8"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_020",
+      "title": "Insufficient Parameter Validation Allows Reward Token Manipulation",
+      "description": "The addRewardToken() function prevents adding FNX as a reward token but does not prevent adding the contract's own address or other critical system addresses. An attacker who becomes owner (or if owner is compromised) can add malicious reward tokens that could be used to manipulate the reward distribution logic or cause the contract to interact with malicious contracts.",
+      "severity": "medium",
+      "original_id": "2582e2da26923b26"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_021",
+      "title": "Inflation Period Calculation Error Leading to Permanent Inflation",
+      "description": "The `weekly_emission()` function incorrectly calculates the inflation period by comparing `active_period <= lastInflationPeriod`. Since `lastInflationPeriod` is set to `active_period + inflationPeriodCount * WEEK` in the `start()` function, and `active_period` advances each week, the condition will always be true for exactly `inflationPeriodCount` weeks. However, the issue is that `active_period` is updated BEFORE the emission calculation in `update_period()`, meaning the inflation calculation uses the NEW period value. This causes the inflation to apply for one fewer week than intended. After the intended inflation period ends, the protocol incorrectly applies decay instead of inflation for the final week.\n\nMathematical Proof:\n- Initial state: active_period = T0, lastInflationPeriod = T0 + 8*WEEK\n- Week 1: active_period updates to T0+WEEK, then weekly_emission() checks T0+WEEK <= T0+8*WEEK \u2192 TRUE (inflation applies)\n- ...\n- Week 8: active_period updates to T0+8*WEEK, then weekly_emission() checks T0+8*WEEK <= T0+8*WEEK \u2192 TRUE (inflation applies)\n- Week 9: active_period updates to T0+9*WEEK, then weekly_emission() checks T0+9*WEEK <= T0+8*WEEK \u2192 FALSE (decay applies)\n\nBut the intended behavior should be 8 weeks of inflation (weeks 1-8), not weeks 0-7. This means week 8 incorrectly gets inflation when it should get decay, and week 9 incorrectly gets decay when it should still get inflation.\n\nFinancial Impact: The protocol will mint approximately 1.5% more tokens during week 8 than intended (inflation instead of decay), and approximately 1.5% fewer tokens during week 9 than intended (decay instead of inflation). This disrupts the intended emission schedule.",
+      "severity": "medium",
+      "original_id": "62350bb9e0e870ca"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_022",
+      "title": "Incorrect Emission Calculation When Weekly < Decay",
+      "description": "The `weekly_emission()` function has flawed logic when handling the case where weekly emission is less than the decay amount. The code returns `Math.max(weeklyCache < decay ? 0 : weeklyCache - decay, circulating_emission())`. However, if `weeklyCache < decay`, it returns `Math.max(0, circulating_emission())`, which means it will return `circulating_emission()` if that's larger than 0. But the intended behavior should be to apply decay until the weekly emission reaches the tail emission, not jump directly to the tail emission when weekly falls below decay.\n\nMathematical Proof:\nSuppose weekly = 100, decay = 110, circulating_emission() = 50.\nCurrent code: weekly < decay \u2192 return max(0, 50) = 50\nIntended behavior: Should return max(100-110, 50) but since 100-110 would underflow, it should be max(0, 50) = 50? Wait, this seems correct actually.\n\nLet me reanalyze: The issue is more subtle. When weekly < decay, the subtraction would underflow, so the ternary prevents that by returning 0. Then Math.max(0, tail_emission) returns tail_emission. This is actually correct behavior for the decay phase - when weekly emission would go negative due to decay, it should clamp to the tail emission.\n\nUpon further analysis, this logic appears correct. The vulnerability is actually in the opposite direction - the inflation calculation doesn't have proper bounds checking.\n\nRevised Finding: The inflation calculation in weekly_emission() adds inflation to the current weekly amount without any upper bound: `calculate_emission_inflation() + weeklyCache`. During high inflation periods, this could lead to excessively large emissions if the weekly amount grows too quickly.\n\nMathematical Proof:\nIf weekly = 1,000,000e18 and inflationRate = 150 (1.5%), then weekly_emission() = 15,000e18 + 1,000,000e18 = 1,015,000e18\nNext week: 1,015,000e18 * 1.5% = 15,225e18 + 1,015,000e18 = 1,030,225e18\nThis compound inflation could grow rapidly without bounds during the inflation period.",
+      "severity": "medium",
+      "original_id": "e46dd178c49bc2a6"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_023",
+      "title": "Missing Access Control on update_period() Function",
+      "description": "The `update_period()` function can be called by any external account without access restrictions. While the function has a time-based check (`block.timestamp >= _period + WEEK`), it can still be called by anyone once per week. This allows malicious actors to trigger the minting process at their preferred timing, potentially front-running legitimate calls or causing unnecessary gas consumption. However, since the function doesn't allow minting more than once per week and the minting logic is deterministic, the impact is limited to potential griefing attacks and minor economic manipulation through timing.\n\nExploitation Scenario: An attacker can call update_period() exactly at the beginning of each new period to control when new emissions are minted and distributed. This could be used to front-run other protocol operations or manipulate timing-dependent mechanisms.\n\nFinancial Impact: Limited to potential MEV extraction opportunities and gas griefing. No direct fund loss, but could enable timing-based exploits in combination with other protocol components.",
+      "severity": "low",
+      "original_id": "50b5ec56dc915d21"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_024",
+      "title": "Potential Underflow in Emission Calculation",
+      "description": "The `circulating_supply()` function calculates `fenix.totalSupply() - fenix.balanceOf(address(ve))`. If the locked supply in the voting escrow ever exceeds the total supply, this will underflow. While this scenario should not occur in normal operation (locked supply should be a subset of total supply), if there are bugs in other contracts or unusual token movements, this could cause a revert that permanently blocks the minting process.\n\nMathematical Proof:\nIf totalSupply = 100,000e18 and ve balance = 150,000e18 due to some error, then circulating_supply() = 100,000e18 - 150,000e18 \u2192 Underflow revert\n\nFinancial Impact: If this underflow occurs, the update_period() function will revert permanently, stopping all future emissions and breaking core protocol functionality. This would require a contract upgrade to fix.",
+      "severity": "medium",
+      "original_id": "ad4b5abc5ea5a112"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_025",
+      "title": "Insufficient Validation in setVoter Function",
+      "description": "The `setVoter()` function only checks that the new voter address is not zero, but does not verify that the address is a valid IVoter implementation or that it's safe to change the voter address. If an attacker somehow gains ownership privileges (through compromised keys or social engineering), they could set the voter to a malicious contract that steals funds when `voter.notifyRewardAmount()` is called.\n\nExploitation Scenario: Malicious owner sets voter to a contract that, when notifyRewardAmount is called, redirects the gauge emissions to the attacker's address instead of legitimate gauge recipients.\n\nFinancial Impact: All future gauge emissions could be stolen by the attacker. However, this requires compromised owner privileges, so the severity is medium rather than high.",
+      "severity": "medium",
+      "original_id": "b99a1a9a29d0b5ba"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_026",
+      "title": "Incorrect ERC20 Allowance Management Leading to Failed Distributions",
+      "description": "The distributeVeFnx function uses a single approval for the total distribution sum, then attempts to create multiple locks. If the votingEscrow contract doesn't fully use the approved amount in the first create_lock_for_without_boost call, subsequent calls will fail due to insufficient allowance. The contract sets approval to zero after the loop, but if any intermediate call fails or uses less than expected, the remaining distributions will fail. This can leave the contract with locked FNX tokens that cannot be distributed.",
+      "severity": "high",
+      "original_id": "cdf604e2cf645802"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_027",
+      "title": "Missing Recipient Zero-Address Validation",
+      "description": "The distributeVeFnx function does not validate that recipient addresses are non-zero. If a zero address is included in the recipients_ array, the votingEscrow.create_lock_for_without_boost call will lock FNX tokens to address(0), permanently burning them. This represents a direct loss of funds that cannot be recovered.",
+      "severity": "high",
+      "original_id": "62606e318ddee6ab"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_028",
+      "title": "Potential Front-Running Attack on Token ID Assignment",
+      "description": "The votingEscrow.create_lock_for_without_boost function returns a tokenId that attackers could potentially front-run. If the votingEscrow contract uses predictable token ID assignment, an attacker could pre-create locks at specific token IDs to cause the distribution to fail or redirect tokens. While the exact vulnerability depends on the external votingEscrow implementation, the lack of validation on the returned tokenId represents an external system abuse risk.",
+      "severity": "medium",
+      "original_id": "f7bfd6eb48ec0125"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_029",
+      "title": "Vote Weight Calculation Division by Zero",
+      "description": "In the _vote function, when calculating pool weights, if _totalVoteWeight is zero due to all gauges being killed or inactive, a division by zero occurs. This can happen when a user votes but all pools in their vote have been killed, making _totalVoteWeight = 0. The division (_weights[i] * _weight) / _totalVoteWeight will revert, preventing voting entirely for users who only have killed gauges in their vote.",
+      "severity": "high",
+      "original_id": "970daaf4088e2fb5"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_030",
+      "title": "Incorrect External Bribe Event Parameter",
+      "description": "In _setExternalBribe function, the SetBribeFor event incorrectly uses internal_bribes[_gauge] as the old value instead of external_bribes[_gauge]. This doesn't cause financial loss but indicates potential logic confusion. The event should track external bribe changes correctly for transparency.",
+      "severity": "low",
+      "original_id": "4451aa65e8f39a1a"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_031",
+      "title": "Managed NFT Vote Window Bypass",
+      "description": "Whitelisted managed NFTs can bypass vote window restrictions in the vote function. The check _checkEndVoteWindow() is skipped for whitelisted NFTs, allowing them to vote outside normal voting periods. This could give privileged users unfair voting advantages.",
+      "severity": "medium",
+      "original_id": "3143fe85198621bf"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_032",
+      "title": "KillGauge Weight Adjustment Race Condition",
+      "description": "In killGauge, weightsPerEpoch[_time][poolForGauge[_gauge]] is subtracted from totalWeightsPerEpoch[_time] using current timestamp. However, if killGauge is called during an epoch transition, the weight subtraction might affect the wrong epoch's total weight, potentially causing distribution inaccuracies.",
+      "severity": "medium",
+      "original_id": "0ec1d362d98a5476"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_033",
+      "title": "Vote Weight Calculation Division by Zero",
+      "description": "The _vote function calculates pool weights using division by _totalVoteWeight, which can be zero when all voted gauges are not alive. This causes division by zero and reverts the transaction, preventing users from voting when no gauges are alive. While this doesn't directly lead to fund loss, it breaks core protocol functionality and can be exploited to deny voting services.",
+      "severity": "medium",
+      "original_id": "ea44bf69b8b89689"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_034",
+      "title": "Incorrect External Bribe Update in _setExternalBribe",
+      "description": "The _setExternalBribe function incorrectly emits the SetBribeFor event with internal_bribes[_gauge] as the old value instead of external_bribes[_gauge]. While this doesn't affect functionality, it creates misleading event logs that could impact off-chain monitoring and analytics.",
+      "severity": "low",
+      "original_id": "f7fa619521054bc0"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_035",
+      "title": "Uninitialized initflag Allows Multiple Initializations",
+      "description": "The initflag variable is declared but not initialized in storage, allowing the _init function to be called multiple times before initialization. This could allow an attacker to reinitialize critical protocol parameters after the contract is already operational.",
+      "severity": "high",
+      "original_id": "0dd1185555021cfb"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_036",
+      "title": "Vote Reset Logic Error in _reset Function",
+      "description": "The _reset function incorrectly handles the _totalWeight calculation when lastVoted[_tokenId] < _time. It sets _totalWeight to 0 but then subtracts it from totalWeightsPerEpoch[_time], which could underflow if the total weight was already 0. This could be exploited to corrupt voting state.",
+      "severity": "high",
+      "original_id": "1b50903168e0297b"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_038",
+      "title": "Incorrect Claim Amount Calculation Allows Double-Spending",
+      "description": "The _claim function calculates the claimable amount as `amount_ - userClaimed[target_]` without checking if `amount_` is greater than the previously claimed amount. This allows attackers to provide a smaller `amount_` than what was previously claimed, resulting in a negative claimAmount that underflows to a very large value due to Solidity 0.8's checked arithmetic. However, the ZeroAmount check prevents immediate exploitation. More critically, if an attacker can claim with a smaller amount than previously claimed, they can effectively reset their claimed amount to a lower value, enabling them to claim additional tokens up to the original larger amount.",
+      "severity": "high",
+      "original_id": "40679e0e3ff35442"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_039",
+      "title": "Missing Zero Address Check in setIsAllowedClaimOperator",
+      "description": "The setIsAllowedClaimOperator function does not validate that operator_ is not address(0). This allows the owner to accidentally set the zero address as an allowed claim operator, which could lead to unexpected behavior. While this doesn't directly enable fund theft, it could be exploited in combination with other vulnerabilities or cause operational issues.",
+      "severity": "medium",
+      "original_id": "ce9097d08ec99d5c"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_040",
+      "title": "Potential Precision Loss in toVeNFTAmount Calculation",
+      "description": "The calculation `(claimAmount * toVeFnxPercentage) / _PRECISION` can result in precision loss when claimAmount is small relative to _PRECISION. For example, if claimAmount = 100 (with 18 decimals, so 100e18) and toVeFnxPercentage = 1e16 (1%), the calculation would be (100e18 * 1e16) / 1e18 = 100e16, which is correct. However, if claimAmount is very small (e.g., 1 wei) and toVeFnxPercentage is also small, the division could round down to zero. This is likely not exploitable for significant fund loss but represents a precision issue.",
+      "severity": "low",
+      "original_id": "1d08dc225040352f"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_041",
+      "title": "Mathematical Precision Error in Vote Weight Calculation",
+      "description": "The _vote function calculates vote power per pool using division that can round down to zero when the totalVotesWeight is large relative to individual weights. This allows attackers to create voting scenarios where some pools receive zero voting power despite having non-zero weights, breaking the intended vote distribution and potentially allowing manipulation of reward distribution.",
+      "severity": "high",
+      "original_id": "8570c776ad64e1c0"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_042",
+      "title": "State Desynchronization in _reset Function",
+      "description": "The _reset function updates weightsPerEpoch[time][pool] and totalWeightsPerEpoch[time] conditionally based on lastVotedTime >= time, but these updates are not synchronized. If the condition is false for some pools but true for others, the totalWeightsPerEpoch[time] calculation becomes incorrect, leading to permanent state corruption that affects reward distribution calculations.",
+      "severity": "high",
+      "original_id": "aabc56fc2cfd2657"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_043",
+      "title": "Division by Zero in notifyRewardAmount Function",
+      "description": "The notifyRewardAmount function performs division by totalWeightsPerEpoch[_epochTimestamp() - _WEEK] without checking if this value is zero. If no votes were cast in the previous epoch, this division will revert, permanently blocking reward distribution and potentially freezing the entire reward system.",
+      "severity": "high",
+      "original_id": "922c282d1146215e"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_044",
+      "title": "Incorrect Time Window Calculation in _checkStartVoteWindow",
+      "description": "The _checkStartVoteWindow function contains a logical error where it subtracts (block.timestamp % _WEEK) from block.timestamp and then adds distributionWindowDuration, which effectively makes the condition always true. This breaks the intended voting window restrictions and allows voting at unintended times.",
+      "severity": "medium",
+      "original_id": "1388a8d90d45514b"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_045",
+      "title": "Missing Access Control on claimBribes Function",
+      "description": "The claimBribes function that takes only bribes and tokens parameters lacks access control, allowing any user to claim bribes intended for other users by specifying their address. This enables theft of bribe rewards from other users.",
+      "severity": "high",
+      "original_id": "635df14dc531f44f"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_046",
+      "title": "Incorrect Boosted Supply Accounting in _deposit_for Function",
+      "description": "The _deposit_for function incorrectly updates the total supply when handling boosted deposits. It first sets supply = supply_before + _value, then later recalculates it as newSupply = supply_before + _value + boostedValue. However, the intermediate assignment creates a temporary incorrect state. More critically, when boostedValue is non-zero, the function transfers boosted tokens from the veBoost contract but doesn't properly account for the fact that these tokens were already part of the veBoost contract's balance, potentially leading to double-counting in the overall token accounting. The mathematical error occurs because the supply is updated twice: first with only the user's deposit, then with both the user's deposit and the boost. This creates a temporary state where supply doesn't match the actual token balance.",
+      "severity": "high",
+      "original_id": "ed55c2eae19413f6"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_047",
+      "title": "Incorrect Token Index Management in _removeTokenFromOwnerList",
+      "description": "The _removeTokenFromOwnerList function contains a critical bug in token index management when removing tokens from an owner's list. The function incorrectly handles the case when the token to remove is not the last token in the owner's list. It updates ownerToNFTokenIdList[_from][current_index] = lastTokenId but fails to properly update tokenToOwnerIndex for the moved token. The mathematical proof shows that when an owner has tokens [A, B, C] at indices [0, 1, 2], and token B (index 1) is removed, the function moves token C to index 1 but doesn't update tokenToOwnerIndex[C] from 2 to 1. This desynchronization means future operations will use incorrect indices, potentially leading to tokens becoming inaccessible or incorrect token ownership reporting.",
+      "severity": "high",
+      "original_id": "fa2922f37209b5ac"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_048",
+      "title": "Precision Loss in Voting Power Calculation",
+      "description": "The voting power calculation in _balanceOfNFT suffers from precision loss due to integer division and multiplication operations. When calculating bias = slope * time_difference, the multiplication of slope (which is amount/iMAXTIME) by time difference can result in significant precision loss, especially for small lock amounts or short time periods. For example, with 1 token locked for 1 week: slope = 1e18 / (182*86400) \u2248 63.4, and bias after 1 day = 63.4 * 86400 \u2248 5.48e6, but the actual voting power should be approximately 1e18 * (1/182) \u2248 5.49e15. This represents a precision loss of 9 orders of magnitude, making small locks effectively worthless for voting.",
+      "severity": "high",
+      "original_id": "e65c93b87d8ca6ba"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_049",
+      "title": "Incorrect Supply Tracking in Split Function",
+      "description": "The split function contains incorrect supply accounting that allows attackers to manipulate the total supply. The function subtracts the full original value from supply before creating new tokens, but then _deposit_for adds back the split amounts. However, due to integer division rounding, the sum of split amounts may not equal the original value. For example, splitting 100 tokens into 3 equal parts: 100/3 = 33.33, which rounds to 33 each, totaling 99 instead of 100. The 1 token difference is permanently lost from supply but remains locked in the contract. Attackers can repeatedly split and merge tokens to gradually drain the supply while keeping the tokens.",
+      "severity": "high",
+      "original_id": "96bb7e61e1d93906"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_050",
+      "title": "Permanent Lock Accounting Error in Managed NFT Detachment",
+      "description": "The `onDettachFromManagedNFT` function incorrectly handles permanent lock accounting when detaching tokens from managed NFTs. When detaching, it subtracts `newBalance_` from `permanentTotalSupply` without verifying if the detached amount was actually permanently locked. This can lead to permanentTotalSupply becoming incorrect when detaching from non-permanent locks or when the managed NFT contains mixed lock types.\n\n**Mathematical Proof:**\n1. Alice attaches 100 tokens (non-permanent lock) to managed NFT #1\n2. Bob attaches 200 tokens (permanent lock) to managed NFT #1\n3. Managed NFT #1 now has 300 tokens total, with 200 permanently locked\n4. When Alice detaches her 100 tokens, the function calls: `permanentTotalSupply -= (newBalance_ < permanentTotalSupply ? newBalance_ : permanentTotalSupply)`\n5. If permanentTotalSupply is 500 (from other locks), it subtracts min(100, 500) = 100\n6. But Alice's 100 tokens were NOT permanently locked, so permanentTotalSupply should remain unchanged\n7. Result: permanentTotalSupply becomes 400 instead of 500, corrupting the accounting\n\n**Exploitation Scenario:**\nAn attacker can create multiple managed NFTs, attach non-permanent locks to them, then detach to artificially reduce permanentTotalSupply. This affects voting power calculations and total supply metrics.\n\n**Financial Impact:**\n- Permanent lock accounting becomes inaccurate\n- Voting power calculations for permanently locked tokens may be incorrect\n- Total supply reporting becomes unreliable\n- Potential for manipulation of protocol metrics",
+      "severity": "high",
+      "original_id": "bc99f3c6cf9af792"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_051",
+      "title": "Incorrect Boosted Value Accounting in Permanent Locks",
+      "description": "When boosting is applied to permanent locks in `_deposit_for`, the boosted value is incorrectly added to `permanentTotalSupply` even though boosted tokens should not be considered permanently locked. The function adds both the original `_value` and `boostedValue` to `permanentTotalSupply` when `old_locked.isPermanentLocked` is true.\n\n**Mathematical Proof:**\n1. Alice has a permanent lock with 1000 tokens\n2. She deposits 100 more tokens with boost enabled\n3. Boost calculation gives 50 extra tokens (boostedValue = 50)\n4. The code executes: `if (old_locked.isPermanentLocked) { permanentTotalSupply += _value; }`\n5. Later, if boostedValue > 0, it executes again: `if (old_locked.isPermanentLocked) { permanentTotalSupply += _value; }`\n6. Wait, there's a bug in the code - it should be `permanentTotalSupply += boostedValue` but it's adding `_value` again\n7. Actually, looking at the code: it adds `_value` twice when boosting permanent locks\n\n**Wait, let me re-examine the exact code:**\nThe code shows:\n```solidity\nif (old_locked.isPermanentLocked) {\n    permanentTotalSupply += _value;\n}\n// ... later in boost logic\nif (boostedValue > 0) {\n    _locked.amount += int128(int256(boostedValue));\n    if (old_locked.isPermanentLocked) {\n        permanentTotalSupply += _value;  // BUG: Should be += boostedValue\n    }\n}\n```\n\n**Correct Calculation:**\n- Permanent lock with 1000 tokens\n- Deposit 100 tokens, get 50 boost\n- permanentTotalSupply should increase by 100 (the actual deposited amount)\n- But code increases by 100 + 100 = 200\n\n**Exploitation Scenario:**\nAttackers can artificially inflate permanentTotalSupply by making small deposits to permanent locks with boost enabled, causing incorrect voting power calculations.\n\n**Financial Impact:**\n- Permanent lock supply accounting becomes inflated\n- Voting power calculations are distorted\n- Protocol metrics become unreliable",
+      "severity": "high",
+      "original_id": "183021b546e08961"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_052",
+      "title": "Unchecked Subtraction in Supply Update During Withdrawal",
+      "description": "The `withdraw` function performs an unchecked subtraction `supply = supply_before - value` without verifying that `supply_before >= value`. If `value` exceeds `supply_before` due to accounting errors, this will underflow and cause critical protocol failure.\n\n**Mathematical Proof:**\n1. Due to a previous accounting error, supply_before = 1000, but locked[_tokenId].amount = 1500\n2. withdraw() calculates: supply = 1000 - 1500\n3. This underflows since 1000 < 1500\n4. Transaction reverts due to underflow, making the withdrawal impossible\n5. User's funds become permanently locked in the contract\n\n**Exploitation Scenario:**\nWhile not directly exploitable by attackers to steal funds, this can be triggered if state corruption occurs through other means, leading to permanent loss of user funds.\n\n**Financial Impact:**\n- User funds permanently locked in contract\n- Protocol insolvency if multiple users affected\n- Requires emergency upgrade to recover",
+      "severity": "high",
+      "original_id": "e14a21ca4b6f4553"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_053",
+      "title": "Incorrect Managed NFT Balance Handling in deposit_for_without_boost",
+      "description": "The `deposit_for_without_boost` function has inconsistent validation for managed NFTs. It checks `if (!managedNFTManagerCache.isManagedNFT(_tokenId))` but then uses the condition to skip the `lockedBalance.amount > 0` requirement. However, managed NFTs should have proper locked balance validation.\n\n**Mathematical Proof:**\n1. Managed NFT #1 is created with zero initial balance\n2. User calls deposit_for_without_boost for managed NFT #1 with _value = 100\n3. The condition `if (!managedNFTManagerCache.isManagedNFT(_tokenId))` is false (it IS a managed NFT)\n4. So it skips the `require(lockedBalance.amount > 0, \"no lock found\")` check\n5. The deposit proceeds even though managed NFT had zero balance\n6. This may lead to inconsistent state if the managed NFT accounting expects specific initialization\n\n**Exploitation Scenario:**\nWhile not directly financially exploitable, this can lead to state inconsistencies in managed NFT accounting that could be leveraged in combination with other vulnerabilities.\n\n**Financial Impact:**\n- Potential state corruption in managed NFT system\n- May enable other attack vectors when combined with additional vulnerabilities",
+      "severity": "medium",
+      "original_id": "e34f79fb59a09572"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_054",
+      "title": "Permanent Lock Accounting Error in Managed NFT Attachment",
+      "description": "The `onAttachToManagedNFT` function incorrectly handles permanent lock accounting when attaching a permanently locked NFT to a managed NFT. The function subtracts the full amount from `permanentTotalSupply` but then adds it back when updating the managed NFT, which is correct. However, when detaching via `onDettachFromManagedNFT`, the function uses `newBalance_` parameter to determine how much to subtract from `permanentTotalSupply`, but this parameter may not reflect the actual permanent lock status. This creates a state desynchronization vulnerability where permanent lock accounting can become incorrect.\n\n**Mathematical Proof:**\n1. Alice has NFT #1 with 100 tokens permanently locked\n2. `permanentTotalSupply = 100`\n3. Alice attaches NFT #1 to managed NFT #2\n4. Function subtracts 100 from `permanentTotalSupply` (now 0)\n5. Function adds 100 to managed NFT #2's locked amount and updates `permanentTotalSupply` (now 100)\n6. Later, when detaching, if `newBalance_` parameter is incorrectly set to 50 (non-permanent amount) instead of 100\n7. Function subtracts min(50, 100) = 50 from `permanentTotalSupply` (now 50)\n8. But the actual permanent locked amount was 100, creating 50 tokens of \"ghost\" permanent supply\n\n**Exploitation:** An attacker could manipulate the managed NFT manager to provide incorrect `newBalance_` values during detachment, causing permanent lock accounting to become desynchronized from actual permanently locked tokens.\n\n**Financial Impact:** Protocol insolvency risk - the voting power calculations will be incorrect, potentially allowing attackers to manipulate governance or cause incorrect reward distributions. The permanent supply tracking becomes unreliable.",
+      "severity": "high",
+      "original_id": "63ce2a2ceba74e94"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_055",
+      "title": "Incorrect Boost Accounting in Lock Operations",
+      "description": "The `_proccessLockChange` function has a critical flaw in how it handles boosted amounts when performing lock operations. The function adds the boosted amount to `newLocked.amount` but then uses the original `amount_` parameter (without boost) for permanent lock accounting and token transfers. This creates a state desynchronization between the actual locked amount and the accounting.\n\n**Mathematical Proof:**\n1. Alice deposits 100 tokens with boost enabled\n2. Boost calculation gives 20 tokens bonus (total 120)\n3. `newLocked.amount` becomes 120 (correct)\n4. But permanent lock accounting uses `amount_` (100) instead of the actual locked amount (120)\n5. Token transfer only takes 100 from user, but contract records 120 as locked\n6. If Alice later makes the lock permanent, only 100 gets added to `permanentTotalSupply` instead of 120\n7. The 20 boost tokens become unaccounted for in permanent supply\n\n**Exploitation:** Attackers can exploit this by:\n- Creating boosted locks and making them permanent, causing permanent supply undercounting\n- The 20 \"ghost\" tokens in the example would not be properly tracked in voting power calculations\n\n**Financial Impact:** Protocol accounting corruption - voting power calculations will be incorrect, potentially allowing manipulation of governance and reward distributions. The supply tracking becomes unreliable.",
+      "severity": "high",
+      "original_id": "dd8fe10028d85f59"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_056",
+      "title": "Division Rounding to Zero in Voting Power Calculation",
+      "description": "The voting power calculation in `_balanceOfNFT` and slope calculations use division operations that can round down to zero when the locked amount is small relative to the maximum lock time. The division `oldLocked_.amount / I128_MAX_LOCK_TIME` and similar operations can result in zero slope values for small lock amounts.\n\n**Mathematical Proof:**\n1. `I128_MAX_LOCK_TIME` is likely 4 years = 126144000 seconds (assuming typical veToken implementation)\n2. If a user locks 100 tokens (with 18 decimals) for maximum time: slope = 100e18 / 126144000 \u2248 792,744,799,000,000 (non-zero)\n3. But if a user locks only 1 token (1e18) for 1 week (604800 seconds): slope = 1e18 / 126144000 \u2248 7,927,447,990 (non-zero)\n4. However, if the contract uses smaller precision or if `I128_MAX_LOCK_TIME` is larger, small amounts could round to zero\n5. When slope rounds to zero, the bias calculation becomes zero, giving the NFT zero voting power regardless of actual locked amount\n\n**Exploitation:** Attackers could create many small locks that have effectively zero voting power but still lock tokens, potentially disrupting protocol economics or exploiting rounding errors in other calculations.\n\n**Financial Impact:** Users with small lock amounts may receive zero voting power even though they have locked tokens, leading to unfair governance participation and potential exploitation of the voting system.",
+      "severity": "medium",
+      "original_id": "7b570a16382a3165"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_057",
+      "title": "Unchecked Integer Underflow in Detachment Function",
+      "description": "The `onDettachFromManagedNFT` function performs subtraction operations without proper underflow checks, particularly when subtracting from `newManagedLocked.amount`. The function uses `amount < newManagedLocked.amount ? amount : newManagedLocked.amount` but doesn't ensure the subtraction won't underflow in the actual assignment.\n\n**Mathematical Proof:**\n1. Managed NFT has 100 tokens locked\n2. During detachment, `amount` parameter is 150 (incorrectly set or manipulated)\n3. The ternary check: `150 < 100 ? 150 : 100` returns 100\n4. But then `newManagedLocked.amount -= 100` when the current amount is 100 results in 0 (correct)\n5. However, if the state is corrupted or the managed NFT amount is less than expected due to race conditions, underflow could occur\n6. More critically, the `permanentTotalSupply` subtraction uses similar logic without explicit underflow protection\n\n**Exploitation:** While the ternary operator provides some protection, a malicious managed NFT manager or state corruption could lead to unexpected values that cause underflows, potentially corrupting the contract state.\n\n**Financial Impact:** State corruption leading to incorrect voting power calculations and potential loss of funds if the contract state becomes inconsistent.",
+      "severity": "medium",
+      "original_id": "2e3a98ab3bb1156e"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_058",
+      "title": "Fee Accounting Desynchronization in _update0 and _update1",
+      "description": "The _update0 and _update1 functions calculate fee ratios using totalSupply, but this value can change during the mint/burn operations that call these functions. When fees are accrued during a swap that occurs in the same block as a mint/burn operation, the ratio calculation uses an outdated totalSupply value, leading to incorrect fee distribution.\n\nMathematical Proof:\n- Initial state: totalSupply = 1000, reserve0 = 1000, reserve1 = 1000\n- User mints 500 liquidity (totalSupply becomes 1500)\n- In same block, swap occurs with 100 token0 fee\n- _update0(100) calculates ratio = (100 * 1e18) / 1000 = 0.1e18\n- But should use 1500: ratio = (100 * 1e18) / 1500 = 0.066e18\n- Error: 0.1e18 vs 0.066e18 (50% over-accrual)\n\nExploitation: Attackers can front-run large mints/burns with swaps to capture disproportionate fee shares. The financial impact is permanent misallocation of fees from legitimate LPs to attackers.",
+      "severity": "high",
+      "original_id": "e3cd8634561d1939"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_059",
+      "title": "Incorrect Fee Accrual During Swap with Protocol Fee",
+      "description": "When protocol fees are charged in _update0/_update1, the amount transferred to the fee contract is reduced by the protocol fee, but the ratio calculation uses the original amount instead of the reduced amount. This causes the fee contract to receive less tokens than what's accounted for in the index.\n\nMathematical Proof:\n- Swap generates 100 token0 in fees\n- Protocol fee rate: 10% (1000 basis points)\n- Protocol fee = 10 tokens, amount to fee contract = 90 tokens\n- But ratio calculation: (100 * 1e18) / totalSupply (uses 100 instead of 90)\n- Fee contract receives 90 tokens but index increases as if it received 100\n- LPs will be able to claim 10 more tokens than actually available\n\nExploitation: This creates an insolvency in the fee contract where LPs can claim more tokens than are actually available. The financial impact is that later LP claims will fail or the protocol will need to cover the shortfall.",
+      "severity": "high",
+      "original_id": "5f9d6196cb217f1a"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_060",
+      "title": "Uninitialized DOMAIN_SEPARATOR in Permit Function",
+      "description": "The permit function recalculates DOMAIN_SEPARATOR on every call instead of initializing it once. This allows signature replay attacks across different chains or if the contract's name changes.\n\nExploitation Scenario:\n- Attacker gets a valid signature on Chain A\n- Same contract deployed on Chain B with different chainId\n- Attacker replays signature on Chain B\n- DOMAIN_SEPARATOR will be different but recalculated each time\n- Signature validates successfully due to missing initialization check\n\nFinancial Impact: Unauthorized token approvals leading to potential theft of LP tokens. Attackers can gain approval to transfer victims' LP tokens.",
+      "severity": "high",
+      "original_id": "6242d3985df90b51"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_061",
+      "title": "Incorrect Reserve Tracking in Swap Function",
+      "description": "The swap function updates reserves after fee accrual but uses pre-fee balances for the constant product check. This allows attackers to drain pools by exploiting the discrepancy between the actual reserves and the reserves used for the K check.\n\nMathematical Proof:\n- Initial: reserve0 = 1000, reserve1 = 1000, K = 1,000,000\n- Attacker swaps with 100 token0 in, gets 90.9 token1 out (volatile pool)\n- Fees: 10 token0 sent to fee contract\n- Actual post-swap balances: 1090 token0, 909.1 token1\n- But K check uses: _balance0 = 1100, _balance1 = 909.1 (before fee transfer)\n- K check: 1100 * 909.1 = 999,010 > 1,000,000 (passes)\n- Actual K: 1090 * 909.1 = 990,919 (violates constant product)\n\nExploitation: Repeated swaps can gradually drain the pool. Financial impact is permanent loss of LP funds.",
+      "severity": "critical",
+      "original_id": "d98de1010f45c35d"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_062",
+      "title": "Rebasing Token Configuration Race Condition",
+      "description": "The createPair function configures rebasing tokens for both the pair and fees contract, but if the rebasingTokensGovernor is set after pair creation, the governor won't be notified about token holders. This creates a state desynchronization where tokens are configured for rebasing but the governor lacks awareness of the holders, potentially causing loss of rebasing rewards.",
+      "severity": "high",
+      "original_id": "ae9c069a58cabeba"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_063",
+      "title": "Missing Pair Existence Check in Custom Fee Setters",
+      "description": "The setCustomProtocolFee and setCustomFee functions check if the provided pair exists using isPair mapping, but this mapping is only set after successful pair creation. An attacker could call these functions with a non-existent pair address that will later become a valid pair, allowing pre-configuration of fees before the pair is officially created.",
+      "severity": "medium",
+      "original_id": "e35ae422c9dc76eb"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_064",
+      "title": "Incorrect Protocol Fee Initialization",
+      "description": "The protocolFee is initialized to 10000 (100%) but the comment incorrectly states it's 100% of stable/volatileFee to community vaults. However, the actual calculation in getProtocolFee uses this value directly without scaling. If protocolFee remains 10000, it would represent 10000/10000 = 100% of fees going to protocol, but the intended meaning seems to be 100% of the trading fees (stableFee/volatileFee) going to community vaults, suggesting a potential misunderstanding in the fee calculation logic.",
+      "severity": "medium",
+      "original_id": "006756878a4437c8"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_065",
+      "title": "Missing Path Length Validation in pathsToVolatilityRoutes Function",
+      "description": "The pathsToVolatilityRoutes function does not validate that the path array has at least 2 elements. When called with a path array containing fewer than 2 elements, the function will attempt to create a routes array with length path.length - 1, which would underflow for path.length = 0 or path.length = 1. This causes a revert due to array underflow, but more critically, when this function is called by other functions like swapExactTokensForTokens, it can cause the entire transaction to fail unexpectedly. While this doesn't directly lead to fund loss, it breaks core protocol functionality and can be exploited in denial-of-service attacks against users attempting legitimate swaps.",
+      "severity": "medium",
+      "original_id": "0412d627d6703d8a"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_066",
+      "title": "Incorrect Return Value Handling in removeLiquidityETHSupportingFeeOnTransferTokens",
+      "description": "The removeLiquidityETHSupportingFeeOnTransferTokens function calls an internal function that returns two values (uint, uint) but only captures and returns one value (amountETH). This creates a mismatch between the function signature and implementation. While Solidity allows this syntax, it indicates potential logic errors where the first return value (amountToken) is ignored. If the internal function's logic depends on both return values being properly handled, this could lead to incorrect state tracking or accounting issues. However, without seeing the implementation of the internal removeLiquidityETHSupportingFeeOnTransferTokens function, the exact impact is uncertain.",
+      "severity": "medium",
+      "original_id": "1455dda9a56f8353"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_067",
+      "title": "Incorrect Fee-on-Transfer Token Accounting in Remove Liquidity Functions",
+      "description": "The removeLiquidityETHSupportingFeeOnTransferTokens function incorrectly transfers the entire token balance of the router contract instead of the calculated amountToken. This allows attackers to steal tokens from the router contract when fee-on-transfer tokens are involved. The function calculates amountToken and amountETH from removeLiquidity, but then transfers erc20(token).balanceOf(address(this)) instead of amountToken. If the router contract has accumulated other tokens from previous operations, attackers can drain them by calling this function with a small liquidity amount.",
+      "severity": "high",
+      "original_id": "8baa14e5d56d093f"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_068",
+      "title": "Incorrect Token Transfer in Fee-on-Transfer Swap Functions",
+      "description": "The swapExactTokensForETHSupportingFeeOnTransferTokens function incorrectly transfers the entire WETH balance instead of the actual output amount. After swapping, it transfers erc20(address(wETH)).balanceOf(address(this)) to ETH without verifying this matches the expected output. If the router has accumulated WETH from other operations, attackers can drain it by calling this function with minimal input. The function should track the actual output amount from the swap rather than transferring the entire balance.",
+      "severity": "high",
+      "original_id": "ce482b93a560d80f"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_069",
+      "title": "Missing Input Amount Validation in UNSAFE_swapExactTokensForTokens",
+      "description": "The UNSAFE_swapExactTokensForTokens function allows users to specify arbitrary amounts array without validation against calculated amounts. Attackers can provide inflated amounts values to manipulate swap outcomes or cause the pair to transfer more tokens than intended. The function should validate that the provided amounts array matches the expected amounts from getAmountsOut or implement proper slippage protection.",
+      "severity": "high",
+      "original_id": "fe4d40816f5fc73f"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_070",
+      "title": "Incorrect Fee-on-Transfer Token Balance Calculation in _swapSupportingFeeOnTransferTokens",
+      "description": "The _swapSupportingFeeOnTransferTokens function calculates amountInput using balanceOf minus reserve, but this can be manipulated if the pair receives tokens from other sources during the transaction. Attackers can front-run swaps to deposit tokens into the pair, causing incorrect amountInput calculation and potentially profitable arbitrage opportunities at the expense of legitimate users.",
+      "severity": "high",
+      "original_id": "2c4204dbbd77d500"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_071",
+      "title": "Fee Distribution Precision Loss Leading to Permanent Token Locking",
+      "description": "The _distributeFees function calculates fee distributions using integer division which can result in precision loss. When totalAmount is small relative to _PRECISION (10000), the calculated amounts for gauge and recipients can round down to zero, leaving tokens permanently locked in the contract. This is particularly problematic when the contract accumulates small amounts of fees over time.",
+      "severity": "high",
+      "original_id": "bfa914c8511c3d9d"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_072",
+      "title": "Incorrect Fee Distribution Base Amount Calculation",
+      "description": "The _distributeFees function uses the same totalAmount (current contract balance) for both gauge distribution and recipient distributions. However, after transferring tokens to the gauge, the contract balance decreases, but the recipient distributions still use the original totalAmount. This means recipients receive a larger share than intended if gauge distribution occurs first, effectively double-counting the gauge portion in the distribution calculations.",
+      "severity": "high",
+      "original_id": "58a14e8e4bd590a2"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_073",
+      "title": "Unauthorized Implementation Upgrade via Fallback Function",
+      "description": "The fallback function allows any caller to update the implementation address when the current implementation differs from the factory's implementation. This creates a race condition where an attacker can front-run legitimate calls to temporarily set a malicious implementation that will execute during the delegatecall. The vulnerability exists because the implementation update check occurs inside the fallback function without proper access control, allowing any caller to trigger the update.\n\n**Mathematical Proof:**\n- Let A = current implementation (0x123...)\n- Let B = factory implementation (0x456...)\n- Let M = malicious implementation (0x789...)\n\nAttack scenario:\n1. Attacker monitors factory for implementation updates\n2. When factory updates implementation to B, attacker front-runs legitimate call\n3. Attacker calls proxy with calldata that triggers fallback\n4. Condition `impl != _getImplementation()` is true (B != A)\n5. Attacker sets implementation to M instead of B\n6. Legitimate call executes delegatecall to M, not B\n\n**Exploitation:** An attacker can intercept and modify implementation upgrades, potentially stealing funds or corrupting state during the delegatecall execution.\n\n**Financial Impact:** Complete loss of funds controlled by the proxy if malicious implementation is set, as the attacker gains full control over the proxy's behavior.",
+      "severity": "critical",
+      "original_id": "e2beac99a83d1e27"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_074",
+      "title": "Implementation State Desynchronization Race Condition",
+      "description": "The proxy maintains two sources of truth for the implementation address: the storage slot and the factory contract. The fallback function checks if the factory's implementation differs from the stored implementation, but this creates a race condition where multiple calls can see inconsistent states. The condition `impl != _getImplementation() && msg.sender != (address(0))` allows any non-zero address caller to update the implementation, but there's no protection against concurrent updates.\n\n**Mathematical Proof:**\n- Time T0: Storage implementation = A, Factory implementation = B\n- Time T1: Caller1 checks: B != A \u2192 true, begins update to B\n- Time T2: Caller2 checks: B != A \u2192 true, begins update to B\n- Time T3: Caller1 sets implementation to B\n- Time T4: Caller2 sets implementation to B (redundant but allowed)\n- If factory updates to C during this process, Caller2 would set to C instead\n\n**Exploitation:** While this doesn't directly enable fund theft, it creates unpredictable behavior where the implementation address can change unexpectedly during transaction processing, potentially leading to reentrancy or state corruption issues.\n\n**Financial Impact:** Protocol instability and potential loss of funds if implementation changes during critical operations, causing inconsistent state or failed transactions.",
+      "severity": "high",
+      "original_id": "8ee2e7645896d54c"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_075",
+      "title": "Missing Access Control on afterPoolInitialize Allows Unauthorized Pool Configuration",
+      "description": "The afterPoolInitialize function is protected by WHITELISTED_CREATOR_ROLE, but it can be called by any whitelisted creator for any pool, even if they didn't create the vault for that pool. This allows a malicious creator to reconfigure rebasing tokens for vaults they don't own, potentially redirecting yield or causing operational issues.\n\n**Mathematical Proof**: \n- Creator A creates vault for Pool X (gets vault address V_X)\n- Creator B (malicious) calls afterPoolInitialize(Pool X) \n- Function configures token0 and token1 for vault V_X\n- Creator B's rebasing configuration gets applied to vault V_X\n\n**Exploitation Scenario**:\n1. Attacker obtains WHITELISTED_CREATOR_ROLE\n2. Waits for legitimate creator to create vault for valuable pool\n3. Calls afterPoolInitialize on that pool before legitimate creator does\n4. Attacker's rebasing configuration gets applied instead of legitimate creator's\n5. Attacker can potentially redirect yield or cause vault malfunction\n\n**Financial Impact**: Yield from rebasing tokens could be redirected to attacker-controlled addresses, or vault operations could be disrupted leading to loss of fees.",
+      "severity": "high",
+      "original_id": "b71e6878c7176d2b"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_076",
+      "title": "Inconsistent State Management in Distribution Config Deletion",
+      "description": "When deleting custom distribution configs in setCustomDistributionConfig, the function deletes both _customDistributionConfigs[feesVault_] and isCustomConfig[feesVault_]. However, when deleting creator configs in setDistributionConfigForCreator, it only deletes _creatorDistributionConfigs[creator_] but doesn't update any corresponding state. This inconsistency could lead to state desynchronization in getDistributionConfig logic.\n\n**Mathematical Proof**:\n- Creator config exists for address C with rates [5000, 5000]\n- Admin calls setDistributionConfigForCreator(C, empty_config)\n- _creatorDistributionConfigs[C] is deleted\n- But no other state is updated\n- getDistributionConfig for vault created by C will fall back to default config\n- However, if admin later sets a new creator config for C, the old state is gone\n\n**Exploitation Scenario**:\n1. Admin accidentally deletes creator config thinking it will revert to default\n2. Later tries to restore same config but with different rates\n3. Vaults created by that creator now use different distribution unexpectedly\n4. Fee distribution becomes inconsistent with intended configuration\n\n**Financial Impact**: Fees may be distributed incorrectly to unintended recipients, causing financial losses for legitimate fee recipients.",
+      "severity": "medium",
+      "original_id": "794e8c1df1cd3059"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_077",
+      "title": "Missing Validation in changeCreatorForFeesVaults Allows Creator Reassignment Without Vault Ownership Check",
+      "description": "The changeCreatorForFeesVaults function allows the admin to reassign creators for any vaults without validating that the vaults exist or that the current creator assignment is correct. This can break the creator-based distribution config lookup logic.\n\n**Mathematical Proof**:\n- Vault V1 created by Creator A with config A\n- Vault V2 created by Creator B with config B  \n- Admin calls changeCreatorForFeesVaults(Attacker, [V1, V2])\n- Now both vaults show Attacker as creator\n- getDistributionConfig for V1 and V2 will use Attacker's config (if exists) instead of original creator configs\n\n**Exploitation Scenario**:\n1. Attacker compromises admin account\n2. Calls changeCreatorForFeesVaults(attacker_address, [all_vaults])\n3. Sets favorable distribution config for attacker_address\n4. All vaults now use attacker's distribution configuration\n5. Fees get redirected to attacker-controlled addresses\n\n**Financial Impact**: Complete takeover of fee distribution for all vaults, allowing redirecting of all protocol fees to attacker addresses.",
+      "severity": "high",
+      "original_id": "7782026682fa3cfa"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_078",
+      "title": "Unchecked External Call to RebasingTokensGovernor in afterPoolInitialize",
+      "description": "The afterPoolInitialize function makes external calls to IBlastRebasingTokensGovernor without checking if the calls succeed. If the governor contract reverts or behaves unexpectedly, the entire function could fail, leaving the pool improperly configured.\n\n**Mathematical Proof**:\n- Pool P with tokens T0 and T1\n- T0 is rebase token, T1 is not\n- afterPoolInitialize(P) is called\n- T0 configuration succeeds\n- rebasingTokensGovernor.addTokenHolder(T0, vault) reverts due to governor issues\n- Entire function fails, T1 never gets configured\n- Pool operates with partial configuration\n\n**Exploitation Scenario**:\n1. RebasingTokensGovernor contract has issues (paused, upgrade in progress, etc.)\n2. Legitimate creator calls afterPoolInitialize for valuable pool\n3. Function fails due to governor issues\n4. Pool operates with incomplete rebasing configuration\n5. Yield may be lost or improperly accounted for\n\n**Financial Impact**: Loss of rebasing yield or improper fee accounting for pools with rebasing tokens, leading to financial losses for vault participants.",
+      "severity": "medium",
+      "original_id": "dc0435aea99ae144"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_079",
+      "title": "Unauthorized Implementation Upgrade via Front-Running",
+      "description": "The fallback function allows any caller to update the implementation address when msg.sender != address(0) and the factory returns a different implementation than currently stored. An attacker can front-run legitimate calls to force an upgrade to a malicious implementation, then execute arbitrary code through delegatecall. The vulnerability exists because the implementation update check lacks proper authorization - it only checks that msg.sender is not the zero address, which is always true for regular transactions. The gaugeFactory is immutable and set during construction, but the implementation update logic is accessible to any caller.",
+      "severity": "critical",
+      "original_id": "b2caba671139257a"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_080",
+      "title": "Implementation Storage Slot Collision Risk",
+      "description": "The contract uses a fixed storage slot (_IMPLEMENTATION_SLOT) for the implementation address, which is a standard EIP-1967 slot. However, if the implementation contract deployed through delegatecall also uses this same storage slot for its own purposes, it could lead to storage collisions and unexpected behavior. While this is a known pattern, the risk exists if the gauge implementation contracts are not properly designed to avoid storage slot conflicts with the proxy.",
+      "severity": "medium",
+      "original_id": "12837761767c074c"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_081",
+      "title": "Missing Gauge Implementation Validation in Gauge Creation",
+      "description": "The createGauge function deploys a new GaugeProxy but uses a hardcoded initialization call to IGauge(newLastGauge).initialize() instead of using the stored gaugeImplementation address. This creates a critical vulnerability where the factory will always deploy gauges with potentially outdated or incorrect implementation logic, regardless of what gaugeImplementation is set to via changeImplementation(). An attacker could exploit this by:\n\n1. The owner calls changeImplementation() to set a new, secure gauge implementation\n2. An attacker calls createGauge() expecting the new implementation to be used\n3. The factory still deploys the old, potentially vulnerable implementation\n4. The attacker exploits vulnerabilities in the old implementation\n\nMathematical proof: The function creates `new GaugeProxy()` but then calls `IGauge(newLastGauge).initialize()` directly, completely ignoring the `gaugeImplementation` state variable. This means the implementation logic is hardcoded at deployment time and cannot be updated, making the changeImplementation() function useless for newly created gauges.\n\nFinancial impact: All gauges created after an implementation upgrade will use outdated, potentially vulnerable code, allowing attackers to exploit known vulnerabilities that were supposed to be fixed. This could lead to theft of all funds locked in the gauge system.",
+      "severity": "critical",
+      "original_id": "8fcc98490f159df1"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_082",
+      "title": "Missing Access Control on setMerklGaugeMiddleman Function",
+      "description": "The setMerklGaugeMiddleman function lacks the _checkAddressZero validation that other similar setter functions have. While it has the onlyOwner modifier, the missing zero address check allows the owner to accidentally set the merklGaugeMiddleman to address(0), which could break gauge functionality for all gauges that rely on this address.\n\nExploitation scenario:\n1. Owner accidentally calls setMerklGaugeMiddleman(address(0))\n2. All existing gauges that use merklGaugeMiddleman will have their functionality broken\n3. New gauges created will be initialized with address(0) for merklGaugeMiddleman\n4. Gauge operations that depend on merklGaugeMiddleman will fail or behave unexpectedly\n\nFinancial impact: If merklGaugeMiddleman is critical for reward distribution or fee handling, setting it to zero could permanently lock rewards or cause incorrect fee calculations, leading to loss of user funds or protocol revenue.",
+      "severity": "high",
+      "original_id": "6884905fc9de49da"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_083",
+      "title": "Missing Reward Token Approval Reset After Transfer",
+      "description": "The notifyRewardAmount function approves the rewarder contract for the full rewardAmount_ without first resetting any existing approval to zero. This creates a vulnerability where if the rewarder contract is malicious or compromised, it can drain all approved tokens from the gauge. The function should follow the safeApprove pattern of resetting to zero before setting a new approval amount to prevent this attack vector.",
+      "severity": "high",
+      "original_id": "8645791f23b75529"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_084",
+      "title": "Incorrect Reward Token Transfer Source",
+      "description": "The notifyRewardAmount function transfers tokens from DISTRIBUTION address instead of from the msg.sender (which is verified as DISTRIBUTION via the onlyVoter modifier). This creates a logical inconsistency where the function requires the caller to be DISTRIBUTION but then attempts to transfer tokens from DISTRIBUTION's balance rather than from the caller. If DISTRIBUTION hasn't approved this contract to spend its tokens, the transfer will fail, breaking the reward distribution functionality.",
+      "severity": "high",
+      "original_id": "36856f3ef8b7f538"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_085",
+      "title": "Empty getReward Function Allows Reward Theft",
+      "description": "The getReward function is empty and does nothing, yet it's marked as external override. This means any user can call getReward(user_) for any address, and the function will execute without performing any reward distribution. If external contracts or users expect this function to actually distribute rewards, this creates a vulnerability where rewards can be claimed without proper distribution logic, potentially allowing attackers to manipulate reward accounting or prevent legitimate reward claims.",
+      "severity": "high",
+      "original_id": "1cfce0e10658ddb0"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_086",
+      "title": "Reward Rate Calculation Error Leading to Permanent Reward Loss",
+      "description": "The notifyRewardAmount function incorrectly calculates the reward rate when extending an active reward period, potentially causing permanent loss of rewards. When block.timestamp < _periodFinish, the function calculates leftover = remaining * rewardRate and then sets rewardRate = (reward + leftover) / DURATION. However, this formula doesn't account for the fact that leftover represents rewards that have already been distributed over the remaining time. Adding leftover to the new reward and dividing by the full DURATION incorrectly spreads the remaining rewards over a new full period instead of just the remaining time.\n\nMathematical Proof:\n- Initial state: rewardRate = 100 tokens/day, DURATION = 7 days, _periodFinish = now + 3.5 days\n- New reward: 700 tokens\n- Current calculation: leftover = 3.5 days * 100 = 350 tokens\n- New rewardRate = (700 + 350) / 7 = 150 tokens/day\n- Total rewards distributed: 350 (already distributed) + (150 * 3.5) = 875 tokens\n- But protocol only has: 350 (leftover) + 700 (new) = 1050 tokens\n- Missing: 1050 - 875 = 175 tokens permanently lost\n\nExploitation: An attacker can monitor when reward periods are about to end and front-run notifyRewardAmount calls to maximize the calculation error. The lost tokens remain stuck in the contract.\n\nFinancial Impact: Permanent loss of reward tokens that should have been distributed to users. The loss percentage depends on timing - up to 50% loss when called exactly halfway through a period.",
+      "severity": "high",
+      "original_id": "52520e937f453cf6"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_087",
+      "title": "Incorrect Reward Distribution When isDistributeEmissionToMerkle is Enabled",
+      "description": "When isDistributeEmissionToMerkle is true, the notifyRewardAmount function transfers rewards to merklGaugeMiddleman but doesn't update the reward distribution state variables (rewardRate, _periodFinish, lastUpdateTime) correctly. The function still updates _periodFinish and lastUpdateTime even though no rewards are being distributed through the gauge's internal mechanism. This causes the gauge's reward tracking to become desynchronized from actual reward distribution.\n\nMathematical Proof:\n- isDistributeEmissionToMerkle = true\n- notifyRewardAmount called with 1000 tokens\n- Tokens transferred to merklGaugeMiddleman\n- But _periodFinish = now + DURATION and lastUpdateTime = now\n- Users' earned() calculations will use the updated time periods but rewardRate = 0 (or old value)\n- Users see incorrect reward accrual calculations\n\nExploitation: Users may see phantom rewards that don't exist, or the gauge's reward state becomes corrupted. When isDistributeEmissionToMerkle is later disabled, the gauge's reward distribution will be based on incorrect historical state.\n\nFinancial Impact: Users may attempt to claim rewards that don't exist, or legitimate rewards may not be properly calculated when switching between distribution modes.",
+      "severity": "high",
+      "original_id": "5705cbadb4ffe795"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_088",
+      "title": "Missing Access Control on getReward(address) Function",
+      "description": "The getReward(address _user) function is marked as public but only has the onlyDistribution modifier, meaning anyone can call it to harvest rewards for any user. However, the function transfers rewards to _user, not msg.sender. This allows any address to trigger reward distribution to any other address, potentially disrupting reward distribution patterns or enabling front-running attacks.\n\nExploitation Scenario:\n- Alice has 100 tokens worth of rewards pending\n- Bob calls getReward(alice) before Alice can claim herself\n- Alice's rewards are transferred to her wallet unexpectedly\n- This could disrupt Alice's planned reward claiming strategy or enable timing-based attacks\n\nFinancial Impact: While funds don't go to the wrong address, this breaks the expected user control over reward claiming and enables potential front-running or disruption attacks on users' reward distribution strategies.",
+      "severity": "medium",
+      "original_id": "d52773efec592f23"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_089",
+      "title": "Division by Zero in rewardPerToken Calculation",
+      "description": "The rewardPerToken() function contains a division by _totalSupply when _totalSupply > 0. While there's a check for _totalSupply == 0, if _totalSupply becomes zero during normal operations (all users withdraw), the function returns rewardPerTokenStored. However, the earned() function uses (rewardPerToken() - userRewardPerTokenPaid[account]) which could lead to incorrect calculations when supply transitions between zero and non-zero states.\n\nMathematical Proof:\n- _totalSupply becomes 0 after all users withdraw\n- rewardPerToken() returns rewardPerTokenStored (last value before supply went to 0)\n- New user deposits, _totalSupply > 0\n- earned() calculation uses the old rewardPerTokenStored value which doesn't account for time elapsed while supply was 0\n- Rewards accumulated during zero-supply period are lost\n\nExploitation: An attacker could monitor when total supply approaches zero and time deposits/withdrawals to exploit the reward calculation gap.\n\nFinancial Impact: Loss of reward accrual during periods when total supply is zero, affecting all users who deposit after such periods.",
+      "severity": "medium",
+      "original_id": "33a219a0460bc516"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_090",
+      "title": "Signature Replay Attack Due to Missing Nonce",
+      "description": "The claim function is vulnerable to signature replay attacks because it doesn't include a nonce or timestamp in the signed message. Once a user's signature is valid for a specific amount, it can be reused multiple times to claim additional rewards beyond what was intended. The vulnerability exists because the signed message only includes (user, amount) without any protection against replay attacks.\n\n**Mathematical Proof:**\n1. User A is authorized to claim 1000 tokens with signature S\n2. User A claims 1000 tokens: claimed[userA] = 1000\n3. User A submits the same signature again\n4. The check `amount_ <= claimedAmount` passes because 1000 <= 1000 is false\n5. The signature is still valid since the message hasn't changed\n6. User A claims another 1000 tokens: claimed[userA] = 2000\n7. Total claimed increases by another 1000 tokens\n\n**Exploitation Scenario:**\nAn attacker who obtains a valid signature (either through network interception or by being the legitimate user) can repeatedly submit the same signature to drain the contract of funds. The attack requires no special conditions beyond having a valid signature.\n\n**Financial Impact:**\nThe contract can be completely drained of its reward tokens. If the contract holds 10,000 tokens and a user is authorized for 1,000 tokens, they can claim all 10,000 tokens using the same signature 10 times. Each claim increases both their claimed balance and the total claimed, allowing unlimited withdrawals.",
+      "severity": "high",
+      "original_id": "c92ca79bc974490d"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_091",
+      "title": "Incorrect Claim Amount Validation Allows Overclaiming",
+      "description": "The claim function incorrectly validates the claim amount by checking `amount_ <= claimedAmount` instead of the proper `amount_ <= totalAuthorizedAmount`. This allows users to claim more than their authorized amount if they can obtain a signature for a larger amount than they're entitled to.\n\n**Mathematical Proof:**\n1. User A is actually authorized for 500 tokens\n2. Attacker obtains a forged signature for 1000 tokens\n3. claimed[userA] = 0 initially\n4. Check: 1000 <= 0 is false, so validation passes\n5. User claims 1000 tokens (500 more than authorized)\n6. claimed[userA] = 1000\n7. Total claimed increases by 1000 instead of 500\n\n**Exploitation Scenario:**\nAn attacker who can obtain signatures (either through compromised signer keys or by manipulating the signing process) can claim arbitrary amounts. The contract doesn't validate that the amount in the signature matches what the user is actually entitled to receive.\n\n**Financial Impact:**\nUsers can claim more rewards than they deserve, draining the contract's funds. If the signer's private key is compromised, an attacker could authorize themselves for the entire contract balance and drain it in one transaction.",
+      "severity": "high",
+      "original_id": "4445e7fe54103648"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_092",
+      "title": "Missing Reward Token Balance Validation in notifyRewardAmount",
+      "description": "The notifyRewardAmount function doesn't validate that the actual token transfer was successful beyond the safeTransferFrom call. If the gauge contract doesn't have sufficient allowance or balance, the function will still update totalReward state, creating an inconsistency between the actual token balance and the recorded rewards.\n\n**Mathematical Proof:**\n1. Gauge has 0 token balance but calls notifyRewardAmount(1000)\n2. safeTransferFrom fails due to insufficient balance\n3. But totalReward += 1000 still executes (totalReward increases by 1000)\n4. Contract now records 1000 more rewards than it actually holds\n5. Later claims will fail when trying to transfer non-existent tokens\n\n**Exploitation Scenario:**\nA malicious or buggy gauge contract could intentionally or accidentally notify rewards without actually transferring tokens. This would make the contract appear to have more funds than it actually holds, potentially causing later legitimate claims to fail.\n\n**Financial Impact:**\nLegitimate users may be unable to claim their rewards because the contract records more rewards than it holds. This could lead to permanent loss of user funds if the contract becomes insolvent due to the accounting error.",
+      "severity": "medium",
+      "original_id": "aba2cafe572463b2"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_093",
+      "title": "Price Manipulation Vulnerability Through Pool Lock State",
+      "description": "The `currentTick()` function reverts with `PoolIsLocked()` error when the pool's `unlocked` flag is false. This creates a denial-of-service vulnerability where an attacker can temporarily lock the Algebra pool to block price queries, potentially disrupting dependent protocols that rely on FNX price feeds. While the pool lock is a legitimate mechanism to prevent flash loan attacks, its use in this context creates a single point of failure for price oracle functionality.\n\n**Mathematical Proof:**\n- Normal operation: `unlocked = true` \u2192 `currentTick()` returns tick value\n- Attack scenario: Attacker triggers pool lock \u2192 `unlocked = false` \u2192 `currentTick()` reverts\n- Impact: All calls to `getUsdToFNXPrice()` will fail while pool is locked\n\n**Exploitation Scenario:**\n1. Attacker identifies protocols dependent on this price provider\n2. Attacker executes actions that cause the Algebra pool to become locked\n3. During the lock period, all price queries revert\n4. Dependent protocols (lending, derivatives, etc.) cannot function properly\n5. Attacker may profit from the disruption through other market positions\n\n**Financial Impact:**\n- Temporary denial of service for all protocols relying on FNX price data\n- Potential liquidation protection avoidance if users cannot be liquidated due to missing price data\n- Protocol functionality disruption leading to financial losses for users",
+      "severity": "high",
+      "original_id": "e8497bec8c7e90b7"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_094",
+      "title": "Unsigned Integer Overflow in _toUint128 Function",
+      "description": "The `_toUint128()` function attempts to prevent overflow by checking if the converted value equals the original, but this check is insufficient for values between 2^128 and 2^256-1. When `ONE_USD` is calculated based on token decimals, if the USD token has more than 38 decimals (since 10^39 > 2^128), the conversion will overflow silently due to how Solidity handles uint256 to uint128 conversion.\n\n**Mathematical Proof:**\n- Maximum uint128 value: 2^128 - 1 \u2248 3.4e38\n- If USD token has 39 decimals: ONE_USD = 10^39 \u2248 1e39 > 3.4e38\n- uint128(10^39) will wrap around due to overflow\n- Check `z != y` will fail because both values will be truncated\n\n**Exploitation Scenario:**\n1. Attacker deploys a malicious USD token with 39+ decimals\n2. Price provider is initialized with this token\n3. ONE_USD calculation overflows silently\n4. getUsdToFNXPrice() returns incorrect price due to corrupted ONE_USD value\n5. All price calculations become incorrect\n\n**Financial Impact:**\n- Complete price oracle failure if initialized with high-decimal tokens\n- Incorrect pricing leading to improper liquidations, trading, or valuation\n- Potential for arbitrage opportunities due to incorrect price reporting",
+      "severity": "high",
+      "original_id": "302c253303ca635f"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_095",
+      "title": "Missing Reinitialization Protection",
+      "description": "The `initialize()` function can be called multiple times after deployment due to missing access control. While the `initializer` modifier prevents multiple initializations in the same transaction, a malicious actor could front-run the legitimate initialization or call it again after the contract is deployed.\n\n**Mathematical Proof:**\n- Initial state: pool, FNX, USD addresses are zero\n- First initialization: sets valid addresses and ONE_USD\n- Second initialization: can overwrite all critical parameters\n- Attacker can set pool to a manipulated pool, FNX/USD to malicious tokens\n\n**Exploitation Scenario:**\n1. Attacker monitors for contract deployment\n2. Attacker front-runs legitimate initialize() call with malicious parameters\n3. OR attacker calls initialize() again after legitimate setup\n4. Price provider now uses attacker-controlled pool and tokens\n5. All price queries return manipulated values\n\n**Financial Impact:**\n- Complete compromise of price oracle functionality\n- Attacker can set arbitrary prices for FNX token\n- Dependent protocols make decisions based on malicious price data\n- Potential for large-scale financial manipulation",
+      "severity": "high",
+      "original_id": "fc66a4df8e99e5a6"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_096",
+      "title": "Insufficient Price Manipulation Protection",
+      "description": "The contract acknowledges it's UNSAFE due to potential price manipulation in the Algebra pool, but lacks any safeguards against flash loan attacks or temporary price manipulation. The single check for pool lock state is insufficient to prevent sophisticated manipulation attacks that can occur within a single transaction.\n\n**Mathematical Proof:**\n- Flash loan attack: Attacker borrows large amount, manipulates pool price, queries oracle, repays loan\n- Price impact: Temporary price deviation can be 100x or more from true value\n- Oracle returns manipulated price during attack window\n- Example: True price = 1 FNX = $1, manipulated price = 1 FNX = $100\n\n**Exploitation Scenario:**\n1. Attacker takes flash loan of large USD amount\n2. Attacker manipulates Algebra pool price through large swaps\n3. Attacker calls dependent protocol functions that use manipulated price\n4. Protocol executes actions based on incorrect price (e.g., allows undervalued collateral)\n5. Attacker profits from protocol's incorrect risk assessment\n\n**Financial Impact:**\n- Temporary but severe price manipulation leading to incorrect protocol decisions\n- Potential for large-scale arbitrage at protocol's expense\n- Collateral valuation errors leading to undercollateralized positions",
+      "severity": "high",
+      "original_id": "9caa1070f69b8db8"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_097",
+      "title": "Missing Access Control on Critical Initialization Function",
+      "description": "The __BlastGovernorClaimableSetup_init function is an internal function that configures critical Blast protocol settings and adds the contract as a gas holder to the governor. However, since it's internal and not protected by any initialization guard, it can be called multiple times by inheriting contracts. If an inheriting contract doesn't properly protect its initialization, an attacker could reinitialize the Blast configuration with a malicious governor address, potentially taking control of yield and gas claims.",
+      "severity": "high",
+      "original_id": "06a5fbd950bc87a1"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_098",
+      "title": "Potential Reentrancy in Cross-Contract Call to Untrusted Governor",
+      "description": "The function calls IBlastGovernor(blastGovernor_).addGasHolder(address(this)) after configuring Blast settings. If blastGovernor_ is a malicious contract, it could reenter the calling contract during the addGasHolder call. Since this function is typically called during initialization, and the contract state may not be fully initialized yet, a reentrancy attack could leave the contract in an inconsistent state or bypass initialization checks.",
+      "severity": "high",
+      "original_id": "ce63ca86133c4044"
+    },
+    {
+      "id": "code4rena_fenix-finance-invitational_2024_10_tool_099",
+      "title": "Missing Governor Contract Validation and Safety Check",
+      "description": "The contract only checks if blastGovernor_ has code (blastGovernor_.code.length > 0) but doesn't validate that the contract properly implements the IBlastGovernor interface or that it's a legitimate governor contract. An attacker could deploy a malicious contract that accepts the addGasHolder call but then misappropriates the gas holder privileges, potentially draining funds or manipulating gas claims.",
+      "severity": "medium",
+      "original_id": "f1f262e8c6d4a197"
+    }
+  ],
+  "input_tokens": 20575,
+  "output_tokens": 628,
+  "cached_tokens": 148
+}
