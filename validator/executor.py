@@ -262,17 +262,6 @@ class AgentExecutor:
             with open(report_file, "r", encoding="utf-8") as f:
                 report_data = json.load(f)
 
-            if not report_data.get("success", False):
-                error_msg = report_data.get("error", "Unknown error")
-                self.logger.error(f"Agent execution failed: {error_msg}")
-                self.logger.info(f"Evaluation complete | Result: FAIL | Detection: 0% | Found: 0 | Error: {error_msg}")
-                return {
-                    "status": Status.ERROR,
-                    "error": error_msg,
-                    "stdout": report_data.get("stdout", ""),
-                    "stderr": report_data.get("stderr", ""),
-                }
-
             # Extract agent findings
             try:
                 agent_findings = report_data.get("report", {}).get("vulnerabilities", [])
@@ -319,13 +308,18 @@ class AgentExecutor:
 
             detection_pct = round(result.detection_rate * 100)
 
-            self.logger.info(
+            msg = (
                 f"Evaluation complete | "
                 f"Result: {final_result} | "
                 f"Detection: {detection_pct}% | "
                 f"Found: {result.true_positives} | "
                 f"Expected: {result.total_expected}"
             )
+            if not report_data.get("success", False):
+                error_msg = report_data.get("error", "Unknown error")
+                msg += f" | Execution error: {error_msg}"
+
+            self.logger.info(msg)
             self.logger.info(
                 "Tokens | "
                 f"Input: {result.input_tokens} (cached: {result.cached_tokens}) | "
