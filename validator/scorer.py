@@ -62,12 +62,10 @@ class ScoringResult:
 
 
 MODELS = [
-    # "deepseek-ai/DeepSeek-V3.2-TEE",
-    "moonshotai/Kimi-K2.5-TEE",
-    # "MiniMaxAI/MiniMax-M2.5-TEE",
-    
+    "MiniMaxAI/MiniMax-M2.5-TEE",
 ]
 CHUTES_MODELS = f"{','.join(MODELS)}:throughput"
+
 
 class ScaBenchScorerV2:
     """Improved scorer with one-by-one matching for consistency."""
@@ -146,7 +144,7 @@ class ScaBenchScorerV2:
 
 
         headers = {
-            "x-chutes-api-key": self.api_key,
+            "x-inference-api-key": self.api_key,
         }
 
         max_retries = 4

@@ -1,5 +1,6 @@
 bittensor-wallet==4.0.1
 bittensor==9.12.2
+async-substrate-interface==1.6.4
 llm>=0.1
 # numpy>=1
 pydantic>=2

@@ -28,14 +28,14 @@ class AgentExecutor:
         project_key,
         job_run_reports_dir,
         platform_client,
-        chutes_api_key=None,
+        execution_api_key=None,
     ):
         self.job_run = job_run
         self.agent_filepath = agent_filepath
         self.project_key = project_key
         self.job_run_reports_dir = job_run_reports_dir
         self.platform_client = platform_client
-        self.chutes_api_key = chutes_api_key
+        self.execution_api_key = execution_api_key
 
         self.project_report_dir = os.path.join(self.job_run_reports_dir, f"{self.project_key}")
         os.makedirs(self.project_report_dir, exist_ok=True)
@@ -47,7 +47,7 @@ class AgentExecutor:
         self.init_logger()
 
     def init_logger(self):
-        prefix = f"[J:{self.job_run.job_id}|JR:{self.job_run.id}|P:{self.project_key}] "
+        prefix = f"[A:{self.job_run.agent_id}|JR:{self.job_run.id}|P:{self.project_key}] "
 
         self.logger = PrefixedLogger(logger, prefix)
 
@@ -68,10 +68,7 @@ class AgentExecutor:
             docker.pull(image_tag, quiet=True)
             self.logger.info(f"Image {image_tag} is up-to-date")
         except DockerException as e:
-            self.logger.warning(
-                f"Failed to pull image {image_tag} "
-                "Will attempt to use local image if available."
-            )
+            self.logger.warning(f"Failed to pull image {image_tag} Will attempt to use local image if available.")
 
     def run(self):
         self.started_at = datetime.utcnow()
@@ -108,7 +105,7 @@ class AgentExecutor:
             envs={
                 "JOB_RUN_ID": self.job_run.id,
                 "PROJECT_KEY": self.project_key,
-                "CHUTES_API_KEY": self.chutes_api_key,
+                "INFERENCE_API_KEY": self.execution_api_key,
             },
             # read_only=True,
             memory="512m",
@@ -145,16 +142,16 @@ class AgentExecutor:
         report_dict["started_at"] = self.started_at
         report_dict["completed_at"] = datetime.utcnow()
 
-        if "report" not in report_dict:
-            report_dict["status"] = "timed_out"
+        if "report" not in report_dict and report_dict.get("error") == "Agent timeout":
+            report_dict["status"] = Status.TIMED_OUT
 
-        elif isinstance(report_dict["report"], dict) and report_dict["report"].get("vulnerabilities") is not None:
-            report_dict["status"] = "success"
+        elif isinstance(report_dict.get("report"), dict) and report_dict["report"].get("vulnerabilities") is not None:
+            report_dict["status"] = Status.SUCCESS
 
         else:
-            report_dict["status"] = "error"
+            report_dict["status"] = Status.ERROR
             report_dict["report"] = {
-                "report_parsing_error": str(report_dict["report"]),
+                "report_parsing_error": str(report_dict.get("report", {})),
                 "vulnerabilities": [],
             }
 

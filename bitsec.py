@@ -20,6 +20,7 @@ from loggers.logger import get_logger
 from validator.platform_client import PlatformClient
 from validator.models.platform import User, UserRole, AgentCode
 from validator.manager import SandboxManager
+from validator.proxy.models import derive_provider_from_api_key
 
 logger = get_logger()
 
@@ -75,7 +76,12 @@ def miner_create(
 
 @miner_app.command("submit")
 def miner_submit(
-    chutes_api_key: str = Option(..., prompt="Chutes API key", hide_input=True, help="Your Chutes API key (will be sent to the platform)"),
+    execution_api_key: str = Option(
+        ...,
+        prompt="Execution API key",
+        hide_input=True,
+        help="Your execution API key (prefix must be cpk_ or sk-or-; will be sent to the platform)",
+    ),
     wallet: str | None = Option(None, help="Bittensor wallet name"),
 ):
     """Submit the miner agent code to the platform."""
@@ -83,12 +89,14 @@ def miner_submit(
     if not agent_path.exists():
         raise FileNotFoundError(agent_path)
 
+    derive_provider_from_api_key(execution_api_key)
+
     code_str = agent_path.read_text(encoding="utf-8")
-    agent_code = AgentCode(code=code_str, chutes_api_key=chutes_api_key)
+    agent_code = AgentCode(code=code_str, execution_api_key=execution_api_key)
 
     client = get_platform_client(wallet)
     agent = client.submit_agent(agent_code)
-    logger.info(f"Agent submitted: version {agent['version']}")
+    logger.info(f"Agent submitted: Agent ID {agent['id']} version {agent['version']}")
 
 @miner_app.command("run")
 def miner_run():

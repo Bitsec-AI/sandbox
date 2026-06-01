@@ -21,17 +21,19 @@ class JobRun(BaseModel):
     completed_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    agent_id: int
 
 
 class MockJobRun(BaseModel):
     id: int
     job_id: int
     validator_id: int
+    agent_id: int
 
 
 class AgentCode(BaseModel):
     code: str
-    chutes_api_key: str
+    execution_api_key: str
 
 
 class AgentExecution(BaseModel):

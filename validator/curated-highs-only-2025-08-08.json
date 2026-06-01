@@ -1173,5 +1173,33 @@
         "description": "Source: https://github.com/sherlock-audit/2025-03-crestal-network-judging/issues/260\n\n**Summary:**\npay With ERC 20 is supposed to be used inside Blueprint V 5 contract to handle payment. But this function also can be used to drain anyone who is interact with Blueprint V 5 and using it to approve payment token when creating an agent. Root Cause Payment.sol#L 25-L 32 @> function pay With ERC 20 (address erc 20 Token Address , uint 256 amount , address from Address , address to Address ) public { ,→ // check from and to address require (from Address != to Address ,\"Cannot transfer to self address\" ); require (to Address != address (0), \"Invalid to address\" ); require (amount >0,\"Amount must be greater than 0\" ); IERC 20 token = IERC 20 (erc 20 Token Address ); token .safe Transfer From (from Address , to Address , amount ); } the root cause simply because this function is public function, meaning anyone can call this and supply valid token address, then fill from Address with any address that still have allowance/approving the payment token to be spend by Blueprint V 5 contract 5 Internal Pre-conditions 1.admin enable usdc or any erc 20 token as payment by calling Blueprint:: add Payment Address External Pre-conditions 1.victim approve the spending of usdc or any erc 20 token set in last step for Blueprint V 5 contract address proxy 2.the amount approved should be greater than the amount used for creating agent with token cost 3.victim call the function to create agent (optional) Attack Path 1.attacker call pay With ERC 20 supplying the parameter with usdc address, victim address and sufficient amount to be sent into attacker address\n\n**Impact:**\nuser/victim who interacted would lose their funds drained by attacker Po C No response Mitigation make the Payment:: pay With ERC 20 internal"
       }
     ]
+  },
+  {
+    "project_id": "cantina_generic-money_2025_11",
+    "name": "Generic Money",
+    "platform": "cantina",
+    "codebases": [
+      {
+        "codebase_id": "Generic Money_67cb02",
+        "repo_url": "https://github.com/MetaFi-Labs/generic-protocol",
+        "commit": "67cb029193a23b77ffeb3a4df225e716349c580c",
+        "tree_url": "https://github.com/MetaFi-Labs/generic-protocol/tree/67cb029193a23b77ffeb3a4df225e716349c580c",
+        "tarball_url": "https://github.com/MetaFi-Labs/generic-protocol/archive/67cb029193a23b77ffeb3a4df225e716349c580c.tar.gz"
+      }
+    ],
+    "vulnerabilities": [
+      {
+        "finding_id": "25d3f15e-12ed-444a-bbab-dd36dde59f22_H-01",
+        "severity": "high",
+        "title": "Insufficient slippage control for vault operations.",
+        "description": "Various aspects of the protocol effect a change in the amount of assets deployed in a strategy without accounting for slippage. The ERC4626 standard, while often used with an assumption of monotonically increasing share prices, does not guarantee that this is the case. A good example would be a vault/ strategy that deposits assets in Curve's 3pool. In such cases the protocol should account for the fact that operations that change the allocated collateral are potentially vulnerable to slippage. This affects both user operations (deposits and withdrawals) and privileged operations such as those used to rebalance assets between vaults."
+      },
+      {
+        "finding_id": "25d3f15e-12ed-444a-bbab-dd36dde59f22_H-02",
+        "severity": "high",
+        "title": "Vault price manipulation allows yield manager to mint tokens",
+        "description": "The yield manager can mint additional tokens whenever the value of the backing assets is higher than the total amount of shares. The method for determining the current value of backing assets relies on a call to the underlying vault_additionalOwnedAssets()functions. However, the return value of this function is potentially manipulable. Issue #1 describes a scenario which leverages this same property. Take for example a vault which deposits in Curve 3pool. In normal cases_additionalOwnedAssets()returns the correct value of the LP position that the vault holds. However, if an attacker manipulates the pool by selling a lot of the vault asset (increasing its balance in the pool) then the generic protocol will assume the vault's LP position is much more valuable."
+      }
+    ]
   }
 ]

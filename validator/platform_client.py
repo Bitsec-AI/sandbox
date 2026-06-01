@@ -152,7 +152,7 @@ class APIPlatformClient:
 
     def get_job_run_agent(self, job_run_id: int):
         endpoint = f"jobs/runs/{job_run_id}/agent"
-        resp = self._call_api("get", endpoint)
+        resp = self._call_api("get", endpoint, authenticate=True)
         return resp
 
     def get_top_agents(self):
@@ -222,6 +222,7 @@ class MockPlatformClient:
         return _method
 
     def get_job_run_agent(self, job_run_id: int):
+        execution_api_key = settings.inference_api_key
         agent = {
             "project_keys": [
                 # "code4rena_secondswap_2025_02",
@@ -237,7 +238,7 @@ class MockPlatformClient:
                 "sherlock_axion_2025_01",
                 "sherlock_oku_2024_12",
             ],
-            "chutes_api_key": settings.chutes_api_key,
+            "execution_api_key": execution_api_key,
         }
         return agent
 
@@ -246,6 +247,7 @@ class MockPlatformClient:
             id=int(time.time()),
             job_id=1,
             validator_id=1,
+            agent_id=1,
         )
         return job_run
 
@@ -257,6 +259,7 @@ class MockPlatformClient:
             {"project_key": "code4rena_secondswap_2025_02"},
         ]
         return projects
+
 
 class PlatformClient:
     """

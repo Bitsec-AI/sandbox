@@ -4,7 +4,9 @@ Mocks the inference API to simulate a multi-turn conversation where the model
 calls list_files, read_file, and report_vulnerabilities in sequence.
 """
 import json
+import os
 import tempfile
+from concurrent.futures import Future
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -13,6 +15,8 @@ import pytest
 from miner.agent import (
     BaselineRunner,
     AnalysisResult,
+    MAX_TOOL_PASS_WORKERS,
+    MAX_TOOL_RUNTIME_SECONDS,
     TOOL_DEFINITIONS,
     Vulnerability,
 )
@@ -96,7 +100,15 @@ def project_dir():
 def runner():
     """Create a BaselineRunner with a dummy config."""
     config = {"model": "test-model"}
-    return BaselineRunner(config, inference_api="http://fake:8000")
+    previous = os.environ.get("INFERENCE_API_KEY")
+    os.environ["INFERENCE_API_KEY"] = "cpk_test"
+    try:
+        return BaselineRunner(config, inference_api="http://fake:8000")
+    finally:
+        if previous is None:
+            os.environ.pop("INFERENCE_API_KEY", None)
+        else:
+            os.environ["INFERENCE_API_KEY"] = previous
 
 
 # ── Tests ────────────────────────────────────────────────────────
@@ -137,10 +149,32 @@ class TestToolExecution:
         result = runner._execute_tool_call(tc, project_dir)
         assert "contract Vault" in result
 
+    def test_read_file_sanitizes_spacing_glitches(self, runner, project_dir):
+        tc = _make_tool_call("c3b", "read_file", {"file_path": "src / Vault. sol"})
+        result = runner._execute_tool_call(tc, project_dir)
+        assert "contract Vault" in result
+
     def test_read_file_not_found(self, runner, project_dir):
         tc = _make_tool_call("c4", "read_file", {"file_path": "nope.sol"})
         result = json.loads(runner._execute_tool_call(tc, project_dir))
         assert "error" in result
+
+    def test_read_file_missing_path_returns_error(self, runner, project_dir):
+        tc = _make_tool_call("c4b", "read_file", {})
+        result = json.loads(runner._execute_tool_call(tc, project_dir))
+        assert result["error"] == "Missing or invalid required argument: file_path"
+
+    def test_invalid_tool_argument_json_returns_error(self, runner, project_dir):
+        tc = {
+            "id": "c4c",
+            "type": "function",
+            "function": {
+                "name": "read_file",
+                "arguments": "{not-json",
+            },
+        }
+        result = json.loads(runner._execute_tool_call(tc, project_dir))
+        assert "Invalid tool arguments JSON" in result["error"]
 
     def test_path_traversal_blocked_list(self, runner, project_dir):
         tc = _make_tool_call("c5", "list_files", {"directory": "../"})
@@ -168,30 +202,24 @@ class TestToolExecution:
 
 
 class TestAnalyzeProjectWithTools:
-    """Full tool-use loop: list_files → read_file → report_vulnerabilities."""
+    """Per-file tool-use loop with seeded target file context."""
 
     def _build_side_effects(self):
-        """Three inference responses simulating a realistic conversation."""
+        """Two inference responses simulating one extra read then final report."""
         return [
-            # Turn 1: model calls list_files
+            # Turn 1: model asks for one additional read
             _make_response(
-                tool_calls=[_make_tool_call("tc1", "list_files", {"directory": "."})],
+                tool_calls=[_make_tool_call("tc1", "read_file", {"file_path": "src/Vault.sol"})],
                 prompt_tokens=200,
                 completion_tokens=30,
             ),
-            # Turn 2: model calls read_file
-            _make_response(
-                tool_calls=[_make_tool_call("tc2", "read_file", {"file_path": "src/Vault.sol"})],
-                prompt_tokens=250,
-                completion_tokens=25,
-            ),
-            # Turn 3: model calls report_vulnerabilities
+            # Turn 2: model reports vulnerabilities
             _make_response(
                 tool_calls=[
-                    _make_tool_call("tc3", "report_vulnerabilities", {"vulnerabilities": SAMPLE_VULNERABILITIES}),
+                    _make_tool_call("tc2", "report_vulnerabilities", {"vulnerabilities": SAMPLE_VULNERABILITIES}),
                 ],
-                prompt_tokens=500,
-                completion_tokens=200,
+                prompt_tokens=250,
+                completion_tokens=25,
             ),
         ]
 
@@ -203,12 +231,12 @@ class TestAnalyzeProjectWithTools:
 
     @patch.object(BaselineRunner, "inference")
     def test_model_explores_with_list_and_read(self, mock_inference, runner, project_dir):
-        """Model uses list_files and read_file before reporting."""
+        """Seeded file list is available and the model uses one extra read before reporting."""
         mock_inference.side_effect = self._build_side_effects()
         runner.analyze_project_with_tools(project_dir, "test-project")
 
-        # 3 inference calls: list_files, read_file, report
-        assert mock_inference.call_count == 3
+        # 2 inference calls: one extra read, then report
+        assert mock_inference.call_count == 2
 
     @patch.object(BaselineRunner, "inference")
     def test_tool_definitions_sent(self, mock_inference, runner, project_dir):
@@ -254,10 +282,8 @@ class TestAnalyzeProjectWithTools:
         mock_inference.side_effect = self._build_side_effects()
         result = runner.analyze_project_with_tools(project_dir, "test-project")
 
-        # 200 + 250 + 500 = 950 input tokens
-        assert result.token_usage["total_input"] == 950
-        # 30 + 25 + 200 = 255 output tokens
-        assert result.token_usage["total_output"] == 255
+        assert result.token_usage["total_input"] == 450
+        assert result.token_usage["total_output"] == 55
 
     @patch.object(BaselineRunner, "inference")
     def test_conversation_includes_tool_results(self, mock_inference, runner, project_dir):
@@ -266,7 +292,7 @@ class TestAnalyzeProjectWithTools:
         runner.analyze_project_with_tools(project_dir, "test-project")
 
         # The messages list is mutated in-place, so we check the final state
-        # which should contain all tool results from all 3 turns
+        # as sent into the second inference call.
         def get_messages(call):
             if call.args:
                 return call.args[0]
@@ -275,12 +301,89 @@ class TestAnalyzeProjectWithTools:
         final_messages = get_messages(mock_inference.call_args_list[-1])
         tool_messages = [m for m in final_messages if isinstance(m, dict) and m.get("role") == "tool"]
 
-        # 3 tool calls = 3 tool result messages (list_files, read_file, report_vulnerabilities)
-        assert len(tool_messages) == 3
+        # Seeded list_files + seeded read_file + both model-issued tool call results
+        assert len(tool_messages) == 4
         tool_call_ids = [m["tool_call_id"] for m in tool_messages]
+        assert "seed-read-0-list" in tool_call_ids
+        assert "seed-read-0" in tool_call_ids
         assert "tc1" in tool_call_ids
         assert "tc2" in tool_call_ids
-        assert "tc3" in tool_call_ids
+
+    @patch.object(BaselineRunner, "inference")
+    def test_first_call_starts_with_seeded_tool_context(self, mock_inference, runner, project_dir):
+        """The first pass is seeded with synthetic list_files and read_file tool results."""
+        mock_inference.side_effect = [
+            _make_response(
+                tool_calls=[
+                    _make_tool_call("tc1", "report_vulnerabilities", {"vulnerabilities": SAMPLE_VULNERABILITIES}),
+                ],
+                prompt_tokens=100,
+                completion_tokens=20,
+            ),
+        ]
+
+        runner.analyze_project_with_tools(project_dir, "test-project")
+
+        first_call = mock_inference.call_args_list[0].kwargs
+        messages = first_call["messages"]
+        assert messages[2]["role"] == "assistant"
+        assert messages[2]["tool_calls"][0]["function"]["name"] == "list_files"
+        assert json.loads(messages[2]["tool_calls"][0]["function"]["arguments"]) == {"directory": "."}
+        assert messages[3]["role"] == "tool"
+        assert messages[3]["tool_call_id"] == "seed-read-0-list"
+        assert "src/" in messages[3]["content"]
+        assert messages[4]["role"] == "assistant"
+        assert messages[4]["tool_calls"][0]["function"]["name"] == "read_file"
+        assert json.loads(messages[4]["tool_calls"][0]["function"]["arguments"]) == {"file_path": "src/Vault.sol"}
+        assert messages[5]["role"] == "tool"
+        assert messages[5]["tool_call_id"] == "seed-read-0"
+        assert "contract Vault" in messages[5]["content"]
+
+    @patch.object(BaselineRunner, "_analyze_target_file_with_tools")
+    def test_runs_one_pass_per_discovered_contract_file(self, mock_analyze_target, runner, project_dir):
+        """Each discovered contract file gets its own seeded analysis pass."""
+        (project_dir / "src" / "Token.sol").write_text("contract Token {}\n")
+        mock_analyze_target.side_effect = [
+            ({"src/Token.sol"}, [], 100, 20),
+            ({ "src/Vault.sol" }, [Vulnerability(**{**SAMPLE_VULNERABILITIES[0], "reported_by_model": "test-model"})], 100, 20),
+        ]
+
+        result = runner.analyze_project_with_tools(project_dir, "test-project")
+
+        called_paths = {call.args[1] for call in mock_analyze_target.call_args_list}
+        assert called_paths == {"src/Token.sol", "src/Vault.sol"}
+        assert result.files_analyzed == 2
+        assert result.total_vulnerabilities == 1
+
+    @patch("miner.agent.ThreadPoolExecutor")
+    def test_uses_four_workers_for_parallel_file_passes(self, mock_executor_cls, runner, project_dir):
+        """Tool-based file passes should fan out with four workers."""
+        completed_future = Future()
+        completed_future.set_result(({"src/Vault.sol"}, [], 0, 0))
+        mock_executor = MagicMock()
+        mock_executor.__enter__.return_value = mock_executor
+        mock_executor.__exit__.return_value = False
+        mock_executor.submit.return_value = completed_future
+        mock_executor_cls.return_value = mock_executor
+
+        runner.analyze_project_with_tools(project_dir, "test-project")
+
+        mock_executor_cls.assert_called_once_with(max_workers=MAX_TOOL_PASS_WORKERS)
+
+    def test_discover_contract_files_filters_tests_and_excluded_dirs(self, runner, project_dir):
+        """Local discovery should ignore tests and excluded directories."""
+        (project_dir / "src" / "Token.sol").write_text("contract Token {}\n")
+        tests_dir = project_dir / "tests"
+        tests_dir.mkdir()
+        (tests_dir / "VaultTest.sol").write_text("contract VaultTest {}\n")
+        mocks_dir = project_dir / "mocks"
+        mocks_dir.mkdir()
+        (mocks_dir / "MockVault.sol").write_text("contract MockVault {}\n")
+
+        files = runner._discover_contract_files(project_dir)
+        rel_paths = [str(path.relative_to(project_dir)) for path in files]
+
+        assert rel_paths == ["src/Token.sol", "src/Vault.sol"]
 
     @patch.object(BaselineRunner, "inference")
     def test_stops_after_report(self, mock_inference, runner, project_dir):
@@ -291,7 +394,7 @@ class TestAnalyzeProjectWithTools:
         mock_inference.side_effect = responses
 
         runner.analyze_project_with_tools(project_dir, "test-project")
-        assert mock_inference.call_count == 3
+        assert mock_inference.call_count == 2
 
     @patch.object(BaselineRunner, "inference")
     def test_stops_when_no_tool_calls(self, mock_inference, runner, project_dir):
@@ -311,21 +414,94 @@ class TestAnalyzeProjectWithTools:
         assert result.total_vulnerabilities == 0
 
     @patch.object(BaselineRunner, "inference")
-    def test_max_turns_respected(self, mock_inference, runner, project_dir):
-        """Loop stops after MAX_TOOL_TURNS even if model keeps calling tools."""
-        # Return list_files calls forever
+    @patch("miner.agent.time.monotonic")
+    def test_forces_report_when_deadline_reached(self, mock_monotonic, mock_inference, runner, project_dir):
+        """Loop forces report_vulnerabilities once the time budget is exhausted."""
+        mock_monotonic.side_effect = [
+            100.0,
+            100.0,
+            100.0,
+            100.0 + MAX_TOOL_RUNTIME_SECONDS,
+        ]
         mock_inference.side_effect = [
             _make_response(
-                tool_calls=[_make_tool_call(f"tc{i}", "list_files", {"directory": "."})],
+                tool_calls=[_make_tool_call("tc1", "list_files", {"directory": "."})],
                 prompt_tokens=100,
                 completion_tokens=20,
-            )
-            for i in range(20)
+            ),
+            _make_response(
+                tool_calls=[
+                    _make_tool_call("tc2", "report_vulnerabilities", {"vulnerabilities": SAMPLE_VULNERABILITIES}),
+                ],
+                prompt_tokens=100,
+                completion_tokens=20,
+            ),
         ]
 
-        from miner.agent import MAX_TOOL_TURNS
         result = runner.analyze_project_with_tools(project_dir, "test-project")
-        assert mock_inference.call_count == MAX_TOOL_TURNS
+
+        assert mock_inference.call_count == 2
+        assert result.total_vulnerabilities == 2
+        forced_call = mock_inference.call_args_list[-1].kwargs
+        assert forced_call["tool_choice"] == {"type": "function", "function": {"name": "report_vulnerabilities"}}
+        timeout_messages = [
+            message for message in forced_call["messages"]
+            if message.get("role") == "user" and "running out of time" in message.get("content", "")
+        ]
+        assert len(timeout_messages) == 1
+
+    @patch.object(BaselineRunner, "inference")
+    @patch("miner.agent.time.monotonic")
+    def test_turns_are_capped_per_file_pass(self, mock_monotonic, mock_inference, runner, project_dir):
+        """A file pass forces reporting by the second turn."""
+        mock_monotonic.side_effect = [100.0, 100.0, 100.0, 101.0]
+        mock_inference.side_effect = [
+            _make_response(
+                tool_calls=[_make_tool_call("tc1", "list_files", {"directory": "."})],
+                prompt_tokens=100,
+                completion_tokens=20,
+            ),
+            _make_response(
+                tool_calls=[
+                    _make_tool_call("tc2", "report_vulnerabilities", {"vulnerabilities": SAMPLE_VULNERABILITIES}),
+                ],
+                prompt_tokens=100,
+                completion_tokens=20,
+            ),
+        ]
+
+        result = runner.analyze_project_with_tools(project_dir, "test-project")
+
+        assert mock_inference.call_count == 2
+        assert result.total_vulnerabilities == 2
+
+    @patch.object(BaselineRunner, "inference")
+    @patch("miner.agent.time.monotonic")
+    def test_forced_report_failure_exits_cleanly(self, mock_monotonic, mock_inference, runner, project_dir):
+        """Loop exits after a forced report attempt that does not actually report."""
+        mock_monotonic.side_effect = [
+            100.0,
+            100.0,
+            100.0,
+            100.0 + MAX_TOOL_RUNTIME_SECONDS,
+        ]
+        mock_inference.side_effect = [
+            _make_response(
+                tool_calls=[_make_tool_call("tc1", "list_files", {"directory": "."})],
+                prompt_tokens=100,
+                completion_tokens=20,
+            ),
+            _make_response(
+                tool_calls=[_make_tool_call("tc2", "list_files", {"directory": "."})],
+                prompt_tokens=100,
+                completion_tokens=20,
+            ),
+        ]
+
+        result = runner.analyze_project_with_tools(project_dir, "test-project")
+
+        assert mock_inference.call_count == 2
+        assert result.total_vulnerabilities == 0
 
     @patch.object(BaselineRunner, "inference")
     def test_deduplicates_vulnerabilities(self, mock_inference, runner, project_dir):
@@ -371,7 +547,10 @@ class TestInferenceKwargs:
             tool_choice="auto",
         )
 
+        headers = mock_post.call_args.kwargs["headers"]
         payload = mock_post.call_args.kwargs["json"]
+        assert headers["x-inference-api-key"] == "cpk_test"
+        assert "provider" not in payload
         assert payload["tools"] == TOOL_DEFINITIONS
         assert payload["tool_choice"] == "auto"
 
