@@ -35,12 +35,14 @@ validator_app = typer.Typer(help="Validator operations")
 app.add_typer(miner_app, name="miner")
 app.add_typer(validator_app, name="validator")
 
+
 # -------------------------------------------------------
 # Helpers
 # -------------------------------------------------------
 def get_platform_client(wallet: str | None = None) -> PlatformClient:
     wallet_name = wallet or settings.wallet_name
     return PlatformClient(settings.platform_url, wallet_name=wallet_name)
+
 
 # -------------------------------------------------------
 # Original helper functions (unchanged)
@@ -61,6 +63,7 @@ def create_user(
 
     logger.info(f"{user['role']} User {user['email']} created with hotkey: {user['hotkey']}")
 
+
 # -------------------------------------------------------
 # Miner commands
 # -------------------------------------------------------
@@ -73,6 +76,7 @@ def miner_create(
     """Create a miner user on the platform (registers with hotkey)."""
     client = get_platform_client(wallet)
     create_user(email=email, name=name, client=client, is_miner=True)
+
 
 @miner_app.command("submit")
 def miner_submit(
@@ -98,6 +102,18 @@ def miner_submit(
     agent = client.submit_agent(agent_code)
     logger.info(f"Agent submitted: Agent ID {agent['id']} version {agent['version']}")
 
+
+@miner_app.command("cancel-agent")
+def miner_cancel_agent(
+    agent_id: int = Argument(..., help="Agent ID to cancel"),
+    wallet: str | None = Option(None, help="Bittensor wallet name"),
+):
+    """Cancel a submitted miner agent execution before evaluation."""
+    client = get_platform_client(wallet)
+    client.cancel_agent(agent_id)
+    logger.info(f"Agent cancellation requested: Agent ID {agent_id}")
+
+
 @miner_app.command("run")
 def miner_run():
     """Run the agent execution and evaluation locally via Docker (recommended)."""
@@ -107,6 +123,7 @@ def miner_run():
     cmd = ["docker", "compose", "up", "--build"]
     subprocess.run(cmd, env=env, check=True)
 
+
 @miner_app.command("run-no-docker")
 def miner_run_no_docker():
     """Run the agent execution and evaluation locally as a script"""
@@ -114,11 +131,13 @@ def miner_run_no_docker():
     manager = SandboxManager(is_local=True)
     asyncio.run(manager.run())
 
+
 @miner_app.command("execute-agent")
 def miner_execute_agent():
     """Run the miner agent script locally on a single project."""
     cmd = [sys.executable, "miner/agent.py"]
     subprocess.run(cmd, env=os.environ.copy(), check=True)
+
 
 # -------------------------------------------------------
 # Validator commands
@@ -133,15 +152,21 @@ def validator_create(
     client = get_platform_client(wallet)
     create_user(email=email, name=name, client=client, is_miner=False)
 
+
 @validator_app.command("run")
 def validator_run():
     """Run the validator."""
     cmd = [
-        "docker", "compose",
-        "-f", "docker-compose.validator.yaml",
-        "up", "--build", "-d",
+        "docker",
+        "compose",
+        "-f",
+        "docker-compose.validator.yaml",
+        "up",
+        "--build",
+        "-d",
     ]
     subprocess.run(cmd, check=True)
+
 
 # -------------------------------------------------------
 # Entry point

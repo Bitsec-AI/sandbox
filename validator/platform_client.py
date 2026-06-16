@@ -191,6 +191,11 @@ class APIPlatformClient:
         resp = self._call_api("post", endpoint, json=payload, authenticate=True)
         return resp
 
+    def cancel_agent(self, agent_id: int) -> dict:
+        endpoint = f"agents/{agent_id}/cancel"
+        resp = self._call_api("post", endpoint, authenticate=True)
+        return resp
+
     def create_user(self, user: User) -> dict:
         endpoint = "users/"
         payload = user.model_dump(mode="json")
