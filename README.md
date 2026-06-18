@@ -2,11 +2,12 @@
 
 # **Bitsec Subnet v2** <!-- omit in toc -->
 
-[![Discord Chat](https://img.shields.io/discord/308323056592486420.svg)](https://discord.gg/bittensor)
+[![Homepage](https://img.shields.io/badge/homepage-bitsec.ai-black)](https://bitsec.ai/)
 [![Docs](https://img.shields.io/badge/docs-docs.bitsec.ai-blue)](https://docs.bitsec.ai/)
+[![Discord Chat](https://img.shields.io/discord/308323056592486420.svg)](https://discord.gg/bittensor)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-[Discord](https://discord.gg/bittensor) • [Network](https://taostats.io/) • [Research](https://bittensor.com/whitepaper)
+[Homepage](https://bitsec.ai/) • [Docs](https://docs.bitsec.ai/) • [Discord](https://discord.gg/bittensor) • [Network](https://taostats.io/) • [Research](https://bittensor.com/whitepaper)
 
 </div>
 
