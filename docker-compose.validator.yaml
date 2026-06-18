@@ -15,7 +15,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     command: >
-      python -m neurons.validator
+      uv run python -m neurons.validator
         --netuid ${NETUID}
         --subtensor.network ${NETWORK}
         --wallet.name ${WALLET_NAME}

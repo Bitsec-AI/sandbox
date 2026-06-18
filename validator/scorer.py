@@ -132,6 +132,7 @@ class ScaBenchScorerV2:
                 {"role": "user", "content": prompt},
             ],
             "response_format": {"type": "json_object"},
+            "reasoning": {"exclude": True},
         }
 
         headers = {
@@ -382,7 +383,11 @@ class ScaBenchScorerV2:
                     system=system,
                 )
 
-                response_content = (response["choices"][0]["message"].get("content") or "").strip()
+                message = response["choices"][0]["message"]
+                response_content = (
+                    message.get("content")
+                    or message.get("reasoning_content", "")
+                ).strip()
 
                 result = self.clean_json_response(response_content)
 

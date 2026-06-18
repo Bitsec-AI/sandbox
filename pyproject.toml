@@ -1,0 +1,36 @@
+[project]
+name = "bitsec"
+version = "0.0.0"
+description = "Bitsec Subnet v2"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "async-substrate-interface==1.6.4",
+    "bittensor==9.12.2",
+    "bittensor-wallet==4.0.1",
+    "langchain==0.3.27",
+    "langchain-core==0.3.76",
+    "llm>=0.1",
+    "pydantic>=2",
+    "pydantic-settings==2.12.0",
+    "python-dotenv==1.1.1",
+    "python-on-whales==0.78.0",
+    "requests==2.32.5",
+    "rich>=13",
+    "starlette>=0.30.0",
+    "typer==0.20.0",
+]
+
+[dependency-groups]
+dev = [
+    "pylint==3.3.7",
+    "pytest>=8",
+    "ruff",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
