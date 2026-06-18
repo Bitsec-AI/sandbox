@@ -161,7 +161,8 @@ class ScaBenchScorerV2:
         resp_json = resp.json()
         usage = resp_json.get("usage", {})
         self.input_tokens += usage.get("prompt_tokens", 0)
-        self.cached_tokens += usage.get("prompt_tokens_details", {}).get("cached_tokens", 0)
+        prompt_token_details = usage.get("prompt_tokens_details") or {}
+        self.cached_tokens += prompt_token_details.get("cached_tokens", 0)
         self.output_tokens += usage.get("completion_tokens", 0)
 
         return resp_json
