@@ -244,6 +244,7 @@ class MockPlatformClient:
                 "sherlock_oku_2024_12",
             ],
             "execution_api_key": execution_api_key,
+            "eval_max_vulns": 100,
         }
         return agent
 

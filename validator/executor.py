@@ -17,7 +17,6 @@ logger = get_logger()
 
 SANDBOX_CONTAINER_TMPL = "bitsec_sandbox_{job_run_id}_{project_key}"
 PROJECT_IMAGE_TAG_TMPL = "ghcr.io/bitsec-ai/{project_key}:latest"
-EVAL_MAX_VULNS = 100
 
 
 class AgentExecutor:
@@ -29,6 +28,7 @@ class AgentExecutor:
         job_run_reports_dir,
         platform_client,
         execution_api_key=None,
+        eval_max_vulns=100,
     ):
         self.job_run = job_run
         self.agent_filepath = agent_filepath
@@ -36,6 +36,7 @@ class AgentExecutor:
         self.job_run_reports_dir = job_run_reports_dir
         self.platform_client = platform_client
         self.execution_api_key = execution_api_key
+        self.eval_max_vulns = eval_max_vulns
 
         self.project_report_dir = os.path.join(self.job_run_reports_dir, f"{self.project_key}")
         os.makedirs(self.project_report_dir, exist_ok=True)
@@ -67,7 +68,7 @@ class AgentExecutor:
             self.logger.info(f"Pulling latest image: {image_tag}")
             docker.pull(image_tag, quiet=True)
             self.logger.info(f"Image {image_tag} is up-to-date")
-        except DockerException as e:
+        except DockerException:
             self.logger.warning(f"Failed to pull image {image_tag} Will attempt to use local image if available.")
 
     def run(self):
@@ -269,7 +270,7 @@ class AgentExecutor:
                 logger.error(f"Invalid report vulnerabilities ({e}): {report_data['report']}")
                 agent_findings = []
 
-            agent_findings = agent_findings[:EVAL_MAX_VULNS]
+            agent_findings = agent_findings[: self.eval_max_vulns]
 
             self.logger.info(
                 f"Scoring {self.project_key}: {len(expected_findings)} expected vs {len(agent_findings)} found"

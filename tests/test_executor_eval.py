@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 
 from config import settings
 from validator.executor import AgentExecutor
@@ -65,3 +66,65 @@ def test_timeout_report_scores_as_zero_findings_without_llm_matching(monkeypatch
     assert len(platform_client.evaluations) == 1
     evaluation_path = project_dir / "evaluation.json"
     assert evaluation_path.exists()
+
+
+def test_eval_job_run_limits_findings_with_configured_eval_max_vulns(monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "chutes_api_key", "test-key")
+
+    captured = {}
+
+    def capture_score_project(self, expected_findings, tool_findings, project_name):
+        captured["tool_findings_len"] = len(tool_findings)
+        return SimpleNamespace(
+            project=project_name,
+            timestamp="2026-06-18T00:00:00",
+            total_expected=len(expected_findings),
+            total_found=len(tool_findings),
+            true_positives=0,
+            false_negatives=len(expected_findings),
+            false_positives=len(tool_findings),
+            detection_rate=0,
+            precision=0,
+            f1_score=0,
+            matched_findings=[],
+            missed_findings=[],
+            extra_findings=[],
+            undecided_findings=[],
+            input_tokens=0,
+            output_tokens=0,
+            cached_tokens=0,
+        )
+
+    monkeypatch.setattr(ScaBenchScorerV2, "score_project", capture_score_project)
+
+    project_key = "code4rena_coded-estate-invitational_2024_12"
+    reports_dir = tmp_path / "reports"
+    project_dir = reports_dir / project_key
+    project_dir.mkdir(parents=True)
+    report_path = project_dir / "report.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "success": True,
+                "report": {
+                    "vulnerabilities": [{"title": f"finding {idx}", "description": "test finding"} for idx in range(5)]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    executor = AgentExecutor(
+        job_run=MockJobRun(id=1, job_id=1, validator_id=1, agent_id=1),
+        agent_filepath="",
+        project_key=project_key,
+        job_run_reports_dir=str(reports_dir),
+        platform_client=CapturingPlatformClient(),
+        eval_max_vulns=2,
+    )
+
+    scoring_result = executor.eval_job_run()
+
+    assert scoring_result["status"] == Status.SUCCESS
+    assert captured["tool_findings_len"] == 2
+    assert scoring_result["result"]["total_found"] == 2

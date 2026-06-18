@@ -118,6 +118,9 @@ class SandboxManager:
             self.platform_client.complete_job_run(job_run.id, status="error")
             return
 
+        eval_max_vulns = agent.get("eval_max_vulns", 100)
+        logger.info(f"[A:{job_run.agent_id}|JR:{job_run.id}] Eval max vulnerabilities: {eval_max_vulns}")
+
         if self.is_local:
             agent_filepath = f"{settings.host_cwd}/miner/agent.py"
             agent_filepath = os.path.abspath(agent_filepath)
@@ -144,6 +147,7 @@ class SandboxManager:
                 job_run_reports_dir,
                 platform_client=self.platform_client,
                 execution_api_key=execution_api_key,
+                eval_max_vulns=eval_max_vulns,
             )
             task = loop.run_in_executor(self.executor_pool, executor.run)
             tasks.append(task)
