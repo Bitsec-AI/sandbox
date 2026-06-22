@@ -1,6 +1,6 @@
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 def derive_provider_from_api_key(api_key: str) -> str:
@@ -98,3 +98,70 @@ class InferenceResponse(BaseModel):
     input_tokens: int = 0
     cached_tokens: int = 0
     output_tokens: int = 0
+
+
+class ProxyMetricsContext(BaseModel):
+    agent_id: str = "unknown"
+    job_run_id: str = "unknown"
+    phase: str = "unknown"
+    req_model: str = "unknown"
+    model: str = "unknown"
+    provider: str = "unknown"
+
+    @field_validator("agent_id", "job_run_id", "req_model", "model", "provider", mode="before")
+    @classmethod
+    def default_unknown(cls, value: Any) -> str:
+        if value is None:
+            return "unknown"
+        value = str(value).strip()
+        return value or "unknown"
+
+    @field_validator("provider", mode="after")
+    @classmethod
+    def default_provider(cls, value: str) -> str:
+        return value.lower()
+
+    @field_validator("phase", mode="before")
+    @classmethod
+    def default_phase(cls, value: Any) -> str:
+        value = cls.default_unknown(value)
+        if value in {"execution", "evaluation"}:
+            return value
+        return "unknown"
+
+
+class LLMAttemptMetrics(BaseModel):
+    upstream_provider: str = "unknown"
+    status_code: int = 0
+    duration_ms: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cached_tokens: int = 0
+    retry_num: int = 0
+    finish_reason: str = ""
+    error_type: str = ""
+
+
+class ProxySummaryRow(BaseModel):
+    phase: str = "unknown"
+    req_model: str = "unknown"
+    model: str = "unknown"
+    provider: str = "unknown"
+    requests: int = 0
+    success: int = 0
+    error: int = 0
+    llm_requests: int = 0
+    llm_success: int = 0
+    llm_error: int = 0
+    retries: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cached_tokens: int = 0
+    duration_ms_total: int = 0
+    duration_ms_max: int = 0
+    status_codes: dict[str, int] = Field(default_factory=dict)
+
+    def to_summary_dict(self) -> dict[str, Any]:
+        payload = self.model_dump()
+        payload["duration_ms_avg"] = int(self.duration_ms_total / self.requests) if self.requests else 0
+        return payload

@@ -1,5 +1,6 @@
 import json
 from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 from config import settings
 from validator.executor import AgentExecutor
@@ -14,6 +15,35 @@ class CapturingPlatformClient:
     def submit_agent_evaluation(self, agent_evaluation):
         self.evaluations.append(agent_evaluation)
         return {"id": 123}
+
+
+@patch("validator.scorer.requests.post")
+def test_scorer_sends_evaluation_tracking_headers(mock_post):
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {
+        "choices": [{"message": {"content": "{}"}}],
+        "usage": {},
+    }
+    mock_resp.raise_for_status.return_value = None
+    mock_post.return_value = mock_resp
+
+    scorer = ScaBenchScorerV2(
+        {
+            "api_key": "cpk_test",
+            "api_url": "http://fake:8000",
+            "agent_id": 123,
+            "job_run_id": 456,
+        }
+    )
+    scorer.prompt("prompt", "system")
+
+    headers = mock_post.call_args.kwargs["headers"]
+    assert headers["x-inference-api-key"] == "cpk_test"
+    assert headers["x-agent-id"] == "123"
+    assert headers["x-job-run-id"] == "456"
+    assert headers["x-request-phase"] == "evaluation"
+    assert "x-job-id" not in headers
+    assert "x-project-id" not in headers
 
 
 def test_timeout_report_scores_as_zero_findings_without_llm_matching(monkeypatch, tmp_path):

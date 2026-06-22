@@ -104,7 +104,8 @@ class AgentExecutor:
                 (self.agent_filepath, "/app/agent.py"),
             ],
             envs={
-                "JOB_RUN_ID": self.job_run.id,
+                "AGENT_ID": str(self.job_run.agent_id),
+                "JOB_RUN_ID": str(self.job_run.id),
                 "PROJECT_KEY": self.project_key,
                 "INFERENCE_API_KEY": self.execution_api_key,
             },
@@ -254,6 +255,8 @@ class AgentExecutor:
             "api_url": settings.proxy_url,
             "debug": True,
             "verbose": True,
+            "agent_id": self.job_run.agent_id,
+            "job_run_id": self.job_run.id,
             "confidence_threshold": 0.75,
             "strict_matching": False,
         }

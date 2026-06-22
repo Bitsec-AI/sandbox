@@ -1,4 +1,5 @@
 fastapi==0.116.1
 pydantic==2.11.9
 requests==2.32.5
+valkey>=6,<7
 uvicorn[standard]==0.23.1

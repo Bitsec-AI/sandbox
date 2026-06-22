@@ -82,6 +82,8 @@ class ScaBenchScorerV2:
         self.api_key = self.config.get("api_key")
         if not self.api_key:
             raise ValueError("Chutes API key is required for validation.")
+        self.agent_id = str(self.config.get("agent_id", "unknown"))
+        self.job_run_id = str(self.config.get("job_run_id", "unknown"))
 
         self.debug = self.config.get("debug", False)
         self.verbose = self.config.get("verbose", False)
@@ -137,6 +139,9 @@ class ScaBenchScorerV2:
 
         headers = {
             "x-inference-api-key": self.api_key,
+            "x-agent-id": self.agent_id,
+            "x-job-run-id": self.job_run_id,
+            "x-request-phase": "evaluation",
         }
 
         resp = None
