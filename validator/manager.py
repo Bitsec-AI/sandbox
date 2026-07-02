@@ -10,6 +10,7 @@ from python_on_whales.utils import run
 from config import settings
 from loggers.logger import get_logger
 from validator.platform_client import PlatformClient, PlatformError
+from validator.proxy_client import ProxyClient
 from validator.executor import AgentExecutor
 
 
@@ -24,6 +25,7 @@ class SandboxManager:
         self.all_jobs_dir = os.path.join(os.getcwd(), "jobs")
         self.host_jobs_dir = os.path.join(settings.host_cwd, "jobs")
         self.platform_client = PlatformClient(is_local=is_local, wallet_name=wallet_name)
+        self.proxy_client = ProxyClient()
         self.validator = self.platform_client.get_current_validator()
         self.executor_pool = ThreadPoolExecutor(max_workers=12)
 
@@ -99,10 +101,33 @@ class SandboxManager:
         # wait for proxy to start up
         time.sleep(10)
 
+    def reset_proxy_summary(self, job_run_id: int, agent_id: int):
+        try:
+            self.proxy_client.reset_job_run_summary(job_run_id)
+        except Exception as e:
+            logger.warning(f"[A:{agent_id}|JR:{job_run_id}] Failed to reset proxy summary: {e}")
+
+    def fetch_proxy_summary(self, job_run_id: int, agent_id: int) -> dict | None:
+        try:
+            return self.proxy_client.get_job_run_summary(job_run_id)
+        except Exception as e:
+            logger.warning(f"[A:{agent_id}|JR:{job_run_id}] Failed to fetch proxy summary: {e}")
+            return None
+
+    def submit_proxy_summary(self, job_run_id: int, agent_id: int):
+        summary = self.fetch_proxy_summary(job_run_id, agent_id)
+        if not summary:
+            return
+        try:
+            self.platform_client.submit_job_run_proxy_summary(job_run_id, summary)
+        except Exception as e:
+            logger.warning(f"[A:{agent_id}|JR:{job_run_id}] Failed to submit proxy summary: {e}")
+
     async def process_job_run(self, job_run):
         logger.info(f"[A:{job_run.agent_id}|JR:{job_run.id}] Processing job run")
 
         self.platform_client.start_job_run(job_run.id)
+        self.reset_proxy_summary(job_run.id, job_run.agent_id)
 
         job_run_dir = os.path.join(self.all_jobs_dir, f"job_run_{job_run.id}")
         job_run_reports_dir = os.path.join(job_run_dir, "reports")
@@ -156,6 +181,7 @@ class SandboxManager:
 
         # TODO: Check if finished successfully or part-fail
         self.platform_client.complete_job_run(job_run.id)
+        self.submit_proxy_summary(job_run.id, job_run.agent_id)
 
 
 if __name__ == "__main__":

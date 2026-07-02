@@ -172,6 +172,11 @@ class APIPlatformClient:
         resp = self._call_api("post", endpoint, json=payload, authenticate=True)
         return resp
 
+    def submit_job_run_proxy_summary(self, job_run_id: int, payload: dict[str, Any]) -> dict:
+        endpoint = f"jobs/runs/{job_run_id}/proxy-summary"
+        resp = self._call_api("post", endpoint, json=payload, authenticate=True)
+        return resp
+
     def start_job_run(self, job_run_id: int) -> dict:
         endpoint = f"jobs/runs/{job_run_id}/start"
         resp = self._call_api("post", endpoint, authenticate=True)
@@ -226,6 +231,10 @@ class MockPlatformClient:
 
         return _method
 
+    def submit_job_run_proxy_summary(self, job_run_id: int, payload: dict[str, Any]) -> dict:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return {"id": 1}
+
     def get_job_run_agent(self, job_run_id: int):
         execution_api_key = settings.inference_api_key
         agent = {
@@ -233,14 +242,14 @@ class MockPlatformClient:
                 # "code4rena_secondswap_2025_02",
                 # "code4rena_superposition_2025_01",
                 # "code4rena_loopfi_2025_02",
-                "code4rena_lambowin_2025_02",
-                "code4rena_bakerfi-invitational_2025_02",
-                "cantina_minimal-delegation_2025_04",
-                "code4rena_kinetiq_2025_07",
-                "cantina_smart-contract-audit-of-tn-contracts_2025_08",
-                "code4rena_forte-float128-solidity-library_2025_04",
-                "sherlock_perennial_v2_update_3_2024_08",
-                "sherlock_axion_2025_01",
+                # "code4rena_lambowin_2025_02",
+                # "code4rena_bakerfi-invitational_2025_02",
+                # "cantina_minimal-delegation_2025_04",
+                # "code4rena_kinetiq_2025_07",
+                # "cantina_smart-contract-audit-of-tn-contracts_2025_08",
+                # "code4rena_forte-float128-solidity-library_2025_04",
+                # "sherlock_perennial_v2_update_3_2024_08",
+                # "sherlock_axion_2025_01",
                 "sherlock_oku_2024_12",
             ],
             "execution_api_key": execution_api_key,

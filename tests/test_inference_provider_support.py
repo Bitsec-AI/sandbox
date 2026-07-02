@@ -37,10 +37,12 @@ def test_runner_requires_inference_api_key_during_init():
     "os.environ",
     {
         "INFERENCE_API_KEY": "sk-or-test",
+        "AGENT_ID": "agent-123",
+        "JOB_RUN_ID": "run-456",
     },
     clear=False,
 )
-def test_runner_sends_inference_api_key_header(mock_post):
+def test_runner_sends_inference_tracking_headers(mock_post):
     mock_resp = MagicMock()
     mock_resp.json.return_value = {"choices": [{"message": {"content": "{}"}}], "usage": {}}
     mock_resp.raise_for_status.return_value = None
@@ -52,4 +54,9 @@ def test_runner_sends_inference_api_key_header(mock_post):
     headers = mock_post.call_args.kwargs["headers"]
     payload = mock_post.call_args.kwargs["json"]
     assert headers["x-inference-api-key"] == "sk-or-test"
+    assert headers["x-agent-id"] == "agent-123"
+    assert headers["x-job-run-id"] == "run-456"
+    assert headers["x-request-phase"] == "execution"
+    assert "x-job-id" not in headers
+    assert "x-project-id" not in headers
     assert "provider" not in payload

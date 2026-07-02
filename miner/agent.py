@@ -144,8 +144,8 @@ class BaselineRunner:
         self.config = config or {}
         self.model = self.config['model']
         self.inference_api = inference_api or os.getenv('INFERENCE_API', "http://bitsec_proxy:8000")
-        self.project_id = os.getenv('PROJECT_ID', "local")
-        self.job_id = os.getenv('JOB_ID', "local")
+        self.agent_id = os.getenv('AGENT_ID', "unknown")
+        self.job_run_id = os.getenv('JOB_RUN_ID', "unknown")
         self.inference_api_key = os.getenv('INFERENCE_API_KEY')
         if not self.inference_api_key:
             raise ValueError("An inference API key is required.")
@@ -168,8 +168,9 @@ class BaselineRunner:
 
         headers = {
             "x-inference-api-key": self.inference_api_key,
-            "x-project-id": self.project_id or "local",
-            "x-job-id": self.job_id,
+            "x-agent-id": self.agent_id,
+            "x-job-run-id": self.job_run_id,
+            "x-request-phase": "execution",
         }
 
         resp = None
@@ -601,7 +602,7 @@ class BaselineRunner:
                             response_format={"type": "text"},
                         )
                         break
-                    except (requests.exceptions.HTTPError, requests.exceptions.ConnectionError) as e:
+                    except (requests.exceptions.HTTPError, requests.exceptions.ConnectionError):
                         if attempt < 4:
                             wait = 3 * (attempt + 1)
                             console.print(f"[yellow]  -> Retry {attempt+1}/4 for R1 step on {relative_path} (wait {wait}s)[/yellow]")
@@ -642,7 +643,7 @@ class BaselineRunner:
                             model=JSON_MODEL,
                         )
                         break
-                    except (requests.exceptions.HTTPError, requests.exceptions.ConnectionError) as e:
+                    except (requests.exceptions.HTTPError, requests.exceptions.ConnectionError):
                         if attempt < 4:
                             wait = 3 * (attempt + 1)
                             console.print(f"[yellow]  -> Retry {attempt+1}/4 for JSON step on {relative_path} (wait {wait}s)[/yellow]")
@@ -661,7 +662,7 @@ class BaselineRunner:
 
             else:
                 # Non-reasoning: single call with system+user, json mode
-                system_prompt = dedent(f"""\
+                system_prompt = dedent("""\
                     You are a security auditor analyzing smart contract code for vulnerabilities.
                     Focus on REAL security issues: loss of funds, unauthorized access, denial of service, privilege escalation, protocol manipulation.
                     DO NOT report: code quality issues, gas optimizations, style issues, missing comments, theoretical issues without practical exploit paths.

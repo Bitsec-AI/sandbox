@@ -550,6 +550,9 @@ class TestInferenceKwargs:
         headers = mock_post.call_args.kwargs["headers"]
         payload = mock_post.call_args.kwargs["json"]
         assert headers["x-inference-api-key"] == "cpk_test"
+        assert headers["x-request-phase"] == "execution"
+        assert "x-job-id" not in headers
+        assert "x-project-id" not in headers
         assert "provider" not in payload
         assert payload["tools"] == TOOL_DEFINITIONS
         assert payload["tool_choice"] == "auto"
