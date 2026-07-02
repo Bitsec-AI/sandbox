@@ -60,7 +60,7 @@ class Validator(BaseValidatorNeuron):
     def update_top_miner_scores(self):
         """
         Fetch the top agents payload from the platform and split scores between
-        the burn hotkey and the first matching agent hotkey.
+        the burn hotkey and matching ranked agent hotkeys.
         """
         try:
             top_agents = self.sandbox_manager.platform_client.get_top_agents()
@@ -72,7 +72,7 @@ class Validator(BaseValidatorNeuron):
             bt.logging.info("No top agents returned from platform")
             return
 
-        new_scores, selected_agent_hotkey, burn_hotkey, burn_fraction = split_top_agent_scores(
+        new_scores, paid_agent_allocations, burn_hotkey, burn_fraction = split_top_agent_scores(
             top_agents_payload=top_agents,
             metagraph_hotkeys=self.metagraph.hotkeys,
             metagraph_size=self.metagraph.n,
@@ -83,9 +83,14 @@ class Validator(BaseValidatorNeuron):
             return
 
         self.scores = new_scores
+        agent_allocation_log = "\n".join(
+            f"rank {index}: {fraction:.2%} -> {hotkey}"
+            for index, (hotkey, fraction) in enumerate(paid_agent_allocations, start=1)
+        ) or "none"
         bt.logging.info(
-            f"Updated top miner scores with agent hotkey {selected_agent_hotkey}, "
-            f"burn hotkey {burn_hotkey}, burn fraction {burn_fraction:.2f}"
+            "Updated top miner scores:\n"
+            f"agents:\n{agent_allocation_log}\n"
+            f"burn:\n{burn_fraction:.2%} -> {burn_hotkey}"
         )
 
     async def forward(self):
