@@ -107,6 +107,7 @@ class AgentExecutor:
                 "AGENT_ID": str(self.job_run.agent_id),
                 "JOB_RUN_ID": str(self.job_run.id),
                 "PROJECT_KEY": self.project_key,
+                "INFERENCE_API": f"http://{settings.proxy_container}:8000",
                 "INFERENCE_API_KEY": self.execution_api_key,
             },
             # read_only=True,
