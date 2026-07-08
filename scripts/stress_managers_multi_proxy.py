@@ -18,6 +18,8 @@ DEFAULT_COUNT = 4
 DEFAULT_START_DELAY_SECONDS = 2
 DEFAULT_BASE_PROXY_PORT = 8087
 DEFAULT_PROXY_WAIT_SECONDS = 10
+COMPOSE_FILE = PROJECT_ROOT / "docker-compose.yml"
+COMPOSE_HOST_FILE = PROJECT_ROOT / "scripts" / "compose.host.yml"
 
 
 def env_int(name: str, default: int) -> int:
@@ -66,6 +68,10 @@ def start_stress_validator(index: int, proxy_port: int) -> None:
     cmd = [
         "docker",
         "compose",
+        "-f",
+        str(COMPOSE_FILE),
+        "-f",
+        str(COMPOSE_HOST_FILE),
         "run",
         "--build",
         "-d",
@@ -160,6 +166,7 @@ def main() -> int:
 
     wait_for_stress_proxies(count, proxy_wait_seconds)
     print_matching_containers()
+
     return 0
 
 
