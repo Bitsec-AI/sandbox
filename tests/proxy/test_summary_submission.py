@@ -1,3 +1,5 @@
+import json
+
 from validator.manager import SandboxManager
 from validator.platform_client import APIPlatformClient, MockPlatformClient
 from validator.proxy_client import APIProxyClient
@@ -67,7 +69,7 @@ def test_proxy_client_resets_and_fetches_expected_summary_endpoints():
     ]
 
 
-def test_manager_resets_fetches_and_submits_proxy_summary():
+def test_manager_resets_fetches_saves_and_submits_proxy_summary(tmp_path):
     summary = {"job_run_id": "123", "stats": []}
     proxy_client = FakeProxyClient(summary)
     platform_client = CapturingPlatform()
@@ -77,21 +79,22 @@ def test_manager_resets_fetches_and_submits_proxy_summary():
     manager.platform_client = platform_client
 
     manager.reset_proxy_summary(123, 456)
-    manager.submit_proxy_summary(123, 456)
+    manager.submit_proxy_summary(123, 456, str(tmp_path))
 
     assert proxy_client.resets == [123]
     assert proxy_client.fetches == [123]
     assert platform_client.submissions == [(123, summary)]
+    assert json.loads((tmp_path / "proxy_summary.json").read_text(encoding="utf-8")) == summary
 
 
-def test_manager_proxy_summary_failures_do_not_raise():
+def test_manager_proxy_summary_failures_do_not_raise(tmp_path):
     platform_client = CapturingPlatform()
     manager = SandboxManager.__new__(SandboxManager)
     manager.proxy_client = FakeProxyClient(fail=True)
     manager.platform_client = platform_client
 
     manager.reset_proxy_summary(123, 456)
-    manager.submit_proxy_summary(123, 456)
+    manager.submit_proxy_summary(123, 456, str(tmp_path))
 
     assert platform_client.submissions == []
 

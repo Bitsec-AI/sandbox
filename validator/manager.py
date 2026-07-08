@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -114,10 +115,21 @@ class SandboxManager:
             logger.warning(f"[A:{agent_id}|JR:{job_run_id}] Failed to fetch proxy summary: {e}")
             return None
 
-    def submit_proxy_summary(self, job_run_id: int, agent_id: int):
+    def save_proxy_summary(self, job_run_id: int, agent_id: int, job_run_reports_dir: str, summary: dict):
+        proxy_summary_path = os.path.join(job_run_reports_dir, "proxy_summary.json")
+
+        with open(proxy_summary_path, "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=2, sort_keys=True)
+
+        logger.info(f"[A:{agent_id}|JR:{job_run_id}] Saved proxy summary: {proxy_summary_path}")
+
+    def submit_proxy_summary(self, job_run_id: int, agent_id: int, job_run_reports_dir: str):
         summary = self.fetch_proxy_summary(job_run_id, agent_id)
         if not summary:
             return
+
+        self.save_proxy_summary(job_run_id, agent_id, job_run_reports_dir, summary)
+
         try:
             self.platform_client.submit_job_run_proxy_summary(job_run_id, summary)
         except Exception as e:
@@ -181,7 +193,7 @@ class SandboxManager:
 
         # TODO: Check if finished successfully or part-fail
         self.platform_client.complete_job_run(job_run.id)
-        self.submit_proxy_summary(job_run.id, job_run.agent_id)
+        self.submit_proxy_summary(job_run.id, job_run.agent_id, job_run_reports_dir)
 
 
 if __name__ == "__main__":
