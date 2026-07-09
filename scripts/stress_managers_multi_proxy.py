@@ -63,6 +63,7 @@ def start_stress_validator(index: int, proxy_port: int) -> None:
         "PROXY_CONTAINER": proxy_name,
         "PROXY_PORT": str(proxy_port),
         "PROXY_URL": proxy_url,
+        "SKIP_EVALUATION": "true",
     }
 
     cmd = [
