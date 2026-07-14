@@ -11,7 +11,7 @@ from models import LLMAttemptMetrics, ProxyMetricsContext, ProxySummaryRow
 
 logger = get_logger()
 
-METRICS_TTL_SECONDS = 40 * 60
+METRICS_TTL_SECONDS = 115 * 60
 KEY_PREFIX = "proxy_metrics:v1"
 
 
