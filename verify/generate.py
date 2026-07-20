@@ -7,7 +7,7 @@ import bittensor
 
 
 def main(args):
-    wallet = bittensor.wallet(name=args.name)
+    wallet = bittensor.Wallet(name=args.name)
     keypair = wallet.coldkey
 
     timestamp = datetime.now()
