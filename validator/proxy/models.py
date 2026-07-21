@@ -39,6 +39,7 @@ class InferenceRequest(BaseModel):
     messages: list[dict[str, Any]]
     max_tokens: int = Field(default=4096)
     temperature: float = Field(default=0.2)
+    provider: dict[str, Any] | None = None
 
 
 # --- OpenAI-compatible response models ---

@@ -571,3 +571,18 @@ class TestInferenceKwargs:
 
         payload = mock_post.call_args.kwargs["json"]
         assert payload["response_format"] == {"type": "text"}
+
+    @patch("miner.agent.requests.post")
+    def test_provider_options_passthrough(self, mock_post, runner):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"choices": [{"message": {"content": "{}"}}], "usage": {}}
+        mock_resp.raise_for_status.return_value = None
+        mock_post.return_value = mock_resp
+
+        runner.inference(
+            [{"role": "user", "content": "hi"}],
+            provider={"sort": "throughput", "allow_fallbacks": False},
+        )
+
+        payload = mock_post.call_args.kwargs["json"]
+        assert payload["provider"] == {"sort": "throughput", "allow_fallbacks": False}
