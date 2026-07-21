@@ -7,6 +7,23 @@ import bittensor as bt
 from typing import List
 
 
+class MockWallet:
+    def __init__(self, config=None):
+        self.config = config
+        self.name = getattr(getattr(config, "wallet", None), "name", "mock")
+        self.hotkey_str = getattr(
+            getattr(config, "wallet", None), "hotkey", "mock"
+        )
+        self.hotkey = bt.Keypair.create_from_uri("//mock_hotkey")
+        self.coldkey = bt.Keypair.create_from_uri("//mock_coldkey")
+
+    def __str__(self) -> str:
+        return f"MockWallet (Name: '{self.name}', Hotkey: '{self.hotkey_str}')"
+
+    def __repr__(self) -> str:
+        return str(self)
+
+
 class MockSubtensor(bt.MockSubtensor):
     def __init__(self, netuid, n=16, wallet=None, network="mock"):
         super().__init__(network=network)
@@ -35,7 +52,7 @@ class MockSubtensor(bt.MockSubtensor):
             )
 
 
-class MockMetagraph(bt.metagraph):
+class MockMetagraph(bt.Metagraph):
     def __init__(self, netuid=1, network="mock", subtensor=None):
         super().__init__(netuid=netuid, network=network, sync=False)
 
@@ -51,7 +68,7 @@ class MockMetagraph(bt.metagraph):
         bt.logging.info(f"Axons: {self.axons}")
 
 
-class MockDendrite(bt.dendrite):
+class MockDendrite(bt.Dendrite):
     """
     Replaces a real bittensor network request with a mock request that just returns some static response for all axons that are passed and adds some random delay.
     """
@@ -61,7 +78,7 @@ class MockDendrite(bt.dendrite):
 
     async def forward(
         self,
-        axons: List[bt.axon],
+        axons: List[bt.Axon],
         synapse: bt.Synapse = bt.Synapse(),
         timeout: float = 12,
         deserialize: bool = True,
