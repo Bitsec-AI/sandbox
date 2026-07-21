@@ -1,6 +1,5 @@
-bittensor-wallet==4.0.1
-bittensor==9.12.2
-async-substrate-interface==1.6.4
+bittensor==10.5.0
+bittensor-wallet==4.1.0
 llm>=0.1
 # numpy>=1
 pydantic>=2
@@ -8,7 +7,7 @@ pydantic-settings==2.12.0
 pytest>=8
 python-dotenv==1.1.1
 python-on-whales==0.78.0
-requests==2.32.5
+requests==2.34.2
 rich>=13
 # setuptools>=68
 starlette>=0.30.0
