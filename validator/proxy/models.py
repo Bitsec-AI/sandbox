@@ -160,7 +160,7 @@ class ProxySummaryRow(BaseModel):
     cached_tokens: int = 0
     duration_ms_total: int = 0
     duration_ms_max: int = 0
-    status_codes: dict[str, int] = Field(default_factory=dict)
+    status_codes: dict[str, dict[str, int]] = Field(default_factory=dict)
 
     def to_summary_dict(self) -> dict[str, Any]:
         payload = self.model_dump()

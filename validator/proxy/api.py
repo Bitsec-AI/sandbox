@@ -65,15 +65,17 @@ async def inference(
         async with _sem:
             response = await asyncio.to_thread(client.call, request, provider, ctx, log_ctx)
             if ctx is not None:
-                metrics.record_proxy_complete(ctx, success=True, duration_ms=monotonic_ms() - started_ms)
+                metrics.record_proxy_complete(
+                    ctx, success=True, duration_ms=monotonic_ms() - started_ms, status_code=200
+                )
             return response
     except ProxyProviderError as e:
         if ctx is not None:
-            metrics.record_proxy_complete(ctx, success=False, duration_ms=monotonic_ms() - started_ms)
+            metrics.record_proxy_complete(ctx, success=False, duration_ms=monotonic_ms() - started_ms, status_code=502)
         raise HTTPException(status_code=502, detail=str(e))
     except Exception:
         if ctx is not None:
-            metrics.record_proxy_complete(ctx, success=False, duration_ms=monotonic_ms() - started_ms)
+            metrics.record_proxy_complete(ctx, success=False, duration_ms=monotonic_ms() - started_ms, status_code=500)
         raise
 
 
