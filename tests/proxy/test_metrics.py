@@ -103,7 +103,7 @@ def test_proxy_metrics_summary_counts_stream_and_ttl():
             retry_num=1,
         ),
     )
-    recorder.record_proxy_complete(ctx, success=True, duration_ms=500)
+    recorder.record_proxy_complete(ctx, success=True, duration_ms=500, status_code=200)
 
     summary = recorder.get_summary("123")
 
@@ -130,7 +130,10 @@ def test_proxy_metrics_summary_counts_stream_and_ttl():
     assert row["duration_ms_total"] == 500
     assert row["duration_ms_avg"] == 500
     assert row["duration_ms_max"] == 500
-    assert row["status_codes"] == {"200": 1, "429": 1}
+    assert row["status_codes"] == {
+        "proxy": {"200": 1},
+        "llm": {"200": 1, "429": 1},
+    }
 
     stream_keys = [key for key in fake.streams if key.endswith(":llm_stream")]
     assert len(stream_keys) == 1
@@ -158,7 +161,7 @@ def test_proxy_metrics_records_request_on_final_response_model_row():
 
     ctx.model = "actual-response-model"
     recorder.record_llm_attempt(ctx, LLMAttemptMetrics(status_code=200))
-    recorder.record_proxy_complete(ctx, success=True, duration_ms=500)
+    recorder.record_proxy_complete(ctx, success=True, duration_ms=500, status_code=200)
 
     rows = recorder.get_summary("123")["stats"]
 
@@ -168,6 +171,65 @@ def test_proxy_metrics_records_request_on_final_response_model_row():
     assert rows[0]["requests"] == 1
     assert rows[0]["success"] == 1
     assert rows[0]["llm_requests"] == 1
+
+
+def test_proxy_metrics_reports_proxy_and_llm_status_codes_for_truncation_guard():
+    fake = FakeValkey()
+    recorder = ProxyMetricsRecorder(client=fake)
+    ctx = ProxyMetricsContext(
+        agent_id="456",
+        job_run_id="123",
+        phase="execution",
+        req_model="openai/gpt-4.1-mini",
+        model="openai/gpt-4.1-mini",
+        provider="openrouter",
+    )
+
+    recorder.record_llm_attempt(
+        ctx,
+        LLMAttemptMetrics(
+            upstream_provider="openai",
+            status_code=200,
+            duration_ms=100,
+            output_tokens=1,
+            finish_reason="length",
+            error_type="finish_reason_length",
+        ),
+    )
+    recorder.record_proxy_complete(ctx, success=False, duration_ms=150, status_code=502)
+
+    row = recorder.get_summary("123")["stats"][0]
+
+    assert row["error"] == 1
+    assert row["llm_error"] == 1
+    assert row["status_codes"] == {
+        "proxy": {"502": 1},
+        "llm": {"200": 1},
+    }
+
+
+def test_proxy_metrics_treats_legacy_flat_status_codes_as_llm_codes():
+    fake = FakeValkey()
+    recorder = ProxyMetricsRecorder(client=fake)
+    ctx = ProxyMetricsContext(
+        agent_id="456",
+        job_run_id="123",
+        phase="execution",
+        req_model="model",
+        model="model",
+        provider="openrouter",
+    )
+
+    recorder.record_proxy_complete(ctx, success=False, duration_ms=150, status_code=502)
+    row_key = next(key for key in fake.hashes if ":row:" in key)
+    fake.hashes[row_key]["status_code:200"] = "1"
+
+    row = recorder.get_summary("123")["stats"][0]
+
+    assert row["status_codes"] == {
+        "proxy": {"502": 1},
+        "llm": {"200": 1},
+    }
 
 
 def test_proxy_metrics_reset_deletes_job_run_keys():
@@ -201,8 +263,12 @@ def test_proxy_metrics_groups_same_model_by_provider():
         "model": "shared-model",
     }
 
-    recorder.record_proxy_complete(ProxyMetricsContext(**base, provider="openrouter"), success=True, duration_ms=1)
-    recorder.record_proxy_complete(ProxyMetricsContext(**base, provider="chutes"), success=True, duration_ms=1)
+    recorder.record_proxy_complete(
+        ProxyMetricsContext(**base, provider="openrouter"), success=True, duration_ms=1, status_code=200
+    )
+    recorder.record_proxy_complete(
+        ProxyMetricsContext(**base, provider="chutes"), success=True, duration_ms=1, status_code=200
+    )
 
     rows = recorder.get_summary("123")["stats"]
 
@@ -222,6 +288,6 @@ def test_proxy_metrics_missing_valkey_is_noop():
     )
 
     recorder.record_llm_attempt(ctx, LLMAttemptMetrics(status_code=200))
-    recorder.record_proxy_complete(ctx, success=True, duration_ms=1)
+    recorder.record_proxy_complete(ctx, success=True, duration_ms=1, status_code=200)
 
     assert recorder.get_summary("123")["stats"] == []
