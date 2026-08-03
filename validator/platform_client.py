@@ -2,7 +2,7 @@ import base64
 import json
 import secrets
 import time
-from typing import Any, Literal
+from typing import Literal
 
 import requests
 from bittensor_wallet import Wallet
@@ -17,11 +17,12 @@ from validator.models.platform import (
     AgentCode,
     User,
     MockJobRun,
+    SubmittedAgentExecution,
 )
 
 
 class PlatformError(Exception):
-    def __init__(self, message: str, status_code: int | None = None, details: Any | None = None):
+    def __init__(self, message: str, status_code: int | None = None, details=None):
         super().__init__(message)
         self.status_code = status_code
         self.details = details
@@ -83,9 +84,9 @@ class APIPlatformClient:
         endpoint: str,
         *,
         authenticate: bool = False,
-        params: dict[str, Any] | None = None,
-        json: dict[str, Any] | None = None,
-    ) -> dict[str, Any] | list[Any] | None:
+        params: dict | None = None,
+        json: dict | None = None,
+    ):
         url = f"{self.base_url}/api/{endpoint.lstrip('/')}"
 
         headers: dict[str, str] = {}
@@ -145,6 +146,15 @@ class APIPlatformClient:
         job_run = JobRun.model_validate(resp)
         return job_run
 
+    def get_next_scoring_job_run(self, validator_id: int):
+        endpoint = f"jobs/runs/validator/{validator_id}/evaluating"
+        resp = self._call_api("post", endpoint, authenticate=True)
+        if not resp:
+            return
+
+        job_run = JobRun.model_validate(resp)
+        return job_run
+
     def get_job_run_code(self, job_run_id: int):
         endpoint = f"jobs/runs/{job_run_id}/code"
         resp = self._call_api("get", endpoint)
@@ -160,7 +170,15 @@ class APIPlatformClient:
         resp = self._call_api("get", endpoint)
         return resp
 
-    def submit_agent_execution(self, agent_execution: AgentExecution) -> dict:
+    def get_job_run_executions(self, job_run_id: int) -> list[SubmittedAgentExecution]:
+        endpoint = f"jobs/runs/{job_run_id}/executions"
+        resp = self._call_api("get", endpoint, authenticate=True)
+        return [SubmittedAgentExecution.model_validate(item) for item in (resp or [])]
+
+    def submit_agent_execution(
+        self,
+        agent_execution: AgentExecution,
+    ) -> dict:
         endpoint = "agents/execution/"
         payload = agent_execution.model_dump(mode="json")
         resp = self._call_api("post", endpoint, json=payload, authenticate=True)
@@ -172,13 +190,18 @@ class APIPlatformClient:
         resp = self._call_api("post", endpoint, json=payload, authenticate=True)
         return resp
 
-    def submit_job_run_proxy_summary(self, job_run_id: int, payload: dict[str, Any]) -> dict:
+    def submit_job_run_proxy_summary(self, job_run_id: int, payload: dict) -> dict:
         endpoint = f"jobs/runs/{job_run_id}/proxy-summary"
         resp = self._call_api("post", endpoint, json=payload, authenticate=True)
         return resp
 
     def start_job_run(self, job_run_id: int) -> dict:
         endpoint = f"jobs/runs/{job_run_id}/start"
+        resp = self._call_api("post", endpoint, authenticate=True)
+        return resp
+
+    def start_job_run_evaluation(self, job_run_id: int) -> dict:
+        endpoint = f"jobs/runs/{job_run_id}/evaluating"
         resp = self._call_api("post", endpoint, authenticate=True)
         return resp
 
@@ -223,7 +246,11 @@ class APIPlatformClient:
 
 class MockPlatformClient:
     def __init__(self, *args, **kwargs):
-        pass
+        self._current_job_run = None
+        self._evaluating_job_run = None
+        self._executions_by_job_run = {}
+        self._next_execution_id = 1
+        self._next_job_run_id = 1
 
     def __getattr__(self, name):
         def _method(*args, **kwargs):
@@ -231,9 +258,38 @@ class MockPlatformClient:
 
         return _method
 
-    def submit_job_run_proxy_summary(self, job_run_id: int, payload: dict[str, Any]) -> dict:
+    def submit_job_run_proxy_summary(self, job_run_id: int, payload: dict) -> dict:
         print(json.dumps(payload, indent=2, sort_keys=True))
         return {"id": 1}
+
+    def submit_agent_execution(
+        self,
+        agent_execution: AgentExecution,
+    ) -> dict:
+        execution_id = self._next_execution_id
+        self._next_execution_id += 1
+
+        payload = agent_execution.model_dump(mode="json")
+        payload["id"] = execution_id
+        self._executions_by_job_run.setdefault(agent_execution.job_run_id, []).append(payload)
+
+        return {"id": execution_id}
+
+    def start_job_run_evaluation(self, job_run_id: int) -> dict:
+        self._evaluating_job_run = self._current_job_run
+        self._current_job_run = None
+        return {"id": job_run_id}
+
+    def get_next_scoring_job_run(self, validator_id: int):
+        job_run = self._evaluating_job_run
+        self._evaluating_job_run = None
+        return job_run
+
+    def get_job_run_executions(self, job_run_id: int) -> list[SubmittedAgentExecution]:
+        return [
+            SubmittedAgentExecution.model_validate(item)
+            for item in self._executions_by_job_run.get(job_run_id, [])
+        ]
 
     def get_job_run_agent(self, job_run_id: int):
         execution_api_key = settings.inference_api_key
@@ -261,12 +317,17 @@ class MockPlatformClient:
         return agent
 
     def get_next_job_run(self, validator_id: int):
+        if self._current_job_run is not None:
+            return None
+
         job_run = MockJobRun(
-            id=int(time.time()),
+            id=self._next_job_run_id,
             job_id=1,
-            validator_id=1,
+            validator_id=validator_id,
             agent_id=1,
         )
+        self._next_job_run_id += 1
+        self._current_job_run = job_run
         return job_run
 
     def get_projects(self):

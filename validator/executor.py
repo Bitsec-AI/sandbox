@@ -8,9 +8,9 @@ from python_on_whales.exceptions import DockerException
 
 from config import settings
 from loggers.logger import get_logger, PrefixedLogger
-from validator.models.platform import AgentExecution, AgentEvaluation, Status
+from validator.evaluator import AgentEvaluator
+from validator.models.platform import AgentExecution, Status
 from validator.platform_client import PlatformError
-from validator.scorer import ScaBenchScorerV2
 
 
 logger = get_logger()
@@ -72,14 +72,16 @@ class AgentExecutor:
             self.logger.warning(f"Failed to pull image {image_tag} Will attempt to use local image if available.")
 
     def run(self):
-        self.started_at = datetime.utcnow()
-
         if not settings.skip_execution:
-            self.run_project()
+            self.run_execution()
             self.agent_execution_id = self.submit_agent_execution()
 
         if not settings.skip_evaluation:
             self.eval_job_run()
+
+    def run_execution(self):
+        self.started_at = datetime.utcnow()
+        self.run_project()
 
     def run_project(self):
         sandbox_container = SANDBOX_CONTAINER_TMPL.format(
@@ -172,22 +174,41 @@ class AgentExecutor:
             self.logger.exception(f"Platform submission failed for agent execution: {e}")
             return None
 
-    def submit_agent_evaluation(self, project_scoring_results):
-        scoring_data = {}
-        scoring_data["agent_execution_id"] = self.agent_execution_id
-        scoring_data["status"] = project_scoring_results["status"]
-        scoring_data.update(project_scoring_results["result"])
+    def eval_job_run(self):
+        """
+        Evaluate a single report.json using ScaBenchScorerV2.
+        """
+        report_file = Path(self.job_run_reports_dir) / self.project_key / "report.json"
 
-        # Persist evaluation locally for inspection
+        if not report_file.exists():
+            self.logger.error(f"Report not found: {report_file}")
+            return {"status": Status.ERROR, "error": "report.json not found"}
+
+        try:
+            with open(report_file, "r", encoding="utf-8") as f:
+                report_data = json.load(f)
+        except Exception as e:
+            self.logger.exception("Failed to read report")
+            return {"status": Status.ERROR, "error": str(e)}
+
+        evaluator = AgentEvaluator(
+            job_run=self.job_run,
+            platform_client=self.platform_client,
+            agent_execution_id=self.agent_execution_id,
+            project_key=self.project_key,
+            eval_max_vulns=self.eval_max_vulns,
+        )
+        scoring_result = evaluator.score_report_data(report_data)
+
         evaluation_path = os.path.join(self.project_report_dir, "evaluation.json")
         try:
             with open(evaluation_path, "w", encoding="utf-8") as f:
                 json.dump(
                     {
-                        "agent_execution_id": scoring_data.get("agent_execution_id"),
-                        "project": scoring_data.get("project"),
-                        "status": str(scoring_data.get("status")),
-                        "result": project_scoring_results.get("result", {}),
+                        "agent_execution_id": evaluator.agent_execution_id,
+                        "project": self.project_key,
+                        "status": str(scoring_result.get("status")),
+                        "result": scoring_result.get("result", {}),
                     },
                     f,
                     default=str,
@@ -197,141 +218,5 @@ class AgentExecutor:
         except Exception as e:
             self.logger.error(f"Failed to write evaluation file: {e}")
 
-        if not self.agent_execution_id:
-            self.logger.info("Not running from agent execution. Skipping submit evaluation")
-            return None
-
-        agent_evaluation = AgentEvaluation.model_validate(scoring_data)
-
-        try:
-            resp = self.platform_client.submit_agent_evaluation(agent_evaluation)
-            evaluation_id = resp.get("id")
-            if not evaluation_id:
-                self.logger.warning("Evaluation ID not received")
-
-            return evaluation_id
-
-        except PlatformError as e:
-            self.logger.exception(f"Platform submission failed for agent evaluation: {e}")
-            return None
-
-    def eval_job_run(self):
-        """
-        Evaluate a single report.json using ScaBenchScorerV2.
-        """
-        self.logger.info("Starting evaluation")
-
-        if not settings.chutes_api_key:
-            self.logger.error("Validator CHUTES_API_KEY not set. Cannot run evaluation.")
-            return {"status": Status.ERROR, "error": "validator chutes_api_key not configured"}
-
-        report_file = Path(self.job_run_reports_dir) / self.project_key / "report.json"
-
-        if not report_file.exists():
-            self.logger.error(f"Report not found: {report_file}")
-            return {"status": Status.ERROR, "error": "report.json not found"}
-
-        benchmark_file = os.path.join(settings.validator_dir, "curated-highs-only-2025-08-08.json")
-        if not os.path.exists(benchmark_file):
-            self.logger.error(f"Benchmark file not found: {benchmark_file}")
-            return {"status": Status.ERROR, "error": "benchmark file not found"}
-
-        with open(benchmark_file, "r", encoding="utf-8") as f:
-            benchmark_data = json.load(f)
-
-        benchmark_map = {
-            e["project_id"]: e.get("vulnerabilities", [])
-            for e in benchmark_data
-            if e.get("project_id") and e.get("vulnerabilities")
-        }
-
-        expected_findings = benchmark_map.get(self.project_key)
-        if not expected_findings:
-            self.logger.error(f"No benchmark data for project {self.project_key}")
-            return {"status": Status.ERROR, "error": "no benchmark data for project"}
-
-        scorer_config = {
-            "api_key": settings.chutes_api_key,
-            "api_url": settings.proxy_url,
-            "debug": True,
-            "verbose": True,
-            "agent_id": self.job_run.agent_id,
-            "job_run_id": self.job_run.id,
-            "confidence_threshold": 0.75,
-            "strict_matching": False,
-        }
-        scorer = ScaBenchScorerV2(scorer_config)
-
-        try:
-            with open(report_file, "r", encoding="utf-8") as f:
-                report_data = json.load(f)
-
-            # Extract agent findings
-            try:
-                agent_findings = report_data.get("report", {}).get("vulnerabilities", [])
-            except AttributeError as e:
-                logger.error(f"Invalid report vulnerabilities ({e}): {report_data['report']}")
-                agent_findings = []
-
-            agent_findings = agent_findings[: self.eval_max_vulns]
-
-            self.logger.info(
-                f"Scoring {self.project_key}: {len(expected_findings)} expected vs {len(agent_findings)} found"
-            )
-
-            result = scorer.score_project(
-                expected_findings=expected_findings,
-                tool_findings=agent_findings,
-                project_name=self.project_key,
-            )
-
-            final_result = "PASS" if result.detection_rate == 1 else "FAIL"
-
-            scoring_result = {
-                "status": Status.SUCCESS,
-                "result": {
-                    "project": result.project,
-                    "timestamp": result.timestamp,
-                    "total_expected": result.total_expected,
-                    "total_found": result.total_found,
-                    "true_positives": result.true_positives,
-                    "false_negatives": result.false_negatives,
-                    "false_positives": result.false_positives,
-                    "detection_rate": result.detection_rate,
-                    "result": final_result,
-                    "precision": result.precision,
-                    "f1_score": result.f1_score,
-                    "matched_findings": result.matched_findings,
-                    "missed_findings": result.missed_findings,
-                    "extra_findings": result.extra_findings,
-                    "undecided_findings": result.undecided_findings,
-                },
-            }
-
-            self.agent_evaluation_id = self.submit_agent_evaluation(project_scoring_results=scoring_result)
-
-            detection_pct = round(result.detection_rate * 100)
-
-            msg = (
-                f"Evaluation complete | "
-                f"Result: {final_result} | "
-                f"Detection: {detection_pct}% | "
-                f"Found: {result.true_positives} | "
-                f"Expected: {result.total_expected}"
-            )
-            if not report_data.get("success", False):
-                error_msg = report_data.get("error", "Unknown error")
-                msg += f" | Execution error: {error_msg}"
-
-            self.logger.info(msg)
-            self.logger.info(
-                "Tokens | "
-                f"Input: {result.input_tokens} (cached: {result.cached_tokens}) | "
-                f"Output: {result.output_tokens}"
-            )
-
-            return scoring_result
-
-        except Exception as e:
-            self.logger.exception("Evaluation crashed")
-            return {"status": Status.ERROR, "error": str(e)}
+        self.agent_evaluation_id = evaluator.agent_evaluation_id
+        return scoring_result

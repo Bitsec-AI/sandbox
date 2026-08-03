@@ -12,6 +12,7 @@ from loggers.logger import get_logger
 from validator.platform_client import PlatformClient, PlatformError
 from validator.proxy_client import ProxyClient
 from validator.executor import AgentExecutor
+from validator.evaluator import AgentEvaluator
 
 
 logger = get_logger()
@@ -27,7 +28,10 @@ class SandboxManager:
         self.platform_client = PlatformClient(is_local=is_local, wallet_name=wallet_name)
         self.proxy_client = ProxyClient()
         self.validator = self.platform_client.get_current_validator()
-        self.executor_pool = ThreadPoolExecutor(max_workers=12)
+        self.execution_pool = ThreadPoolExecutor(max_workers=settings.execution_workers)
+        self.scoring_pool = ThreadPoolExecutor(max_workers=settings.scoring_workers)
+        self.execution_queue_task = None
+        self.scoring_queue_task = None
 
         self.validator_id = self.validator["id"]
 
@@ -37,20 +41,88 @@ class SandboxManager:
         self.is_local = is_local
 
     async def run(self):
+        if self.is_local:
+            await self.poll_execution_job_run()
+            await self.poll_scoring_job_run()
+            return
+
         while True:
-            has_job = await self.poll_job_run()
+            await self.run_once()
+            await asyncio.sleep(60)
+
+    async def poll_job_run(self):
+        return await self.poll_execution_job_run()
+
+    async def run_once(self):
+        self.raise_queue_errors()
+        queue_started = self.ensure_queue_tasks()
+        await asyncio.sleep(0)
+        self.raise_queue_errors()
+        return queue_started
+
+    async def run_execution_queue(self):
+        while True:
+            has_job = await self.poll_execution_job_run()
             if not has_job:
                 await asyncio.sleep(60)
 
-            if self.is_local:
-                break
+    async def run_scoring_queue(self):
+        while True:
+            has_job = await self.poll_scoring_job_run()
+            if not has_job:
+                await asyncio.sleep(60)
 
-    async def poll_job_run(self):
+    def queue_tasks(self):
+        return {
+            "execution": self.execution_queue_task,
+            "scoring": self.scoring_queue_task,
+        }
+
+    def raise_queue_errors(self):
+        for queue_name, task in self.queue_tasks().items():
+            if task is None or not task.done():
+                continue
+
+            if task.cancelled():
+                raise RuntimeError(f"{queue_name} queue task was cancelled")
+
+            exception = task.exception()
+            if exception:
+                raise RuntimeError(f"{queue_name} queue crashed") from exception
+
+            raise RuntimeError(f"{queue_name} queue stopped unexpectedly")
+
+    def ensure_queue_tasks(self):
+        if settings.skip_execution and settings.skip_evaluation:
+            logger.warning("Both execution and evaluation are disabled. Nothing to poll.")
+            return False
+
+        started = False
+        if not settings.skip_execution and self.execution_queue_task is None:
+            self.execution_queue_task = asyncio.create_task(
+                self.run_execution_queue(),
+                name="execution-queue",
+            )
+            started = True
+
+        if not settings.skip_evaluation and self.scoring_queue_task is None:
+            self.scoring_queue_task = asyncio.create_task(
+                self.run_scoring_queue(),
+                name="scoring-queue",
+            )
+            started = True
+
+        return started
+
+    async def _send_heartbeat(self):
         if not self.is_local:
             try:
                 self.platform_client.send_heartbeat()
             except Exception as e:
                 logger.error(f"Failed to send heartbeat: {e}")
+
+    async def poll_execution_job_run(self):
+        await self._send_heartbeat()
 
         retries = 10
         job_run = None
@@ -66,7 +138,27 @@ class SandboxManager:
             logger.info("No job runs available")
             return False
 
-        await self.process_job_run(job_run)
+        await self.process_execution_job_run(job_run)
+        return True
+
+    async def poll_scoring_job_run(self):
+        await self._send_heartbeat()
+
+        retries = 10
+        job_run = None
+        for _ in range(retries):
+            try:
+                job_run = self.platform_client.get_next_scoring_job_run(self.validator_id)
+                break
+            except PlatformError as e:
+                logger.error(f"Error fetching scoring job run: {e}")
+                await asyncio.sleep(1)
+
+        if not job_run:
+            logger.info("No scoring job runs available")
+            return False
+
+        await self.process_scoring_job_run(job_run)
         return True
 
     def build_images(self):
@@ -124,7 +216,12 @@ class SandboxManager:
             logger.warning(f"[A:{agent_id}|JR:{job_run_id}] Failed to submit proxy summary: {e}")
 
     async def process_job_run(self, job_run):
-        logger.info(f"[A:{job_run.agent_id}|JR:{job_run.id}] Processing job run")
+        await self.process_execution_job_run(job_run)
+        if not settings.skip_evaluation:
+            await self.process_scoring_job_run(job_run)
+
+    async def process_execution_job_run(self, job_run):
+        logger.info(f"[A:{job_run.agent_id}|JR:{job_run.id}] Processing execution job run")
 
         self.platform_client.start_job_run(job_run.id)
         self.reset_proxy_summary(job_run.id, job_run.agent_id)
@@ -163,6 +260,7 @@ class SandboxManager:
 
         loop = asyncio.get_running_loop()
         tasks = []
+        executors = []
 
         for project_key in agent["project_keys"]:
             executor = AgentExecutor(
@@ -174,13 +272,47 @@ class SandboxManager:
                 execution_api_key=execution_api_key,
                 eval_max_vulns=eval_max_vulns,
             )
-            task = loop.run_in_executor(self.executor_pool, executor.run)
+            executors.append(executor)
+            task = loop.run_in_executor(self.execution_pool, executor.run_execution)
             tasks.append(task)
 
         await asyncio.gather(*tasks)
 
-        # TODO: Check if finished successfully or part-fail
-        self.platform_client.complete_job_run(job_run.id)
+        for executor in executors:
+            executor.agent_execution_id = executor.submit_agent_execution()
+
+        self.platform_client.start_job_run_evaluation(job_run.id)
+
+    async def process_scoring_job_run(self, job_run):
+        logger.info(f"[A:{job_run.agent_id}|JR:{job_run.id}] Processing scoring job run")
+
+        agent = self.platform_client.get_job_run_agent(job_run_id=job_run.id)
+        eval_max_vulns = agent.get("eval_max_vulns", 100)
+        executions = self.platform_client.get_job_run_executions(job_run.id)
+
+        if not executions:
+            logger.error(f"[A:{job_run.agent_id}|JR:{job_run.id}] No submitted executions available for scoring")
+            self.platform_client.complete_job_run(job_run.id, status="error")
+            self.submit_proxy_summary(job_run.id, job_run.agent_id)
+            return
+
+        loop = asyncio.get_running_loop()
+        tasks = []
+
+        for execution in executions:
+            evaluator = AgentEvaluator(
+                job_run=job_run,
+                platform_client=self.platform_client,
+                agent_execution_id=execution.id,
+                project_key=execution.project,
+                eval_max_vulns=execution.eval_max_vulns or eval_max_vulns,
+            )
+            task = loop.run_in_executor(self.scoring_pool, evaluator.eval_agent_execution, execution)
+            tasks.append(task)
+
+        results = await asyncio.gather(*tasks)
+        status = "error" if any(result.get("status") == "error" for result in results if result) else "success"
+        self.platform_client.complete_job_run(job_run.id, status=status)
         self.submit_proxy_summary(job_run.id, job_run.agent_id)
 
 
