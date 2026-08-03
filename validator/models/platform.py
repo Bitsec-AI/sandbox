@@ -6,6 +6,7 @@ from pydantic import BaseModel
 class Status(str, Enum):
     PENDING = "pending"
     RUNNING = "running"
+    EVALUATING = "evaluating"
     SUCCESS = "success"
     ERROR = "error"
     TIMED_OUT = "timed_out"
@@ -18,6 +19,7 @@ class JobRun(BaseModel):
     validator_id: int
     status: str
     started_at: datetime | None
+    evaluation_started_at: datetime | None = None
     completed_at: datetime | None
     created_at: datetime
     updated_at: datetime
@@ -50,6 +52,11 @@ class AgentExecution(BaseModel):
     completed_at: datetime | None = None
     created_at: datetime = datetime.utcnow()
     updated_at: datetime = datetime.utcnow()
+
+
+class SubmittedAgentExecution(AgentExecution):
+    id: int
+    eval_max_vulns: int | None = None
 
 
 class AgentEvaluation(BaseModel):

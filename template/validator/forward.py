@@ -18,12 +18,7 @@
 # DEALINGS IN THE SOFTWARE.
 
 import asyncio
-import time
 import bittensor as bt
-
-from template.protocol import Dummy
-from template.validator.reward import get_rewards
-from template.utils.uids import get_random_uids
 
 
 async def forward(self):
@@ -39,11 +34,12 @@ async def forward(self):
     # TODO(developer): Define how the validator selects a miner to query, how often, etc.
     # get_random_uids is an example method, but you can replace it with your own.
 
-    bt.logging.info(f"Validator running. Polling queue...")
+    bt.logging.info("Validator running. Polling queue...")
 
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, self.update_top_miner_scores)
 
-    await self.sandbox_manager.poll_job_run()
+    self.sandbox_manager.raise_queue_errors()
+    self.sandbox_manager.ensure_queue_tasks()
 
     await asyncio.sleep(60)
