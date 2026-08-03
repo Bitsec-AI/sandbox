@@ -21,6 +21,8 @@ class Settings(BaseSettings):
 
     skip_execution: bool = False
     skip_evaluation: bool = False
+    execution_workers: int = 10
+    scoring_workers: int = 10
 
     use_bt_logging: bool = False
 
