@@ -3,8 +3,9 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from config import settings
+from validator.evaluator import AgentEvaluator
 from validator.executor import AgentExecutor
-from validator.models.platform import MockJobRun, Status
+from validator.models.platform import MockJobRun, Status, SubmittedAgentExecution
 from validator.scorer import ScaBenchScorerV2
 
 
@@ -158,3 +159,63 @@ def test_eval_job_run_limits_findings_with_configured_eval_max_vulns(monkeypatch
     assert scoring_result["status"] == Status.SUCCESS
     assert captured["tool_findings_len"] == 2
     assert scoring_result["result"]["total_found"] == 2
+
+
+def test_eval_agent_execution_scores_platform_payload_without_local_report(monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "chutes_api_key", "test-key")
+
+    captured = {}
+
+    def capture_score_project(self, expected_findings, tool_findings, project_name):
+        captured["project_name"] = project_name
+        captured["tool_findings"] = tool_findings
+        return SimpleNamespace(
+            project=project_name,
+            timestamp="2026-06-18T00:00:00",
+            total_expected=len(expected_findings),
+            total_found=len(tool_findings),
+            true_positives=0,
+            false_negatives=len(expected_findings),
+            false_positives=len(tool_findings),
+            detection_rate=0,
+            precision=0,
+            f1_score=0,
+            matched_findings=[],
+            missed_findings=[],
+            extra_findings=[],
+            undecided_findings=[],
+            input_tokens=0,
+            output_tokens=0,
+            cached_tokens=0,
+        )
+
+    monkeypatch.setattr(ScaBenchScorerV2, "score_project", capture_score_project)
+
+    project_key = "code4rena_coded-estate-invitational_2024_12"
+    reports_dir = tmp_path / "reports"
+    platform_client = CapturingPlatformClient()
+    evaluator = AgentEvaluator(
+        job_run=MockJobRun(id=1, job_id=1, validator_id=1, agent_id=1),
+        platform_client=platform_client,
+        agent_execution_id=99,
+        project_key=project_key,
+    )
+
+    execution = SubmittedAgentExecution(
+        id=99,
+        validator_id=1,
+        job_run_id=1,
+        project=project_key,
+        success=True,
+        report={"vulnerabilities": [{"title": "finding", "description": "test"}]},
+        status=Status.SUCCESS,
+        eval_max_vulns=1,
+    )
+    scoring_result = evaluator.eval_agent_execution(execution)
+
+    assert scoring_result["status"] == Status.SUCCESS
+    assert captured["project_name"] == project_key
+    assert len(captured["tool_findings"]) == 1
+    assert len(platform_client.evaluations) == 1
+    assert platform_client.evaluations[0].agent_execution_id == 99
+    assert not (reports_dir / project_key / "report.json").exists()

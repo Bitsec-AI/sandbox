@@ -60,7 +60,7 @@ class ScoringResult:
 
 
 MODELS = [
-    "MiniMaxAI/MiniMax-M2.5-TEE",
+    "deepseek-ai/DeepSeek-V3.2-TEE",
 ]
 CHUTES_MODELS = f"{','.join(MODELS)}:throughput"
 

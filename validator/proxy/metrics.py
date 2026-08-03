@@ -41,7 +41,7 @@ def _row_has_counts(row: ProxySummaryRow) -> bool:
             "duration_ms_total",
             "duration_ms_max",
         )
-    ) or bool(row.status_codes)
+    ) or any(bool(codes) for codes in row.status_codes.values())
 
 
 class ProxyMetricsRecorder:
@@ -119,7 +119,9 @@ class ProxyMetricsRecorder:
         except Exception as e:
             logger.warning(f"Proxy metrics update skipped: {e}")
 
-    def record_proxy_complete(self, ctx: ProxyMetricsContext, *, success: bool, duration_ms: int) -> None:
+    def record_proxy_complete(
+        self, ctx: ProxyMetricsContext, *, success: bool, duration_ms: int, status_code: int
+    ) -> None:
         def _record():
             row_id = row_id_for(ctx.phase, ctx.req_model, ctx.model, ctx.provider)
             row_key = self._row_key(ctx.job_run_id, row_id)
@@ -129,6 +131,7 @@ class ProxyMetricsRecorder:
             pipe.hincrby(row_key, "requests", 1)
             pipe.hincrby(row_key, "success" if success else "error", 1)
             pipe.hincrby(row_key, "duration_ms_total", int(duration_ms))
+            pipe.hincrby(row_key, f"proxy_status_code:{int(status_code)}", 1)
             if int(duration_ms) > int(current_max or 0):
                 pipe.hset(row_key, "duration_ms_max", int(duration_ms))
             pipe.execute()
@@ -145,7 +148,7 @@ class ProxyMetricsRecorder:
             pipe.hincrby(row_key, "llm_success" if is_success else "llm_error", 1)
             if int(attempt.retry_num) > 0:
                 pipe.hincrby(row_key, "retries", 1)
-            pipe.hincrby(row_key, f"status_code:{int(attempt.status_code)}", 1)
+            pipe.hincrby(row_key, f"llm_status_code:{int(attempt.status_code)}", 1)
             pipe.hincrby(row_key, "input_tokens", int(attempt.input_tokens))
             pipe.hincrby(row_key, "output_tokens", int(attempt.output_tokens))
             pipe.hincrby(row_key, "cached_tokens", int(attempt.cached_tokens))
@@ -199,11 +202,15 @@ class ProxyMetricsRecorder:
                 row = self.client.hgetall(self._row_key(job_run_id, row_id)) or {}
                 if not row:
                     continue
-                status_codes = {}
+                status_codes = {"proxy": {}, "llm": {}}
                 payload = {}
                 for key, value in row.items():
-                    if key.startswith("status_code:"):
-                        status_codes[key.split(":", 1)[1]] = int(value)
+                    if key.startswith("proxy_status_code:"):
+                        status_codes["proxy"][key.split(":", 1)[1]] = int(value)
+                    elif key.startswith("llm_status_code:"):
+                        status_codes["llm"][key.split(":", 1)[1]] = int(value)
+                    elif key.startswith("status_code:"):
+                        status_codes["llm"][key.split(":", 1)[1]] = int(value)
                     elif key in {"phase", "req_model", "model", "provider"}:
                         payload[key] = value
                     else:
