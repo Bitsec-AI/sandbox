@@ -60,7 +60,8 @@ class ScoringResult:
 
 
 MODELS = [
-    "deepseek-ai/DeepSeek-V3.2-TEE",
+    "moonshotai/Kimi-K2.6-TEE",
+    "moonshotai/Kimi-K3-TEE",
 ]
 CHUTES_MODELS = f"{','.join(MODELS)}:throughput"
 
@@ -135,6 +136,11 @@ class ScaBenchScorerV2:
             ],
             "response_format": {"type": "json_object"},
             "reasoning": {"exclude": True},
+            "temperature": 0.6,
+            "chat_template_kwargs": {
+              "enable_thinking": False,
+              "thinking": False,
+            },
         }
 
         headers = {
