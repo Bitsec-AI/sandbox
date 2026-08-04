@@ -1,16 +1,25 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import MagicMock
 
 import pytest
 
 from validator.manager import SandboxManager
 from validator.models.platform import MockJobRun, Status, SubmittedAgentExecution
+from validator.proxy_client import ProxyClientError
 
 
 class FakeProxyClient:
-    def __init__(self):
+    def __init__(self, auth_error=False):
+        self.auth_error = auth_error
         self.resets = []
         self.fetches = []
+        self.auth_checks = []
+
+    def validate_auth(self, api_key):
+        self.auth_checks.append(api_key)
+        if self.auth_error:
+            raise ProxyClientError("validation failed")
 
     def reset_job_run_summary(self, job_run_id):
         self.resets.append(job_run_id)
@@ -140,7 +149,8 @@ def test_execution_starts_evaluation_after_all_execution_submissions(monkeypatch
     monkeypatch.setattr("validator.manager.AgentExecutor", FakeExecutionAgentExecutor)
     job_run = MockJobRun(id=1, job_id=1, validator_id=7, agent_id=9)
     platform = FakePlatformClient(execution_jobs=[job_run])
-    manager = make_manager(platform, tmp_path=tmp_path)
+    proxy = FakeProxyClient()
+    manager = make_manager(platform, proxy_client=proxy, tmp_path=tmp_path)
 
     try:
         assert asyncio.run(manager.poll_execution_job_run()) is True
@@ -148,12 +158,56 @@ def test_execution_starts_evaluation_after_all_execution_submissions(monkeypatch
         close_manager(manager)
 
     assert platform.started == [1]
+    assert proxy.auth_checks == ["cpk_test"]
     assert platform.completed == []
     assert platform.execution_submissions == [
         (1, "project-a"),
         (1, "project-b"),
     ]
     assert platform.evaluation_starts == [1]
+
+
+def test_execution_auth_failure_completes_job_without_executors(monkeypatch, tmp_path):
+    executor = MagicMock()
+    monkeypatch.setattr("validator.manager.AgentExecutor", executor)
+    job_run = MockJobRun(id=1, job_id=1, validator_id=7, agent_id=9)
+    platform = FakePlatformClient(execution_jobs=[job_run])
+    proxy = FakeProxyClient(auth_error=True)
+    manager = make_manager(platform, proxy_client=proxy, tmp_path=tmp_path)
+
+    try:
+        assert asyncio.run(manager.poll_execution_job_run()) is True
+    finally:
+        close_manager(manager)
+
+    assert proxy.auth_checks == ["cpk_test"]
+    assert platform.completed == [(1, "error")]
+    assert platform.execution_submissions == []
+    assert platform.evaluation_starts == []
+    executor.assert_not_called()
+
+
+def test_execution_missing_key_does_not_call_auth_validation(monkeypatch, tmp_path):
+    job_run = MockJobRun(id=1, job_id=1, validator_id=7, agent_id=9)
+
+    class MissingKeyPlatformClient(FakePlatformClient):
+        def get_job_run_agent(self, job_run_id):
+            agent = super().get_job_run_agent(job_run_id)
+            agent["execution_api_key"] = None
+            return agent
+
+    platform = MissingKeyPlatformClient(execution_jobs=[job_run])
+    proxy = FakeProxyClient()
+    manager = make_manager(platform, proxy_client=proxy, tmp_path=tmp_path)
+
+    try:
+        assert asyncio.run(manager.poll_execution_job_run()) is True
+    finally:
+        close_manager(manager)
+
+    assert proxy.auth_checks == []
+    assert platform.completed == [(1, "error")]
+    assert platform.evaluation_starts == []
 
 
 def test_execution_can_claim_next_job_before_prior_scoring_completes(monkeypatch, tmp_path):

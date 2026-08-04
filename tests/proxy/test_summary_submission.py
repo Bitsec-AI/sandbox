@@ -1,6 +1,9 @@
+import pytest
+import requests
+
 from validator.manager import SandboxManager
 from validator.platform_client import APIPlatformClient, MockPlatformClient
-from validator.proxy_client import APIProxyClient
+from validator.proxy_client import APIProxyClient, ProxyClientError
 
 
 class FakeResponse:
@@ -65,6 +68,55 @@ def test_proxy_client_resets_and_fetches_expected_summary_endpoints():
         ("POST", "http://proxy:8000/metrics/job-runs/123/summary/reset", 5),
         ("GET", "http://proxy:8000/metrics/job-runs/123/summary", 10),
     ]
+
+
+def test_proxy_client_validate_auth_uses_single_direct_request(monkeypatch):
+    calls = []
+
+    def fake_post(url, headers, timeout):
+        calls.append((url, headers, timeout))
+        return FakeResponse({"valid": True})
+
+    monkeypatch.setattr("validator.proxy_client.requests.post", fake_post)
+    client = APIProxyClient.__new__(APIProxyClient)
+    client.base_url = "http://proxy:8000"
+
+    assert client.validate_auth("cpk_secret") is None
+    assert calls == [
+        (
+            "http://proxy:8000/validate_auth",
+            {"x-inference-api-key": "cpk_secret"},
+            30,
+        )
+    ]
+
+
+@pytest.mark.parametrize("payload", [{"valid": False}, {}, {"valid": True, "extra": "field"}])
+def test_proxy_client_validate_auth_rejects_unexpected_response(monkeypatch, payload):
+    monkeypatch.setattr(
+        "validator.proxy_client.requests.post",
+        lambda *_args, **_kwargs: FakeResponse(payload),
+    )
+    client = APIProxyClient.__new__(APIProxyClient)
+    client.base_url = "http://proxy:8000"
+
+    with pytest.raises(ProxyClientError, match="Inference authentication validation failed"):
+        client.validate_auth("cpk_secret")
+
+
+def test_proxy_client_validate_auth_sanitizes_request_failure(monkeypatch):
+    monkeypatch.setattr(
+        "validator.proxy_client.requests.post",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(requests.Timeout("secret provider details")),
+    )
+    client = APIProxyClient.__new__(APIProxyClient)
+    client.base_url = "http://proxy:8000"
+
+    with pytest.raises(ProxyClientError) as exc_info:
+        client.validate_auth("cpk_secret")
+
+    assert "cpk_secret" not in str(exc_info.value)
+    assert "provider details" not in str(exc_info.value)
 
 
 def test_manager_resets_fetches_and_submits_proxy_summary():

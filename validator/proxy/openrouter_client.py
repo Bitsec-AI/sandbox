@@ -12,7 +12,7 @@ class OpenRouterClient(BaseProviderClient):
 
     @property
     def default_model(self) -> str:
-        return "openai/gpt-4.1-mini"
+        return "openrouter/auto-beta"
 
     def build_headers(self, api_key: str) -> dict[str, str]:
         return {

@@ -14,13 +14,16 @@ class FakeMetricsRecorder:
 
 
 class FakeProviderClient:
-    default_model = "default-model"
-
-    def __init__(self):
+    def __init__(self, default_model="default-model"):
+        self.default_model = default_model
         self.metrics_ctx = "not-called"
         self.log_ctx = "not-called"
+        self.request = None
+        self.provider = None
 
     def call(self, request, provider, metrics_ctx=None, log_ctx=None):
+        self.request = request
+        self.provider = provider
         self.metrics_ctx = metrics_ctx
         self.log_ctx = log_ctx
         return InferenceResponse(
@@ -35,6 +38,80 @@ class FailingProviderClient(FakeProviderClient):
         self.metrics_ctx = metrics_ctx
         self.log_ctx = log_ctx
         raise ProxyProviderError("openrouter error: response unusable (finish_reason=length)")
+
+
+class ExplodingProviderClient(FakeProviderClient):
+    def call(self, request, provider, metrics_ctx=None, log_ctx=None):
+        raise RuntimeError("unexpected error")
+
+
+def test_validate_auth_routes_chutes_to_validation_model(monkeypatch):
+    provider_client = FakeProviderClient(default_model="Qwen/Qwen3-32B-TEE")
+    provider_names = []
+
+    def get_client(provider_name):
+        provider_names.append(provider_name)
+        return provider_client
+
+    monkeypatch.setattr(api, "get_provider_client", get_client)
+
+    response = TestClient(api.app).post(
+        "/validate_auth",
+        headers={"x-inference-api-key": "cpk_test"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"valid": True}
+    assert provider_names == ["chutes"]
+    assert provider_client.request.model == "Qwen/Qwen3-32B-TEE"
+    assert provider_client.request.model_extra["response_format"] == {"type": "text"}
+    assert provider_client.metrics_ctx is None
+    assert provider_client.log_ctx is None
+
+
+def test_validate_auth_routes_openrouter_to_auto_beta(monkeypatch):
+    provider_client = FakeProviderClient(default_model="openrouter/auto-beta")
+    monkeypatch.setattr(api, "get_provider_client", lambda _provider_name: provider_client)
+
+    response = TestClient(api.app).post(
+        "/validate_auth",
+        headers={"x-inference-api-key": "sk-or-test"},
+    )
+
+    assert response.status_code == 200
+    assert provider_client.request.model == "openrouter/auto-beta"
+    assert provider_client.provider.name == "openrouter"
+
+
+def test_validate_auth_rejects_missing_and_unsupported_keys():
+    client = TestClient(api.app)
+
+    assert client.post("/validate_auth").status_code == 422
+    assert client.post("/validate_auth", headers={"x-inference-api-key": "bad-key"}).status_code == 422
+
+
+def test_validate_auth_maps_provider_failure_to_bad_gateway(monkeypatch):
+    monkeypatch.setattr(api, "get_provider_client", lambda _provider_name: FailingProviderClient())
+
+    response = TestClient(api.app).post(
+        "/validate_auth",
+        headers={"x-inference-api-key": "sk-or-test"},
+    )
+
+    assert response.status_code == 502
+    assert response.json() == {"detail": "Inference provider authentication failed"}
+
+
+def test_validate_auth_maps_unexpected_failure_to_internal_error(monkeypatch):
+    monkeypatch.setattr(api, "get_provider_client", lambda _provider_name: ExplodingProviderClient())
+    client = TestClient(api.app, raise_server_exceptions=False)
+
+    response = client.post(
+        "/validate_auth",
+        headers={"x-inference-api-key": "cpk_test"},
+    )
+
+    assert response.status_code == 500
 
 
 def test_inference_skips_metrics_without_job_run_id(monkeypatch):

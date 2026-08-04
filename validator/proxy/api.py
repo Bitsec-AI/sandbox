@@ -20,6 +20,7 @@ async def root():
             "description": "Inference proxy for LLM requests",
             "endpoints": {
                 "POST /inference": "Submit inference requests",
+                "POST /validate_auth": "Validate inference provider authentication",
                 "GET /docs": "Interactive API documentation",
                 "GET /openapi.json": "OpenAPI schema",
             },
@@ -30,6 +31,34 @@ async def root():
 
 INFER_CONCURRENCY = 8  # per worker
 _sem = asyncio.Semaphore(INFER_CONCURRENCY)
+
+
+@app.post("/validate_auth")
+async def validate_auth(x_inference_api_key: str | None = Header(default=None)):
+    if not x_inference_api_key:
+        raise HTTPException(status_code=422, detail="x-inference-api-key is required")
+
+    try:
+        provider = InferenceProvider(api_key=x_inference_api_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Unsupported inference API key") from exc
+
+    client = get_provider_client(provider.name)
+    request = InferenceRequest(
+        model=client.default_model,
+        messages=[{"role": "user", "content": 'Return exactly this JSON object: {"ok": true}'}],
+        max_tokens=32,
+        temperature=0,
+        response_format={"type": "text"},
+    )
+
+    try:
+        async with _sem:
+            await asyncio.to_thread(client.call, request, provider)
+    except ProxyProviderError as exc:
+        raise HTTPException(status_code=502, detail="Inference provider authentication failed") from exc
+
+    return {"valid": True}
 
 
 @app.post("/inference", response_model=InferenceResponse)

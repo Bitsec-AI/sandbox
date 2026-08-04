@@ -12,7 +12,7 @@ class ChutesClient(BaseProviderClient):
 
     @property
     def default_model(self) -> str:
-        return "unsloth/gemma-3-12b-it"
+        return "Qwen/Qwen3-32B-TEE"
 
     def build_headers(self, api_key: str) -> dict[str, str]:
         return {
