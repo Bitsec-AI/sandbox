@@ -10,7 +10,7 @@ from python_on_whales.utils import run
 from config import settings
 from loggers.logger import get_logger
 from validator.platform_client import PlatformClient, PlatformError
-from validator.proxy_client import ProxyClient
+from validator.proxy_client import ProxyClient, ProxyClientError
 from validator.executor import AgentExecutor
 from validator.evaluator import AgentEvaluator
 
@@ -236,6 +236,15 @@ class SandboxManager:
         if not execution_api_key:
             logger.error(
                 f"[A:{job_run.agent_id}|JR:{job_run.id}] Miner did not provide an execution API key. Skipping job run."
+            )
+            self.platform_client.complete_job_run(job_run.id, status="error")
+            return
+
+        try:
+            self.proxy_client.validate_auth(execution_api_key)
+        except ProxyClientError:
+            logger.error(
+                f"[A:{job_run.agent_id}|JR:{job_run.id}] Miner inference authentication failed. Skipping job run."
             )
             self.platform_client.complete_job_run(job_run.id, status="error")
             return

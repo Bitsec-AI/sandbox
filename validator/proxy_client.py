@@ -57,6 +57,21 @@ class APIProxyClient:
     def get_job_run_summary(self, job_run_id: int) -> dict[str, Any] | None:
         return self._call_proxy("GET", f"metrics/job-runs/{job_run_id}/summary", timeout=10)
 
+    def validate_auth(self, api_key: str) -> None:
+        url = f"{self.base_url}/validate_auth"
+        try:
+            response = requests.post(
+                url,
+                headers={"x-inference-api-key": api_key},
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except (requests.RequestException, ValueError) as exc:
+            raise ProxyClientError("Inference authentication validation failed") from exc
+
+        if payload != {"valid": True}:
+            raise ProxyClientError("Inference authentication validation failed")
+
 
 class ProxyClient:
     def __init__(self, *args, **kwargs):

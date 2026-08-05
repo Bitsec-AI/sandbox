@@ -67,6 +67,11 @@ class FakeMetricsRecorder:
         self.attempts.append((ctx.model, attempt))
 
 
+def test_provider_clients_expose_auth_validation_defaults():
+    assert ChutesClient().default_model == "Qwen/Qwen3-32B-TEE"
+    assert OpenRouterClient().default_model == "openrouter/auto-beta"
+
+
 def test_provider_client_uses_response_model_for_metrics_when_available(monkeypatch):
     def fake_post(*args, **kwargs):
         return FakeResponse()
@@ -144,8 +149,7 @@ def test_provider_client_logs_request_metadata_when_metrics_disabled(monkeypatch
     )
 
     assert any(
-        'Request from [A:agent-123|JR:unknown|Phase:execution] | provider="chutes" | model="requested-model"'
-        in message
+        'Request from [A:agent-123|JR:unknown|Phase:execution] | provider="chutes" | model="requested-model"' in message
         for message in fake_logger.infos
     )
 
