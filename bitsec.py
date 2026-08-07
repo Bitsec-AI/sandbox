@@ -23,6 +23,7 @@ from validator.manager import SandboxManager
 from validator.proxy.models import derive_provider_from_api_key
 
 logger = get_logger()
+ALLOWED_PROVIDERS = {"openrouter"}
 
 # -------------------------------------------------------
 # Typer apps
@@ -82,9 +83,9 @@ def miner_create(
 def miner_submit(
     execution_api_key: str = Option(
         ...,
-        prompt="Execution API key",
+        prompt="OpenRouter API key",
         hide_input=True,
-        help="Your execution API key (prefix must be cpk_ or sk-or-; will be sent to the platform)",
+        help="Your OpenRouter API key (prefix must be sk-or-; will be sent to the platform)",
     ),
     wallet: str | None = Option(None, help="Bittensor wallet name"),
 ):
@@ -93,7 +94,14 @@ def miner_submit(
     if not agent_path.exists():
         raise FileNotFoundError(agent_path)
 
-    derive_provider_from_api_key(execution_api_key)
+    unsupported_key_message = "Miner execution only supports OpenRouter API keys (prefix: sk-or-)."
+    try:
+        provider = derive_provider_from_api_key(execution_api_key)
+    except ValueError as exc:
+        raise typer.BadParameter(unsupported_key_message) from exc
+
+    if provider not in ALLOWED_PROVIDERS:
+        raise typer.BadParameter(unsupported_key_message)
 
     code_str = agent_path.read_text(encoding="utf-8")
     agent_code = AgentCode(code=code_str, execution_api_key=execution_api_key)
