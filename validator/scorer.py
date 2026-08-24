@@ -16,7 +16,7 @@ from pathlib import Path
 from textwrap import dedent
 from typing import Dict, List, Any, Optional, Tuple
 
-import requests
+from validator.proxy_client import APIProxyClient
 
 # Rich for console output
 from rich.console import Console
@@ -84,6 +84,7 @@ class ScaBenchScorerV2:
             raise ValueError("Chutes API key is required for validation.")
         self.agent_id = str(self.config.get("agent_id", "unknown"))
         self.job_run_id = str(self.config.get("job_run_id", "unknown"))
+        self.proxy_client = APIProxyClient(base_url=self.api_url)
 
         self.debug = self.config.get("debug", False)
         self.verbose = self.config.get("verbose", False)
@@ -149,29 +150,15 @@ class ScaBenchScorerV2:
             "x-request-phase": "evaluation",
         }
 
-        resp = None
+        resp_json = self.proxy_client.inference(
+            payload,
+            headers=headers,
+        )
 
-        try:
-            resp = requests.post(
-                f"{self.api_url}/inference",
-                headers=headers,
-                json=payload,
-            )
-            resp.raise_for_status()
-
-        except requests.exceptions.HTTPError as e:
-            body = resp.json() if resp else ""
-            console.print(f"Inference Proxy Error: {e} {body}")
-            raise
-
-        except requests.exceptions.RequestException as e:
-            body = resp.json() if resp else ""
-            console.print(f"Inference Error: {e} {body}")
-            raise
-
-        resp_json = resp.json()
         usage = resp_json.get("usage", {})
+
         self.input_tokens += usage.get("prompt_tokens", 0)
+
         prompt_token_details = usage.get("prompt_tokens_details") or {}
         self.cached_tokens += prompt_token_details.get("cached_tokens", 0)
         self.output_tokens += usage.get("completion_tokens", 0)
