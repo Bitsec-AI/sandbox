@@ -2,10 +2,14 @@ import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
+import requests
+
 from config import settings
 from validator.evaluator import AgentEvaluator
 from validator.executor import AgentExecutor
 from validator.models.platform import MockJobRun, Status, SubmittedAgentExecution
+from validator.proxy_client import APIProxyClient
 from validator.scorer import ScaBenchScorerV2
 
 
@@ -18,7 +22,7 @@ class CapturingPlatformClient:
         return {"id": 123}
 
 
-@patch("validator.scorer.requests.post")
+@patch("validator.proxy_client.requests.post")
 def test_scorer_sends_evaluation_tracking_headers(mock_post):
     mock_resp = MagicMock()
     mock_resp.json.return_value = {
@@ -45,6 +49,132 @@ def test_scorer_sends_evaluation_tracking_headers(mock_post):
     assert headers["x-request-phase"] == "evaluation"
     assert "x-job-id" not in headers
     assert "x-project-id" not in headers
+
+
+def make_response(status_code, payload):
+    response = requests.Response()
+    response.status_code = status_code
+    response.url = "http://fake:8000/inference"
+    response.headers["Content-Type"] = "application/json"
+    response._content = json.dumps(payload).encode("utf-8")
+    return response
+
+
+def test_scorer_retries_structured_rate_limit_then_succeeds(monkeypatch):
+    responses = [
+        make_response(
+            502,
+            {
+                "detail": "chutes error: retry limit reached (status 429)",
+                "error_code": "rate_limited",
+                "upstream_status": 429,
+            },
+        ),
+        make_response(200, {"choices": [{"message": {"content": "{}"}}], "usage": {}}),
+    ]
+    sleeps = []
+    monkeypatch.setattr("validator.proxy_client.requests.post", lambda *args, **kwargs: responses.pop(0))
+    monkeypatch.setattr("validator.proxy_client.time.sleep", sleeps.append)
+
+    scorer = ScaBenchScorerV2(
+        {
+            "api_key": "cpk_test",
+            "api_url": "http://fake:8000",
+        }
+    )
+
+    result = scorer.prompt("prompt", "system")
+
+    assert result["choices"][0]["message"]["content"] == "{}"
+    assert sleeps == [60]
+
+
+def test_scorer_stops_after_max_rate_limit_retries(monkeypatch):
+    rate_limit_response = make_response(
+        502,
+        {
+            "detail": "chutes error: retry limit reached (status 429)",
+            "error_code": "rate_limited",
+            "upstream_status": 429,
+        },
+    )
+    post_count = 0
+    sleeps = []
+
+    def fake_post(*args, **kwargs):
+        nonlocal post_count
+        post_count += 1
+        return rate_limit_response
+
+    monkeypatch.setattr("validator.proxy_client.requests.post", fake_post)
+    monkeypatch.setattr("validator.proxy_client.time.sleep", sleeps.append)
+    monkeypatch.setattr("validator.proxy_client.INFERENCE_429_MAX_RETRIES", 2)
+    monkeypatch.setattr("validator.proxy_client.INFERENCE_429_RETRY_INTERVAL_SECONDS", 60)
+
+    scorer = ScaBenchScorerV2(
+        {
+            "api_key": "cpk_test",
+            "api_url": "http://fake:8000",
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="remained rate limited after 2 retries"):
+        scorer.prompt("prompt", "system")
+
+    assert post_count == 3
+    assert sleeps == [60, 60]
+
+
+def test_scorer_does_not_retry_untyped_proxy_failure(monkeypatch):
+    post_count = 0
+    sleeps = []
+
+    def fake_post(*args, **kwargs):
+        nonlocal post_count
+        post_count += 1
+        return make_response(502, {"detail": "untyped proxy failure mentioning 429"})
+
+    monkeypatch.setattr("validator.proxy_client.requests.post", fake_post)
+    monkeypatch.setattr("validator.proxy_client.time.sleep", sleeps.append)
+    scorer = ScaBenchScorerV2({"api_key": "cpk_test", "api_url": "http://fake:8000"})
+
+    with pytest.raises(requests.HTTPError):
+        scorer.prompt("prompt", "system")
+
+    assert post_count == 1
+    assert sleeps == []
+
+
+def test_inference_can_disable_rate_limit_retries(monkeypatch):
+    response = make_response(
+        502,
+        {
+            "detail": "chutes error: retry limit reached (status 429)",
+            "error_code": "rate_limited",
+            "upstream_status": 429,
+        },
+    )
+    post_count = 0
+    sleeps = []
+
+    def fake_post(*args, **kwargs):
+        nonlocal post_count
+        post_count += 1
+        return response
+
+    monkeypatch.setattr("validator.proxy_client.requests.post", fake_post)
+    monkeypatch.setattr("validator.proxy_client.time.sleep", sleeps.append)
+    client = APIProxyClient(base_url="http://fake:8000")
+
+    with pytest.raises(requests.HTTPError):
+        client.inference(
+            {},
+            headers={"x-inference-api-key": "cpk_test"},
+            retry_rate_limits=False,
+        )
+
+    assert post_count == 1
+    assert sleeps == []
 
 
 def test_timeout_report_scores_as_zero_findings_without_llm_matching(monkeypatch, tmp_path):

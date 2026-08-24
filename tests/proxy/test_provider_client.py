@@ -34,7 +34,7 @@ class FakeErrorResponse:
 
 class FakeRetryResponse:
     status_code = 429
-    text = "rate limited"
+    text = '{"detail":"Infrastructure is at maximum capacity, try again later"}'
 
     def raise_for_status(self):
         import requests
@@ -207,3 +207,33 @@ def test_provider_client_flushes_retry_metrics_with_final_response_model(monkeyp
         "actual-response-model",
     ]
     assert [attempt.status_code for _model, attempt in recorder.attempts] == [429, 200]
+
+
+def test_provider_client_classifies_exhausted_rate_limit(monkeypatch):
+    sleeps = []
+    recorder = FakeMetricsRecorder()
+    monkeypatch.setattr("base_client.SESSION.post", lambda *args, **kwargs: FakeRetryResponse())
+    monkeypatch.setattr("base_client.time.sleep", sleeps.append)
+    monkeypatch.setattr(base_client, "get_metrics_recorder", lambda: recorder)
+
+    ctx = ProxyMetricsContext(
+        agent_id="456",
+        job_run_id="123",
+        phase="evaluation",
+        req_model="requested-model",
+        model="requested-model",
+        provider="chutes",
+    )
+
+    with pytest.raises(ProxyProviderError) as exc_info:
+        ChutesClient().call(
+            InferenceRequest(model="requested-model", messages=[{"role": "user", "content": "hi"}]),
+            InferenceProvider(api_key="cpk_test"),
+            ctx,
+        )
+
+    assert str(exc_info.value) == "chutes error: retry limit reached (status 429)"
+    assert exc_info.value.error_code == "rate_limited"
+    assert exc_info.value.upstream_status == 429
+    assert sleeps == [1.5, 3.0, 6.0, 12.0]
+    assert [attempt.status_code for _model, attempt in recorder.attempts] == [429] * 5

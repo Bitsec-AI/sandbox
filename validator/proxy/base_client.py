@@ -13,7 +13,16 @@ logger = get_logger()
 
 
 class ProxyProviderError(Exception):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_code: str | None = None,
+        upstream_status: int | None = None,
+    ):
+        super().__init__(message)
+        self.error_code = error_code
+        self.upstream_status = upstream_status
 
 
 TIMEOUT = 300
@@ -180,6 +189,13 @@ class BaseProviderClient(ABC):
                     self._flush_llm_attempts(metrics_ctx, llm_attempts)
                     msg = f"{self.provider_name} error: retry limit reached (status {status})"
                     logger.exception(f"{msg}: {resp.text}")
+                    if status == 429:
+                        raise ProxyProviderError(
+                            msg,
+                            error_code="rate_limited",
+                            upstream_status=status,
+                        ) from e
+
                     raise ProxyProviderError(msg) from e
 
                 sleep_time = BACKOFF_FACTOR * (2 ** (attempt - 1))

@@ -101,7 +101,12 @@ async def inference(
     except ProxyProviderError as e:
         if ctx is not None:
             metrics.record_proxy_complete(ctx, success=False, duration_ms=monotonic_ms() - started_ms, status_code=502)
-        raise HTTPException(status_code=502, detail=str(e))
+        error_payload = {"detail": str(e)}
+        if e.error_code is not None:
+            error_payload["error_code"] = e.error_code
+        if e.upstream_status is not None:
+            error_payload["upstream_status"] = e.upstream_status
+        return JSONResponse(status_code=502, content=error_payload)
     except Exception:
         if ctx is not None:
             metrics.record_proxy_complete(ctx, success=False, duration_ms=monotonic_ms() - started_ms, status_code=500)

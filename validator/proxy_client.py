@@ -1,13 +1,22 @@
 from typing import Any, Literal
+import time
 
 import requests
 from requests.adapters import HTTPAdapter, Retry
 
 from config import settings
+from loggers.logger import get_logger
+
+
+logger = get_logger()
 
 
 class ProxyClientError(Exception):
     pass
+
+
+INFERENCE_429_RETRY_INTERVAL_SECONDS = 60
+INFERENCE_429_MAX_RETRIES = 12 * 60
 
 
 class APIProxyClient:
@@ -71,6 +80,52 @@ class APIProxyClient:
 
         if payload != {"valid": True}:
             raise ProxyClientError("Inference authentication validation failed")
+
+    def inference(
+        self,
+        payload: dict[str, Any],
+        *,
+        headers: dict[str, str],
+        retry_rate_limits: bool = True,
+    ) -> dict[str, Any]:
+        max_retries = INFERENCE_429_MAX_RETRIES if retry_rate_limits else 0
+
+        for retry_num in range(max_retries + 1):
+            response = requests.post(
+                f"{self.base_url}/inference",
+                headers=headers,
+                json=payload,
+            )
+
+            try:
+                response.raise_for_status()
+
+            except requests.HTTPError as exc:
+                try:
+                    body = response.json()
+
+                except ValueError:
+                    body = None
+
+                is_rate_limited = (
+                    isinstance(body, dict)
+                    and body.get("error_code") == "rate_limited"
+                    and body.get("upstream_status") == 429
+                )
+
+                if not is_rate_limited or not retry_rate_limits:
+                    raise
+
+                if retry_num == max_retries:
+                    raise RuntimeError(f"Inference remained rate limited after {max_retries} retries") from exc
+
+                logger.warning(f"Inference rate limited. Retrying {retry_num + 1}/{max_retries}")
+
+                time.sleep(INFERENCE_429_RETRY_INTERVAL_SECONDS)
+
+                continue
+
+            return response.json()
 
 
 class ProxyClient:

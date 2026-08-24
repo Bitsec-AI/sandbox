@@ -40,6 +40,17 @@ class FailingProviderClient(FakeProviderClient):
         raise ProxyProviderError("openrouter error: response unusable (finish_reason=length)")
 
 
+class RateLimitedProviderClient(FakeProviderClient):
+    def call(self, request, provider, metrics_ctx=None, log_ctx=None):
+        self.metrics_ctx = metrics_ctx
+        self.log_ctx = log_ctx
+        raise ProxyProviderError(
+            "chutes error: retry limit reached (status 429)",
+            error_code="rate_limited",
+            upstream_status=429,
+        )
+
+
 class ExplodingProviderClient(FakeProviderClient):
     def call(self, request, provider, metrics_ctx=None, log_ctx=None):
         raise RuntimeError("unexpected error")
@@ -164,5 +175,26 @@ def test_inference_records_proxy_status_code_on_provider_error(monkeypatch):
     )
 
     assert response.status_code == 502
+    assert recorder.completions[0][1]["success"] is False
+    assert recorder.completions[0][1]["status_code"] == 502
+
+
+def test_inference_returns_structured_upstream_rate_limit(monkeypatch):
+    recorder = FakeMetricsRecorder()
+    monkeypatch.setattr(api, "get_metrics_recorder", lambda: recorder)
+    monkeypatch.setattr(api, "get_provider_client", lambda provider_name: RateLimitedProviderClient())
+
+    response = TestClient(api.app).post(
+        "/inference",
+        headers={"x-inference-api-key": "cpk_test", "x-job-run-id": "123"},
+        json={"model": "requested-model", "messages": [{"role": "user", "content": "hi"}]},
+    )
+
+    assert response.status_code == 502
+    assert response.json() == {
+        "detail": "chutes error: retry limit reached (status 429)",
+        "error_code": "rate_limited",
+        "upstream_status": 429,
+    }
     assert recorder.completions[0][1]["success"] is False
     assert recorder.completions[0][1]["status_code"] == 502
