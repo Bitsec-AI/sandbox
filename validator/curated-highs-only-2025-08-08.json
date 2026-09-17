@@ -1230,13 +1230,13 @@
       }
     ]
   },
-    {
-    "project_id": "cantina_fluent-base--rwasm_2025_11",
-    "name": "Fluent base & rwasm",
+  {
+    "project_id": "cantina_fluentbase_2025_11",
+    "name": "Fluentbase",
     "platform": "cantina",
     "codebases": [
       {
-        "codebase_id": "Fluent base & rwasm_6c9a2c",
+        "codebase_id": "Fluentbase_6c9a2c",
         "repo_url": "https://github.com/fluentlabs-xyz/fluentbase",
         "commit": "6c9a2c2e3681510eba9d2ed9e3a3ad7d00d061a1",
         "tree_url": "https://github.com/fluentlabs-xyz/fluentbase/tree/6c9a2c2e3681510eba9d2ed9e3a3ad7d00d061a1",
@@ -1247,56 +1247,72 @@
       {
         "finding_id": "8ca11230-5592-46d2-80ea-60316c4bb45e_C-01",
         "severity": "critical",
-        "title": "Triggerable node crash via point above field modulus duringweierstrass_doublesyscall",
-        "description": "Both theweierstrass_double_handlerandweierstrass_double_impldo not verify that the provided input coordinates are not above the field modulus which can lead to a node crash that can be triggered trivially by providing a single invalid point to the syscall. This is because it can cause an underflow of thedashu::UBigtype in the underlyingsw_doubleimplementation in the SP1 code, which panics on an underflow. The underflow occurs on the above line, if2 * self_x > slope * slope + 2 * p, then an underflow can occur. Here,pis the field modulus of the curve which is slightly less than the maximum unsigned 48-bit integer (0xfff..fff). As such it is possible to specify an invalid coordinate(0xfff...fff, 0x0)which results inself_x = 0xfff..fffandself_y = 0x0. The result ofslopewhenself_yis always 0 and this is because the result ofdashu_modpowwhen theslope_denominatoris 0 is 0."
-      },
-      {
-        "finding_id": "8ca11230-5592-46d2-80ea-60316c4bb45e_C-02",
-        "severity": "critical",
-        "title": "Incorrect implementation ofi64_div_uandi64_rem_uinstruction inrwasm",
-        "description": "Thei64_div_uinstruction was incorrect for some inputs. One such input found by our differential fuzzer wasargs=[I64(9223372036854775807), I64(3707827967)]which resulted in an output of2155872256byrwasminstead of the correct output of2487540446which can be verified by both a calculator andwasmtime Further testing thei64_rem_uinstruction with the same inputs ofargs=[I64(9223372036854775807), I64(3707827967)]showed that thei64_rem_uimplementation was also incorrect.rwasmyielded a value of8388607instead of the correct output of2132322525which can also be verified by both a calculator andwasmtime Analysing therustimplementation of the snippets will showcase the bug, the root cause is a subtle overflow issue in the fast path'sdiv_mod_64_by_32function"
-      },
-      {
-        "finding_id": "8ca11230-5592-46d2-80ea-60316c4bb45e_C-03",
-        "severity": "critical",
-        "title": "translate_localsdoes  not charge fuel for locals",
-        "description": "In Wasm, it is possible to very succinctly declare that a function has a large number of locals (see Proof of Concept for example). Locals are turned into stack elements for rWasm, but the translation fails to insert fuel metering for these pushed values. Insteadtranslate_localsdirectly emitsop_i32_const()instructions, one for eachi32local and two for eachi64local. The compilation currently fails if any function more than2152^{15}215locals, due to aDropKeepOutOfBoundserror, but Wasmtime by default supports up to 50,000 locals per function."
+        "title": "Triggerable node crash via point above field modulus during weierstrass_double syscall",
+        "description": "Both the `weierstrass_double_handler` and `weierstrass_double_impl` fail to verify that the supplied coordinates are below the curve's field modulus. An invalid point such as `(0xfff...fff, 0x0)` can therefore reach SP1's underlying `sw_double` implementation and underflow its `dashu::UBig` arithmetic, causing a panic and crashing the node."
       },
       {
         "finding_id": "8ca11230-5592-46d2-80ea-60316c4bb45e_H-01",
         "severity": "high",
         "title": "Incorrect result from BLS12-381 point addition if the output is the infinity point",
-        "description": "For both BLS12-381 G1 and G2 point addition if the output is the infinity point, the result returned will be incorrect. This is becauseto_uncompressedis called on the result which internally sets the 2nd most significant bit of the encoded point if the point is the point at infinity. This is incorrect because the EVM expects the output of the infinity point to be all zeros."
+        "description": "For both BLS12-381 G1 and G2 point addition, the result is encoded incorrectly when the output is the point at infinity. Calling `to_uncompressed` sets the second-most-significant bit of an encoded infinity point, whereas the EVM expects the output to be all zeros."
       },
       {
         "finding_id": "8ca11230-5592-46d2-80ea-60316c4bb45e_H-02",
         "severity": "high",
         "title": "Invalid points are incorrectly converted to infinity points for BLS12-381 operations",
-        "description": "For all BLS12-381 operations during point decoding iffrom_uncompressedfails the point gets incorrectly converted to the infinity point viaunwrap_orinstead of reverting the precompile as required by the EVM. This would lead to an incorrect result for the BLS12-381 operation if an invalid point (ie. not on curve or subgroup) is provided."
+        "description": "During point decoding for every BLS12-381 operation, a failed `from_uncompressed` call is handled with `unwrap_or` and incorrectly converted to the point at infinity instead of reverting the precompile as required by the EVM. Supplying a point that is not on the curve or in the subgroup can therefore produce an incorrect result."
       },
       {
         "finding_id": "8ca11230-5592-46d2-80ea-60316c4bb45e_H-03",
         "severity": "high",
         "title": "BLS12-381 MSM operation incorrectly converts scalar to zero if above subgroup order",
-        "description": "For the BLS12-381 MSM operation during scalar decoding ifScalar::from_bytesfails, the scalar gets converted to zero. This can happen if the scalar is above the subgroup orderq = 0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001 The correct behaviour in this case is to reduce the scalar by moduloqand not convert to 0, as per the spec:"
-      },
-      {
-        "finding_id": "8ca11230-5592-46d2-80ea-60316c4bb45e_H-04",
-        "severity": "high",
-        "title": "Memory range operations undercharge for access by rounding down",
-        "description": "The operationsmemory.fill,memory.copyandmemory.initall charge based on the range of memory bytes accessed. However, the cost is charged for every 64 bytes of memory access, rounding down. This means that, for example, amemory.fillof 63 bytes consumes no fuel. A similar issue exists for accessing table elements, where access is charged in groups of 16 and rounded down for the following operations:table.init,table.grow,table.fillandtable.copy."
+        "description": "During scalar decoding for BLS12-381 MSM operations, a failed `Scalar::from_bytes` call converts the scalar to zero. This occurs when the scalar exceeds the subgroup order `q = 0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001`; the specification instead requires reducing the scalar modulo `q`."
       },
       {
         "finding_id": "8ca11230-5592-46d2-80ea-60316c4bb45e_H-05",
         "severity": "high",
         "title": "Missing fuel charge for computationally expensive precompiles",
-        "description": "During genesis, all precompile contracts are compiled with thewith_consume_fuelandwith_builtins_consume_fuelto false, this means that operations in these precompiles must meter their own fuel or no fuel is charged for them. However, certain precompiles, particularly for non-EVM precompiles do not charge any fuel, and are free to use, the precompiles arePRECOMPILE_EIP2935,PRECOMPILE_WEBAUTHN_VERIFIER,PRECOMPILE_NITRO_VERIFIER,PRECOMPILE_NATIVE_MULTICALL,PRECOMPILE_UNIVERSAL_TOKEN_RUNTIME,PRECOMPILE_WASM_RUNTIME,PRECOMPILE_FAIRBLOCK_VERIFIER."
+        "description": "During genesis, all precompile contracts are compiled with `with_consume_fuel` and `with_builtins_consume_fuel` set to false, so each precompile must meter its own fuel. Several computationally expensive precompiles do not do so and can be used for free: `PRECOMPILE_EIP2935`, `PRECOMPILE_WEBAUTHN_VERIFIER`, `PRECOMPILE_NITRO_VERIFIER`, `PRECOMPILE_NATIVE_MULTICALL`, `PRECOMPILE_UNIVERSAL_TOKEN_RUNTIME`, `PRECOMPILE_WASM_RUNTIME`, and `PRECOMPILE_FAIRBLOCK_VERIFIER`."
       },
       {
         "finding_id": "8ca11230-5592-46d2-80ea-60316c4bb45e_H-06",
         "severity": "high",
-        "title": "Reachable code branch reverts with compiler hintunreachable_unchecked()",
-        "description": "The global allocator reverts if it runs out of memory. It would be easy to make it run out of memory through over-allocation, by choosing a high enough pointer to allocate. However, the code chooses to revert by thecore::hints::unreachable_unchecked()function. The purpose of this function is as follows: The stated reason for usingunreachable_unchecked()is because the generated code is much smaller, simply issuing anunreachableWasm instruction, whereas a regularunreachable!()macro generates up to 2300 instructions. However, as stated in the documentation, the purpose ofunreachable_unchecked()is to help the compiler make optimizations, and if the code is in fact reachable, this could cause nonsensical code. Any future compiler upgrade, or use of feature flags, could generate vulnerable code that could even lead to remote code execution."
+        "title": "Reachable code branch reverts with compiler hint unreachable_unchecked()",
+        "description": "The global allocator can run out of memory through over-allocation, but its reachable failure path calls `core::hints::unreachable_unchecked()`. Because this hint tells the compiler that the branch can never execute, reaching it invokes undefined behavior and may produce nonsensical machine code. A compiler upgrade or different feature flags could turn this into a serious vulnerability, potentially including remote code execution."
+      }
+    ]
+  },
+  {
+    "project_id": "cantina_rwasm_2025_11",
+    "name": "rWasm",
+    "platform": "cantina",
+    "codebases": [
+      {
+        "codebase_id": "rWasm_07a81c",
+        "repo_url": "https://github.com/fluentlabs-xyz/rwasm",
+        "commit": "07a81cd0206efb24df77e37aa7794a877eb83678",
+        "tree_url": "https://github.com/fluentlabs-xyz/rwasm/tree/07a81cd0206efb24df77e37aa7794a877eb83678",
+        "tarball_url": "https://github.com/fluentlabs-xyz/rwasm/archive/07a81cd0206efb24df77e37aa7794a877eb83678.tar.gz"
+      }
+    ],
+    "vulnerabilities": [
+      {
+        "finding_id": "8ca11230-5592-46d2-80ea-60316c4bb45e_C-02",
+        "severity": "critical",
+        "title": "Incorrect implementation of i64_div_u and i64_rem_u instruction in rwasm",
+        "description": "The `i64_div_u` and `i64_rem_u` instructions return incorrect results for some inputs. For example, with `args=[I64(9223372036854775807), I64(3707827967)]`, rWasm returns `2155872256` and `8388607`, while the correct quotient and remainder are `2487540446` and `2132322525`. The root cause is an overflow in the fast-path `div_mod_64_by_32` and `rem_64_by_32` implementations, where the intermediate remainder can require 33 bits but is stored in a `u32`."
+      },
+      {
+        "finding_id": "8ca11230-5592-46d2-80ea-60316c4bb45e_C-03",
+        "severity": "critical",
+        "title": "translate_locals does not charge fuel for locals",
+        "description": "Wasm can declare a large number of local variables very compactly. rWasm turns those locals into stack elements, but `translate_locals` emits `op_i32_const()` instructions without inserting fuel metering—one instruction for each `i32` local and two for each `i64` local. An attacker can repeatedly invoke a function with thousands of locals, forcing nodes to perform substantial work for the same fuel cost as an empty function."
+      },
+      {
+        "finding_id": "8ca11230-5592-46d2-80ea-60316c4bb45e_H-04",
+        "severity": "high",
+        "title": "Memory range operations undercharge for access by rounding down",
+        "description": "The `memory.fill`, `memory.copy`, and `memory.init` operations charge fuel for each 64 bytes accessed but round down, so an operation such as a 63-byte `memory.fill` consumes no fuel. The same issue affects `table.init`, `table.grow`, `table.fill`, and `table.copy`, which charge in groups of 16 elements and also round down."
       }
     ]
   }
