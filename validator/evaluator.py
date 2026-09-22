@@ -74,20 +74,13 @@ class AgentEvaluator:
             self.logger.exception(f"Platform submission failed for agent evaluation: {e}")
             return None
 
-    def score_report_data(self, report_data: dict):
-        self.logger.info("Starting evaluation")
-
-        if not settings.chutes_api_key:
-            self.logger.error("Validator CHUTES_API_KEY not set. Cannot run evaluation.")
-            return {"status": Status.ERROR, "error": "validator chutes_api_key not configured"}
-
+    def _get_expected_findings(self) -> list[dict]:
         benchmark_file = os.path.join(settings.validator_dir, "curated-highs-only-2025-08-08.json")
-        if not os.path.exists(benchmark_file):
-            self.logger.error(f"Benchmark file not found: {benchmark_file}")
-            return {"status": Status.ERROR, "error": "benchmark file not found"}
-
-        with open(benchmark_file, "r", encoding="utf-8") as f:
-            benchmark_data = json.load(f)
+        try:
+            with open(benchmark_file, "r", encoding="utf-8") as f:
+                benchmark_data = json.load(f)
+        except FileNotFoundError:
+            benchmark_data = []
 
         benchmark_map = {
             e["project_id"]: e.get("vulnerabilities", [])
@@ -97,8 +90,28 @@ class AgentEvaluator:
 
         expected_findings = benchmark_map.get(self.project_key)
         if not expected_findings:
-            self.logger.error(f"No benchmark data for project {self.project_key}")
-            return {"status": Status.ERROR, "error": "no benchmark data for project"}
+            self.logger.info("No local answers found; retrieving project vulnerabilities from platform")
+            answers = self.platform_client.get_project_vulnerabilities(self.project_key)
+            expected_findings = answers["vulnerabilities"]
+
+        if not expected_findings:
+            raise ValueError("No benchmark data for project")
+
+        return expected_findings
+
+    def score_report_data(self, report_data: dict):
+        self.logger.info("Starting evaluation")
+
+        if not settings.chutes_api_key:
+            self.logger.error("Validator CHUTES_API_KEY not set. Cannot run evaluation.")
+            return {"status": Status.ERROR, "error": "validator chutes_api_key not configured"}
+
+        try:
+            expected_findings = self._get_expected_findings()
+
+        except Exception as exc:
+            self.logger.error(f"Could not load benchmark answers: {exc}")
+            return {"status": Status.ERROR, "error": str(exc)}
 
         scorer_config = {
             "api_key": settings.chutes_api_key,

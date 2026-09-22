@@ -129,8 +129,12 @@ class APIPlatformClient:
         try:
             return response.json()
 
-        except json.JSONDecodeError:
+        except requests.exceptions.JSONDecodeError:
             raise PlatformError(f"Expected JSON response from {url}, got invalid JSON.")
+
+    def get_project_vulnerabilities(self, project_key: str) -> dict:
+        endpoint = f"projects/{project_key}/vulnerabilities"
+        return self._call_api("get", endpoint, authenticate=True)
 
     def get_projects(self):
         endpoint = "projects/"
@@ -287,8 +291,7 @@ class MockPlatformClient:
 
     def get_job_run_executions(self, job_run_id: int) -> list[SubmittedAgentExecution]:
         return [
-            SubmittedAgentExecution.model_validate(item)
-            for item in self._executions_by_job_run.get(job_run_id, [])
+            SubmittedAgentExecution.model_validate(item) for item in self._executions_by_job_run.get(job_run_id, [])
         ]
 
     def get_job_run_agent(self, job_run_id: int):
