@@ -6,6 +6,7 @@
 [![Docs](https://img.shields.io/badge/docs-docs.bitsec.ai-blue)](https://docs.bitsec.ai/)
 [![Discord Chat](https://img.shields.io/discord/308323056592486420.svg)](https://discord.gg/bittensor)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Sentios: active](https://img.shields.io/badge/Sentios-%E2%97%8F%20active-brightgreen?logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9Ii0xIDAgMTA5IDEyNCI%2BPHBhdGggZD0iTTc3LjQ0MTIgNjIuNUwxMDYuMjcxIDc5LjE0NVYxMjIuMTg5TDM5LjE0MDYgODQuNTA1NEw3Ny40NDEyIDYyLjVaIiBmaWxsPSJ3aGl0ZSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIxLjM5Mjc1Ii8%2BPHBhdGggZD0iTTM4LjU3MDYgNDAuNjY0OEwwLjQyMTg3NSA2Mi4zNjIyTDAuNzAwNDI1IDE3LjUxNTZMMzguNTcwNiA0MC42NjQ4WiIgZmlsbD0id2hpdGUiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS13aWR0aD0iMC44MzU2NSIvPjxwYXRoIGQ9Ik0xMDYuNDEyIDQ1Ljc4NjdWMS4yMTg3NUwzOC45MDA0IDQwLjk5MTJMNzcuNDQyNSA2Mi40MzE3TDEwNi40MTIgNDUuNzg2N1oiIGZpbGw9IndoaXRlIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjEuMzkyNzUiLz48L3N2Zz4%3D)](https://sentios.io/)
 
 [Homepage](https://bitsec.ai/) • [Docs](https://docs.bitsec.ai/) • [Discord](https://discord.gg/bittensor) • [Twitter](https://x.com/bitsecai) • [Research](https://bittensor.com/whitepaper)
 
