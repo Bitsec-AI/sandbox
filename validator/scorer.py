@@ -60,7 +60,7 @@ class ScoringResult:
 
 
 MODELS = [
-    "moonshotai/Kimi-K3-TEE",
+    "deepseek-ai/DeepSeek-V3.2-TEE",
 ]
 CHUTES_MODELS = f"{','.join(MODELS)}:throughput"
 
